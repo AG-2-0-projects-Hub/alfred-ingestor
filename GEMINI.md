@@ -174,12 +174,10 @@ Review all generated code through the lens of a highly skeptical Senior Mechatro
 **Global Candidate:** [Yes / No — reason]
 ```
 
-### Promotion to Global Constitution
-* When a lesson is tagged `Global Candidate: Yes`, flag it to the user at the end of the session:
-> `"PROMOTION CANDIDATE: [lesson title]. This discovery may apply globally. Promote to GEMINI.md? (User must type 'PROMOTE' to confirm.)"`
-* **Only the user may authorize a promotion.** The agent may identify candidates but never self-promote.
-* Upon promotion, the lesson is added to the relevant section of `GEMINI.md` with a version bump and date stamp.
-* **Why:** This keeps the Constitution as a living document that gets smarter from real project experience, while ensuring the user controls what becomes law.
+### Promotion Hierarchy
+* **PROMOTE** → moves lesson to `_global_lessons/lessons.md` (technical knowledge, environment gotchas, setup notes that apply globally but are not behavioral rules).
+* **PROMOTE TO CONSTITUTION** → moves lesson to `GEMINI.md` (behavioral laws, hard stops, and operational principles only — nothing technical or environment-specific).
+* **Project-level lessons** stay in `projects/[project]/lessons.md` unless explicitly promoted.
 
 ---
 
@@ -203,11 +201,12 @@ Review all generated code through the lens of a highly skeptical Senior Mechatro
 
 ## Document Version & Maintenance
 
-**Version:** 2.0
-**Last Updated:** 2026-02-18
+**Version:** 2.1
+**Last Updated:** 2026-02-19
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v2.1 (2026-02-19):** Implemented three-level promotion hierarchy (Global Lessons vs. Constitution). Reverted environment-specific protocols to global lessons.
 * **v2.0 (2026-02-18):** Added Environment & Installation Protocol, Context Handoff Protocol, Lessons & Promotion Protocol, Project Isolation Rule. Resolved Zero-Inference vs. Answer First tiebreaker.
 * **v1.2 (2026-02-11):** Added "Global Execution Framework" (Context Initialization, Plan Mode, Skepticism Protocol).
 * **v1.1 (2026-02-09):** Refined Operational Constraints and Communication Standards.
