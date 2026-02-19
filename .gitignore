@@ -1,0 +1,19 @@
+# Dependencies (always project-local, never synced)
+node_modules/
+venv/
+.venv/
+__pycache__/
+
+# Temporary files
+.tmp/
+*.log
+*.pyc
+
+# Environment files (credentials — never commit these)
+.env
+.env.local
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
