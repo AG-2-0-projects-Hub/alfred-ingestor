@@ -1,20 +1,44 @@
-# Dependencies (always project-local, never synced)
-node_modules/
-venv/
-.venv/
-__pycache__/
-
-# Temporary files
-.tmp/
-*.log
-*.pyc
-
-# Environment files (credentials — never commit these)
+# ============================================================
+# SECRETS — Never commit these
+# ============================================================
 .env
 .env.local
 .env.*
+*.env
+mcp_config.json
+claude_desktop_config.json
+**/mcp_config.json
+**/.claude/
 
-# OS files
+# API key files
+*.key
+*.pem
+secrets/
+.secrets/
+
+# ============================================================
+# DEPENDENCIES — Always project-local, never global
+# ============================================================
+node_modules/
+venv/
+.venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+
+# ============================================================
+# OS & EDITOR JUNK
+# ============================================================
 .DS_Store
 Thumbs.db
 *.Identifier
+.vscode/
+
+# ============================================================
+# LOGS & TEMP
+# ============================================================
+*.log
+logs/
+.tmp/
+*.pyc
