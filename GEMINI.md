@@ -248,6 +248,7 @@ The following are shared between Gemini and Claude Code. Never duplicate them ac
 - Claude Code reads skills from `_skills/` — not from any Claude-native path
 - When a lesson is promoted globally, it lands in `_global_lessons/lessons.md` — one location, always
 - Protocols in `_protocols/` are the authoritative source; project-level agents reference them, never copy them
+- **Always ask the user interactively whether Supabase is needed — never assume.**
 
 **Gemini API Skill:** Before any Gemini API implementation, read `_skills/gemini-api-dev/SKILL.md` to verify current models and SDK syntax. Run `npx skills update` monthly to keep it current.
 
@@ -280,13 +281,25 @@ file structure.
 
 ---
 
+## 13. New Project Protocol
+
+When instructed to create a new project, always execute:
+`bash ~/AG_master_files/_scripts/new-project.sh`
+Never scaffold projects manually or ad-hoc.
+This script is the single source of truth for project creation.
+Wait for the script to complete before proceeding with any project work.
+
+---
+
 ## Document Version & Maintenance
 
-**Version:** 2.6
-**Last Updated:** 2026-02-23
+**Version:** 2.8
+**Last Updated:** 2026-02-24
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v2.8 (2026-02-24):** Added rule to Section 11 to always ask interactively whether Supabase is needed.
+* **v2.7 (2026-02-24):** Added Section 13 — New Project Protocol.
 * **v2.6 (2026-02-23):** Added Section 12 — Agent Orchestration Protocol. Added Shared Resources section (Section 11) to define `_skills`, `_global_lessons`, and `_protocols` handling.
 * **v2.5 (2026-02-23):** Added Command Transparency Rule to Communication Standards.
 * **v2.4 (2026-02-19):** Added strict API key and config protocols to Security & Safety.
