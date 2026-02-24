@@ -149,6 +149,15 @@ Before installing any tool, dependency, or package, you must classify it and sta
 > **C)** Request explicit definition of [X]
 > **Which approach should I proceed with?"**
 
+### Command Transparency Rule
+Before requesting permission to run any terminal command, provide a one-line 
+plain-English explanation of what the command does and why it is being run.
+
+Format:
+> **Command:** `[the command]`
+> **What it does:** [plain English — what it executes and why, in one sentence]
+> **Proceed?**
+
 ---
 
 ## 7. Global Execution Framework
@@ -224,13 +233,35 @@ Skills are the source of truth for their domain — do not proceed without readi
 
 ---
 
+## 11. Shared Resources (Single Source of Truth)
+
+The following are shared between Gemini and Claude Code. Never duplicate them across models or projects.
+
+| Resource | Path | Purpose |
+|---|---|---|
+| **Skills** | `_skills/` | Capabilities both models invoke — read SKILL.md before any matching task |
+| **Global Lessons** | `_global_lessons/lessons.md` | Promoted cross-project technical knowledge |
+| **Protocols** | `_protocols/` | Workflow frameworks (BLAST, AGENT_TEAM, etc.) |
+
+**Rules:**
+- Neither model maintains a separate local copy of these resources
+- Claude Code reads skills from `_skills/` — not from any Claude-native path
+- When a lesson is promoted globally, it lands in `_global_lessons/lessons.md` — one location, always
+- Protocols in `_protocols/` are the authoritative source; project-level agents reference them, never copy them
+
+**Gemini API Skill:** Before any Gemini API implementation, read `_skills/gemini-api-dev/SKILL.md` to verify current models and SDK syntax. Run `npx skills update` monthly to keep it current.
+
+---
+
 ## Document Version & Maintenance
 
-**Version:** 2.4
-**Last Updated:** 2026-02-19
+**Version:** 2.6
+**Last Updated:** 2026-02-23
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v2.6 (2026-02-23):** Added Shared Resources section (Section 11) to define `_skills`, `_global_lessons`, and `_protocols` handling.
+* **v2.5 (2026-02-23):** Added Command Transparency Rule to Communication Standards.
 * **v2.4 (2026-02-19):** Added strict API key and config protocols to Security & Safety.
 * **v2.3 (2026-02-19):** Added Environment & Workspace section (Section 2) and renumbered subsequent sections. Updated internal references.
 * **v2.2 (2026-02-19):** Added "Skills Library" protocol (Section 10) to mandate checking `_skills/` before tasks.

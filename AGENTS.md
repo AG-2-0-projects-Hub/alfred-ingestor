@@ -1,16 +1,28 @@
 # Agent Manager Context
+**Runtime:** Windows host shell — treat as CMD-safe
 
-## Workspace Resolution
-**All file operations must use this absolute WSL2 path as root:**
-`/home/santoskoy/AG_master_files/`
+## Workspace Root
+All AG project files live here:
+`\\wsl.localhost\Ubuntu-24.04\home\santoskoy\AG_master_files`
 
-**Never search:**
-- Windows drives (C:\, D:\)
-- Relative paths without this root
-- `/home/` or `/santoskoy/` alone
+**Not the AG brain — do not write project files here:**
+`C:\Users\San_8\.gemini\antigravity\` (AG's internal state only)
 
-## Quick Reference
-- GEMINI.md: `/home/santoskoy/AG_master_files/GEMINI.md`
-- Skills: `/home/santoskoy/AG_master_files/_skills/`
-- Projects: `/home/santoskoy/AG_master_files/projects/`
-- Global lessons: `/home/santoskoy/AG_master_files/_global_lessons/lessons.md`
+## How to Navigate
+Always use `wsl` wrap. Never bare Linux commands, `~/`, or Windows drives.
+
+`wsl ls /home/santoskoy/AG_master_files` — list workspace  
+`wsl cat /home/santoskoy/AG_master_files/[path]` — read any file  
+`wsl find /home/santoskoy/AG_master_files -name "[name]"` — find anything  
+
+**Never search:** `C:\`, `D:\`, OneDrive, Old Santoskoy backup, BACKUP folders.
+
+## Session Start
+Run the list command above. Confirm `GEMINI.md` is visible.
+If it fails, stop and report the exact error — do not proceed.
+
+## Structural Folders
+- `_skills/` — agent capabilities
+- `_protocols/` — workflow frameworks  
+- `_global_lessons/` — promoted cross-project knowledge
+- `projects/` — individual project workspaces
