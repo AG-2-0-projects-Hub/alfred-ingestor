@@ -253,6 +253,33 @@ The following are shared between Gemini and Claude Code. Never duplicate them ac
 
 ---
 
+## 12. Agent Orchestration Protocol
+
+**Gemini's role:** Macro-orchestrator only. When receiving a task:
+
+1. Classify: Does this touch one domain or multiple?
+2. **Single domain** → delegate directly to Claude Code with clear instructions
+   and success criteria
+3. **Multi-domain** → consult `_protocols/AGENT_TEAM.md`, decompose into
+   sub-tasks, delegate to Claude Code with explicit task boundaries
+4. **Never implement directly** — route everything
+
+**Before delegating any multi-domain task:**
+- Read `_protocols/AGENT_TEAM.md` Section 2 (Decision Gate)
+- Confirm whether Tier 1 or Tier 2 applies
+- Pass that decision to Claude Code as part of the delegation
+
+**Agent team awareness:**
+Only active if the current project has an `agents/` folder.
+When it does, read `agents/README.md` to understand the routing table
+before proceeding.
+
+**For projects that ARE agent applications:**
+See `_protocols/AGENT_TEAM.md` Sections 5–6 for ADK patterns and
+file structure.
+
+---
+
 ## Document Version & Maintenance
 
 **Version:** 2.6
@@ -260,7 +287,7 @@ The following are shared between Gemini and Claude Code. Never duplicate them ac
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
-* **v2.6 (2026-02-23):** Added Shared Resources section (Section 11) to define `_skills`, `_global_lessons`, and `_protocols` handling.
+* **v2.6 (2026-02-23):** Added Section 12 — Agent Orchestration Protocol. Added Shared Resources section (Section 11) to define `_skills`, `_global_lessons`, and `_protocols` handling.
 * **v2.5 (2026-02-23):** Added Command Transparency Rule to Communication Standards.
 * **v2.4 (2026-02-19):** Added strict API key and config protocols to Security & Safety.
 * **v2.3 (2026-02-19):** Added Environment & Workspace section (Section 2) and renumbered subsequent sections. Updated internal references.

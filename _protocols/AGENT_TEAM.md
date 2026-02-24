@@ -147,3 +147,44 @@ After a project using agents completes:
 - Log any structural decisions that should inform future teams to
   `_global_lessons/lessons.md`
 - If a pattern proved reusable, document it in this file as a new section
+
+---
+
+## 9. Skill-to-Agent Mapping (Per Project)
+
+> Run this process at the start of each new project, after the Skill Scanner
+> has populated `_skills/` with relevant candidates.
+
+**This is not a global decision.** The same skill may play different roles
+in different projects. Decide per project, document in the project's `CLAUDE.md`.
+
+### The Three Outcomes
+
+| Outcome | Condition | Action |
+|---|---|---|
+| **Keep as skill** | Standalone capability invoked on-demand | Reference in project `CLAUDE.md` |
+| **Promote to agent** | Has identity, domain ownership, decision logic | Refactor into `agents/` persona |
+| **Embed into workflow** | Belongs inside a phase, not a standalone tool | Merge into relevant agent or protocol |
+
+### The Process
+
+1. List the domains this project touches
+2. Run `npx skills list` to see what's available in `_skills/`
+3. For each relevant skill, apply the three-outcome test above
+4. Document decisions in the project's `CLAUDE.md` under a `## Skills` section
+5. If promoting to agent, follow the file structure in Section 6
+
+### Example `CLAUDE.md` Skills Section
+```markdown
+## Skills
+
+| Skill | Role in this project |
+|---|---|
+| `troubleshooting-diagnostics` | Keep — invoked on-demand when bugs surface |
+| `planning` | Embedded — planning runs inside BLAST Phase 1, not standalone |
+| `error-handling-patterns` | Keep — reference during implementation |
+```
+
+### Rule
+Never copy skills into the project directory. Always reference from `_skills/`.
+Single source of truth — always.
