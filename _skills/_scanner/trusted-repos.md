@@ -14,7 +14,7 @@
 | `obra/superpowers` | https://github.com/obra/superpowers | ⭐ Proven | 20+ battle-tested skills, widely adopted |
 | `VoltAgent/awesome-agent-skills` | https://github.com/VoltAgent/awesome-agent-skills | ✅ Verified | 200+ skills, explicitly AG-compatible |
 
-## Discovery Index (Browse Only)
+## Discovery Index (Browse Only — Do Not Install Directly)
 
 | Repo | URL | Purpose |
 |---|---|---|
