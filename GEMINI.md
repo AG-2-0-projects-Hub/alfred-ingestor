@@ -19,6 +19,7 @@
 **Runtime:** WSL2 — Ubuntu 24.04
 **Workspace root:** `~/AG_master_files/` (WSL2)
 **Windows access path:** `\\wsl.localhost\Ubuntu-24.04\home\santoskoy\AG_master_files`
+**MCP config:** `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`
 
 **Critical rules:**
 - All file operations use relative paths from the workspace root
@@ -293,11 +294,12 @@ Wait for the script to complete before proceeding with any project work.
 
 ## Document Version & Maintenance
 
-**Version:** 2.8
+**Version:** 2.9
 **Last Updated:** 2026-02-24
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v2.9 (2026-02-24):** Added MCP config path to Environment & Workspace (Section 2).
 * **v2.8 (2026-02-24):** Added rule to Section 11 to always ask interactively whether Supabase is needed.
 * **v2.7 (2026-02-24):** Added Section 13 — New Project Protocol.
 * **v2.6 (2026-02-23):** Added Section 12 — Agent Orchestration Protocol. Added Shared Resources section (Section 11) to define `_skills`, `_global_lessons`, and `_protocols` handling.
