@@ -77,6 +77,7 @@ cp -r "$TEMPLATE_DIR" "$PROJECT_DIR"
 cat > "$PROJECT_DIR/CLAUDE.md" << EOF
 # ${PROJECT_NAME} — Local Law
 
+**Active Workspace:** \`projects/${PROJECT_NAME}/\` — all file operations scoped here unless explicitly stated otherwise.
 **Inherits:** AG Global Constitution (GEMINI.md)
 **Overrides:** None
 **Stack:** [Define after BLAST Blueprint phase]
