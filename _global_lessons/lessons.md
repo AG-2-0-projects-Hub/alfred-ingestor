@@ -51,3 +51,16 @@ Agent Manager reads this file to anchor all filesystem operations.
 **Discovery:** AG operates exclusively within its own workspace. Never modify system-wide settings, Windows registry, global OS configurations, or any tool/process outside of `~/AG_master_files/`. When a problem exists within AG, solve it within AG. If a fix requires system-wide changes, flag it to the user with explicit warning of scope — never execute it.
 **Impact:** Establishes a strict safety boundary to protect the host system from modification.
 **Global Candidate:** Constitution Candidate
+
+## 2026-03-01 — MCP Profile System
+
+**Context:** AG's 100-tool hard limit makes managing MCPs across multiple
+projects unsustainable with manual UI toggles.
+
+**Discovery:** Built a profile-based MCP switching system using ag-switch.sh.
+Each project declares its MCPs in a profile file. ag-switch activates only
+those tools per session, leaving all other projects unaffected.
+
+**Full documentation:** See `_global_lessons/mcp-system-lessons-entry.md`
+
+**Global Candidate:** Yes — promoted here.

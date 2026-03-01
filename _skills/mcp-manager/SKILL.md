@@ -61,7 +61,7 @@ When starting a project or asked "what MCPs do I need":
 
 When user says "add [mcp-name] to this project":
 
-**Step 1 — Check if it exists in global.json:**
+**Step 1 — Check if it exists in global.json (synced from mcp_config.json):**
 ```bash
 python3 -c "
 import json
@@ -80,12 +80,12 @@ Then hit Refresh in the AG MCP panel. Done.
 
 **Step 2b — If it does NOT exist in global:**
 Tell the user:
-> "This MCP isn't in global.json yet. You need to add it there first
-> (with its API key/config), then I can add it to this project.
-> Open global.json at: `~/AG_master_files/_mcp_profiles/global.json`
-> and add the entry. I'll wait."
+> "This MCP isn't registered yet. Add it via the AG MCP panel to
+> mcp_config.json as you normally would. ag-switch will sync it into
+> global.json automatically on next run. Once added, confirm and I'll
+> add it to this project's profile."
 
-After they confirm it's added:
+After they confirm it's added to mcp_config.json:
 ```bash
 bash ~/AG_master_files/_scripts/ag-switch.sh --add-mcp [name]
 ```
@@ -137,18 +137,25 @@ bash ~/AG_master_files/_scripts/ag-switch.sh
 
 ## Task 5 — Session Start (Auto-Switch)
 
-When Gemini initializes a session and detects a project folder:
+When Gemini initializes a session:
 
-1. Read `CLAUDE.md` to confirm project name
-2. Check if `_mcp_profiles/[project].json` exists
-3. If yes → run ag-switch automatically:
-```bash
-bash ~/AG_master_files/_scripts/ag-switch.sh
-```
-4. Tell the user: "MCP profile switched to [project]. Hit Refresh in the MCP panel."
-5. If no profile exists → tell the user:
-   > "No MCP profile found for this project. Run new-project.sh or
-   > create `_mcp_profiles/[project].json` manually."
+1. Check the open workspace — is this a project folder or AG_master_files root?
+   - **If at AG_master_files root:** Do NOT run ag-switch. Say:
+     "You are at the AG root level — ag-switch only runs inside a project folder.
+     Open a project folder to activate its MCP profile."
+   - **If inside a project folder:** Continue to step 2.
+
+2. Read `CLAUDE.md` to confirm project name (first heading, before the dash).
+
+3. Check if `_mcp_profiles/[project].json` exists.
+   - If yes → run ag-switch:
+     ```bash
+     bash ~/AG_master_files/_scripts/ag-switch.sh
+     ```
+     Tell the user: "MCP profile switched to [project]. Hit Refresh in the MCP panel."
+   - If no profile exists → tell the user:
+     > "No MCP profile found for this project. Run new-project.sh or
+     > create `_mcp_profiles/[project].json` manually."
 
 ---
 

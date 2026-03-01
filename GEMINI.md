@@ -19,7 +19,14 @@
 **Runtime:** WSL2 — Ubuntu 24.04
 **Workspace root:** `~/AG_master_files/` (WSL2)
 **Windows access path:** `\\wsl.localhost\Ubuntu-24.04\home\santoskoy\AG_master_files`
-**MCP config:** `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`
+**MCP config (source of truth):** `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`
+Add all new MCPs here via the AG MCP panel as always. Never edit directly for project scoping.
+
+**MCP registry (auto-synced, do not edit):** `~/AG_master_files/_mcp_profiles/global.json`
+Automatically synced from mcp_config.json by ag-switch on every run. Gitignored.
+
+**MCP profiles (per-project):** `~/AG_master_files/_mcp_profiles/[project].json`
+Declares which MCPs a project needs. No API keys. Committed to git.
 
 **Critical rules:**
 - All file operations use relative paths from the workspace root
@@ -71,7 +78,7 @@
 * **Destructive Gate:** Never execute destructive terminal commands (`rm -rf`, `DROP TABLE`, `DELETE FROM`) without generating a manual review artifact first.
 * **Credential Safety:** Always check for `.env` or `.geminiignore` before reading files or generating code involving credentials.
 * **API Keys Protocol:** API keys always go in `mcp_config.json` or `.env` — never hardcoded in any file.
-* **Local Config Protocol:** `mcp_config.json` stays local only — back it up manually (e.g., encrypted note, password manager).
+* **Local Config Protocol:** `mcp_config.json` stays local only — back it up manually (e.g., encrypted note, password manager). `_mcp_profiles/global.json` also stays local only — it mirrors the API keys from mcp_config.json and must also be backed up manually. Neither file is ever committed to git.
 * **Key Rotation Protocol:** If a key is ever accidentally committed: rotate it immediately, then remove it from git history.
 
 ### Destructive Operations Protocol
@@ -294,6 +301,7 @@ When instructed to create a new project, always execute:
 Never scaffold projects manually or ad-hoc.
 This script is the single source of truth for project creation.
 Wait for the script to complete before proceeding with any project work.
+- Never add MCPs directly to global.json — always add to mcp_config.json first, ag-switch will sync automatically
 
 ---
 
@@ -309,11 +317,13 @@ When a session begins and a project folder is open:
 
 ## Document Version & Maintenance
 
-**Version:** 3.0
+**Version:** 3.2
 **Last Updated:** 2026-03-01
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v3.2 (2026-03-01):** MCP Profile System added (Section 14), MCP config references corrected in Sections 2 and 4 to reflect the three-layer architecture: mcp_config.json (source of truth) → global.json (auto-synced mirror) → [project].json (scoped profile).
+* **v3.1 (2026-03-01):** Updated MCP config paths in Section 2, added global.json sync rule in Section 13.
 * **v3.0 (2026-03-01):** Added Section 14 — Session Start Protocol.
 * **v2.9 (2026-02-24):** Added MCP config path to Environment & Workspace (Section 2).
 * **v2.8 (2026-02-24):** Added rule to Section 11 to always ask interactively whether Supabase is needed.

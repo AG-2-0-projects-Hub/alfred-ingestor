@@ -173,31 +173,8 @@ if added:
         json.dump(config, f, indent=2)
     print(f"ok_config")
 
-# Add to global.json (source of truth)
-if "${GLOBAL_PROFILE}" and __import__('os').path.exists("${GLOBAL_PROFILE}"):
-    try:
-        with open(global_path, 'r') as f:
-            global_cfg = json.load(f)
-        if "mcpServers" not in global_cfg:
-            global_cfg["mcpServers"] = {}
-        if mcp_name not in global_cfg["mcpServers"]:
-            # Re-read token from global_cfg itself (it's the master)
-            token = None
-            for arg in global_cfg["mcpServers"].get("supabase", {}).get("args", []):
-                if arg.startswith("SUPABASE_ACCESS_TOKEN="):
-                    token = arg.split("=", 1)[1]
-                    break
-            if token:
-                global_cfg["mcpServers"][mcp_name] = {
-                    "command": "wsl",
-                    "args": ["env", f"SUPABASE_ACCESS_TOKEN={token}", "npx", "-y",
-                             "@supabase/mcp-server-supabase@latest", f"--project-ref={project_ref}"]
-                }
-                with open(global_path, 'w') as f:
-                    json.dump(global_cfg, f, indent=2)
-                print("ok_global")
-    except Exception as e:
-        print(f"Warning: could not update global.json: {e}")
+# global.json is synced automatically by ag-switch on next run — no direct write needed here
+print("note: global.json will be synced by ag-switch on next session start")
 PYEOF
 
     if [[ $? -eq 0 ]]; then

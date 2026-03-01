@@ -165,9 +165,17 @@ if [[ -n "$1" ]]; then
 else
   PROJECT_NAME=$(detect_project 2>/dev/null || echo "")
   if [[ -z "$PROJECT_NAME" ]]; then
-    echo -e "${RED}Error: could not detect project from CLAUDE.md.${NC}"
-    echo -e "${YELLOW}Either navigate to a project folder or pass the name explicitly:${NC}"
-    echo -e "  bash ag-switch.sh alfred"
+    # Check if we are at AG root level specifically
+    if [[ "$PWD" == "$AG_ROOT" || "$PWD" == "$HOME/AG_master_files" ]]; then
+      echo -e "${YELLOW}You are at the AG root level.${NC}"
+      echo -e "${YELLOW}ag-switch only runs inside a project folder.${NC}"
+      echo -e "${YELLOW}Open a project folder first, or pass the name explicitly:${NC}"
+      echo -e "  bash ag-switch.sh alfred"
+    else
+      echo -e "${RED}Error: could not detect project from CLAUDE.md.${NC}"
+      echo -e "${YELLOW}Navigate to a project folder or pass the name explicitly:${NC}"
+      echo -e "  bash ag-switch.sh alfred"
+    fi
     exit 1
   fi
 fi
@@ -186,7 +194,36 @@ echo -e "${CYAN}   AG Switch → ${PROJECT_NAME}${NC}"
 echo -e "${CYAN}=======================================${NC}"
 echo ""
 
-# --- Merge profile + keys from global → mcp_config.json ---
+# --- Step 1: Sync mcp_config.json → global.json (mcp_config is source of truth) ---
+python3 << PYEOF
+import json, sys, os
+
+mcp_config_path = "$MCP_CONFIG"
+global_path = "$GLOBAL_PROFILE"
+
+try:
+    with open(mcp_config_path) as f:
+        mcp_config = json.load(f)
+except Exception as e:
+    print(f"Error reading mcp_config.json: {e}")
+    sys.exit(1)
+
+global_cfg = {}
+if os.path.exists(global_path):
+    try:
+        with open(global_path) as f:
+            global_cfg = json.load(f)
+    except:
+        pass
+
+global_cfg["mcpServers"] = mcp_config.get("mcpServers", {})
+
+with open(global_path, 'w') as f:
+    json.dump(global_cfg, f, indent=2)
+print(f"✓ global.json synced ({len(global_cfg['mcpServers'])} MCPs)")
+PYEOF
+
+# --- Step 2: Build scoped mcp_config.json from project profile + keys in global ---
 python3 << PYEOF
 import json, sys
 
@@ -212,7 +249,6 @@ except Exception as e:
 requested = profile.get("mcpServers", [])
 global_servers = global_cfg.get("mcpServers", {})
 
-# Build output: only the MCPs this project needs, with keys from global
 output = {"mcpServers": {}}
 missing = []
 
@@ -224,13 +260,7 @@ for mcp_name in requested:
 
 if missing:
     print(f"Warning: these MCPs are in the profile but not in global.json: {missing}")
-    print("They will be skipped. Add them to global.json first.")
-
-# Count tools for info
-tool_count = 0
-for name, server in output["mcpServers"].items():
-    # Can't know tool count without connecting, so just count servers
-    pass
+    print("They will be skipped. Add them via the AG MCP panel first.")
 
 with open(output_path, 'w') as f:
     json.dump(output, f, indent=2)
