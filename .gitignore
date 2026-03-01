@@ -42,3 +42,4 @@ Thumbs.db
 logs/
 .tmp/
 *.pyc
+_mcp_profiles/global.json
