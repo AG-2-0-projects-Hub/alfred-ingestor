@@ -27,6 +27,8 @@
 - Never search Windows drives (`C:\`, `D:\`)
 - When in doubt, paths start from `~/AG_master_files/`
 
+**System map:** If context is lost or architecture is unclear, read `_global_lessons/AG_SYSTEM_MAP.md`
+
 ---
 
 ## 3. Core Logic Protocols
@@ -166,6 +168,9 @@ Format:
 ### Context Initialization
 * Before generating any code, inherently review the constraints in `GEMINI.md` and the active project's `CLAUDE.md` (or equivalent).
 * If the user's request contradicts these constraints, output a `CONSTRAINT_VIOLATION` warning and halt.
+* If the active project is unclear, architecture decisions are uncertain, or 
+  this is a fresh/recovered session — read `_global_lessons/AG_SYSTEM_MAP.md` 
+  before proceeding. This is a hard stop, not a suggestion.
 
 ### Context Handoff Protocol
 * At the **start** of every session, read the active project's `CLAUDE.md` and `lessons.md` to restore context.
