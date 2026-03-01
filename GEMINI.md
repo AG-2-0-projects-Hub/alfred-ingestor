@@ -297,13 +297,24 @@ Wait for the script to complete before proceeding with any project work.
 
 ---
 
+## 14. Session Start Protocol
+
+When a session begins and a project folder is open:
+1. Read `CLAUDE.md` to confirm the project name
+2. Run: `bash ~/AG_master_files/_scripts/ag-switch.sh`
+3. Tell the user: "MCP profile switched to [project]. Hit Refresh in the MCP panel."
+4. If no profile exists for this project, say so and stop — do not proceed until resolved.
+
+---
+
 ## Document Version & Maintenance
 
-**Version:** 2.9
-**Last Updated:** 2026-02-24
+**Version:** 3.0
+**Last Updated:** 2026-03-01
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v3.0 (2026-03-01):** Added Section 14 — Session Start Protocol.
 * **v2.9 (2026-02-24):** Added MCP config path to Environment & Workspace (Section 2).
 * **v2.8 (2026-02-24):** Added rule to Section 11 to always ask interactively whether Supabase is needed.
 * **v2.7 (2026-02-24):** Added Section 13 — New Project Protocol.
