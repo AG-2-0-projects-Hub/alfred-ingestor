@@ -2,6 +2,8 @@
     "mcpServers": [
         "context7",
         "github",
-        "supabase-scraper"
+        "supabase-scraper",
+        "firecrawl-mcp",
+        "make"
     ]
 }

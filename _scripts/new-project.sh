@@ -7,6 +7,14 @@
 
 set -e
 
+# --- Preflight Check ---
+for cmd in node npm npx claude; do
+  if [[ ! -x "/usr/local/bin/$cmd" ]]; then
+    echo -e "\033[0;31mError: $cmd not found in /usr/local/bin. Have you run the nvm symlinks step?\033[0m"
+    exit 1
+  fi
+done
+
 # --- Config ---
 AG_ROOT="$HOME/AG_master_files"
 TEMPLATE_DIR="$AG_ROOT/projects/_template"
@@ -75,6 +83,34 @@ echo ""
 echo -e "Creating project scaffold..."
 
 cp -r "$TEMPLATE_DIR" "$PROJECT_DIR"
+mkdir -p "$PROJECT_DIR/_mcp"
+touch "$PROJECT_DIR/_mcp/project_mcps.md"
+mkdir -p "$PROJECT_DIR/src"
+mkdir -p "$PROJECT_DIR/.vscode"
+
+cat > "$PROJECT_DIR/.vscode/tasks.json" << 'EOF'
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Sync AG MCP Profile",
+      "type": "shell",
+      "command": "bash ~/AG_master_files/_scripts/ag-switch.sh",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "never",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    }
+  ]
+}
+EOF
 
 cat > "$PROJECT_DIR/CLAUDE.md" << EOF
 # ${PROJECT_NAME} — Local Law

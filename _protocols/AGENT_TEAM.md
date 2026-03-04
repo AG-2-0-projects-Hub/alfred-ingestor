@@ -23,6 +23,14 @@ with explicit boundaries and success criteria. Never implement directly.
 to run sequentially or spawn subagents via the Task tool. Report completion
 back to Gemini.
 
+### The Manual Handoff Ritual (Hard Rule)
+When Gemini delegates to Claude Code, it **MUST NEVER** invoke `claude` as a subprocess. Instead, follow this exact ritual:
+1. Gemini completes planning and writes `CLAUDE_DELEGATION_PHASES_X.md` to the workspace.
+2. Gemini uses `notify_user` to say: "Delegation file ready. Open Claude Code and paste: 'Please execute the delegation plan in CLAUDE_DELEGATION_PHASES_X.md'"
+3. User pastes the prompt into Claude Code.
+4. Claude executes the work.
+5. User replies to Gemini with the outcomes or confirming completion.
+
 **Subagents:** Claude Code's internal workers. Spawned inline via Task tool
 when parallelism is worth it. They report back to Claude Code only — they
 don't communicate with each other or with Gemini.

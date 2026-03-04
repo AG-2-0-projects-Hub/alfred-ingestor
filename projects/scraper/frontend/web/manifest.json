@@ -1,0 +1,12 @@
+{
+  "name": "Alfred Scraper",
+  "short_name": "Alfred",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0D1117",
+  "theme_color": "#1E3A5F",
+  "description": "Alfred Airbnb Scraper — Extract structured data from listings.",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": []
+}

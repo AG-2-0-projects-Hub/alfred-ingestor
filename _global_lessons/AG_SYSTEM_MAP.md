@@ -51,6 +51,8 @@ sudo ln -sf $(which claude) /usr/local/bin/claude
 bash -c "node --version && npm --version && npx --version && claude --version"
 ```
 
+Note: Do not add symlinks for MCP-specific tools like `vercel` or `flutter` here. They should be handled via absolute paths in `mcp_config.json`.
+
 ### python vs python3
 Both point to Python 3.12. `python` command created via symlink — both work identically.
 
@@ -216,6 +218,9 @@ AG's MCP manager runs on the **Windows host**, not WSL2. All `npx`-based MCPs mu
 | Firecrawl | ✅ | — | Web research — must use inline env pattern |
 | Supabase (global) | ✅ | — | Full account access — for creating new projects |
 | Supabase (per-project) | ✅ | — | Scoped to one `project_ref` — auto-registered by `new-project.sh` |
+| Pinecone | ✅ | — | Vector DB — inline env key pattern |
+| Flutter | ⚠️ | — | Dart team official MCP — `FLUTTER_ROOT` must be set in env |
+| Vercel | ⚠️ | — | Remote MCP via `mcp-remote` to `https://mcp.vercel.com` — requires `VERCEL_AUTH_TOKEN` inline |
 
 ### Supabase Two-Level Architecture
 

@@ -33,6 +33,7 @@ Declares which MCPs a project needs. No API keys. Committed to git.
 - Never use absolute Linux paths (`/home/...`, `/usr/...`)
 - Never search Windows drives (`C:\`, `D:\`)
 - When in doubt, paths start from `~/AG_master_files/`
+- **Shell Rule:** Claude's shell is non-interactive — never assume `.bashrc`-loaded tools are visible without symlinks.
 
 **System map:** If context is lost or architecture is unclear, read `_global_lessons/AG_SYSTEM_MAP.md`
 
@@ -243,6 +244,7 @@ Review all generated code through the lens of a highly skeptical Senior Mechatro
 Before starting any task, scan `_skills/` for relevant skills. If a skill 
 folder matches the task domain, read its SKILL.md and follow it.
 Skills are the source of truth for their domain — do not proceed without reading them first.
+**Global Skills Path Rule:** You must read from the absolute path `~/AG_master_files/_skills/` instead of relying on local project symlinks. Do not attempt to use `_skills` symlinks inside a project folder.
 
 ---
 
@@ -282,6 +284,7 @@ The following are shared between Gemini and Claude Code. Never duplicate them ac
 - Read `_protocols/AGENT_TEAM.md` Section 2 (Decision Gate)
 - Confirm whether Tier 1 or Tier 2 applies
 - Pass that decision to Claude Code as part of the delegation
+- **Claude Code Invocation Fix:** Always use the wrapper `wsl -e bash -ic 'claude -p "..."'` to delegate tasks. You are strictly forbidden from invoking `claude` directly as a subprocess without the interactive shell wrapper.
 
 **Agent team awareness:**
 Only active if the current project has an `agents/` folder.
@@ -308,10 +311,11 @@ Wait for the script to complete before proceeding with any project work.
 ## 14. Session Start Protocol
 
 When a session begins and a project folder is open:
-1. Read `CLAUDE.md` to confirm the project name
-2. Run: `bash ~/AG_master_files/_scripts/ag-switch.sh`
+1. VS Code opens and `ag-switch` fires automatically via `.vscode/tasks.json`.
+2. Read `CLAUDE.md` to confirm the project name (if needed for context).
 3. Tell the user: "MCP profile switched to [project]. Hit Refresh in the MCP panel."
-4. If no profile exists for this project, say so and stop — do not proceed until resolved.
+4. **Refresh must happen BEFORE opening Claude Code.**
+5. If no profile exists for this project, say so and stop — do not proceed until resolved.
 
 ---
 
