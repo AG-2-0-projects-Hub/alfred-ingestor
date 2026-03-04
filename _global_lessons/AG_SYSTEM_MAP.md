@@ -1,11 +1,11 @@
 # AG_SYSTEM_MAP.md
-**Version:** 1.0 | **Created:** 2026-03-01 | **Status:** Current state — post-foundation-complete
+**Version:** 1.1 | **Created:** 2026-03-01 | **Updated:** 2026-03-04 | **Status:** Current state — post-AG-Improvement-Roadmap-v1.1
 
-> **Purpose:** Context dump for broken or fresh AG sessions. Contains the full architecture, config, paths, and logic of the AG environment as of foundation completion (Steps 1–12 done). Drop this into any session that has lost context.
+> **Purpose:** Context dump for broken or fresh AG sessions. Contains the full architecture, config, paths, and logic of the AG environment as of AG Improvement Roadmap v1.1 completion. Drop this into any session that has lost context.
 >
 > **Storage:** `~/AG_master_files/_global_lessons/AG_SYSTEM_MAP.md` — load only when context is lost or architecture is unclear. Not loaded in normal sessions.
 >
-> **Governing document:** `GEMINI.md` v2.9 is the law. This document describes; GEMINI.md prescribes.
+> **Governing document:** `GEMINI.md` v3.2 is the law. This document describes; GEMINI.md prescribes.
 
 ---
 
@@ -36,19 +36,25 @@
 | npm | 11.10.0 | bundled with Node |
 | Python | 3.12.0 | pyenv |
 | Claude Code CLI | 2.1.47 | npm -g |
+| Dart SDK | stable | apt (dart.dev repo) |
 
 ### Critical: nvm Symlinks (Non-Interactive Shell Access)
 
 nvm initializes via `.bashrc` — only loads in interactive shells. AG's MCP manager and background processes spawn non-interactive shells and cannot see nvm-managed tools without these symlinks. **Run after any Node.js update:**
 
 ```bash
-sudo ln -sf $(nvm which current) /usr/local/bin/node
+# Use 'which node' (not 'nvm which current') — 'current' alias may not be set
+sudo ln -sf $(which node) /usr/local/bin/node
 sudo ln -sf $(which npm) /usr/local/bin/npm
 sudo ln -sf $(which npx) /usr/local/bin/npx
 sudo ln -sf $(which claude) /usr/local/bin/claude
+sudo ln -sf /usr/lib/dart/bin/dart /usr/local/bin/dart
 
-# Verify all four work in non-interactive context:
-bash -c "node --version && npm --version && npx --version && claude --version"
+# If 'which node' fails, first activate the version:
+nvm use node || nvm install node
+
+# Verify all five work in non-interactive context:
+bash -c "node --version && npm --version && npx --version && claude --version && dart --version"
 ```
 
 Note: Do not add symlinks for MCP-specific tools like `vercel` or `flutter` here. They should be handled via absolute paths in `mcp_config.json`.
@@ -65,7 +71,7 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 
 ```
 ~/AG_master_files/
-├── GEMINI.md                              # The Constitution — v2.9 — global law for all sessions
+├── GEMINI.md                              # The Constitution — v3.2 — global law for all sessions
 ├── CLAUDE.md                              # Claude Code operating rules — extends GEMINI.md
 ├── AGENTS.md                              # Agent Manager path resolution anchor
 
@@ -73,7 +79,8 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 │
 ├── _protocols/
 │   ├── BLAST_Framework.md                 # Workflow protocol — used at project kickoff (Phase 1: Blueprint)
-│   └── AGENT_TEAM.md                      # Agent architecture decision guide — sizing, patterns, file structure
+│   ├── AGENT_TEAM.md                      # Agent architecture decision guide + Manual Handoff Ritual
+│   └── PROJECT_KICKOFF.md                 # 6-step deterministic workflow protocol — mandatory for new projects
 │
 ├── _skills/                               # Global skill library — single source of truth for both models
 │   ├── _scanner/
@@ -82,6 +89,7 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 │   ├── error-handling-patterns/SKILL.md   # Error handling patterns for implementation tasks
 │   ├── find-skills/SKILL.md               # Meta-skill: skill discovery via npx skills CLI
 │   ├── gemini-api-dev/SKILL.md            # Current Gemini SDK syntax — prevents deprecated code
+│   ├── mcp-tool-manager/SKILL.md          # Dynamically enable/disable MCP tools in project profiles
 │   ├── planning/SKILL.md                  # Roadmap and task decomposition
 │   ├── skill-scanner/SKILL.md             # Scans trusted repos for skills matching project domains
 │   ├── troubleshooting-diagnostics/SKILL.md # SRE-style root cause analysis
@@ -89,6 +97,10 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 │
 ├── _scripts/
 │   └── new-project.sh                     # Project creation automation — single source of truth
+│
+├── _mcp_profiles/                         # Per-project scoped MCP lists (no keys, committed to git)
+│   ├── global.json                        # Auto-synced mirror of mcp_config.json — gitignored
+│   └── [project].json                     # Declares which MCPs a project needs
 │
 ├── _global_lessons/
 │   ├── lessons.md                         # Promoted cross-project technical knowledge
@@ -99,12 +111,19 @@ Both point to Python 3.12. `python` command created via symlink — both work id
     │   ├── CLAUDE.md                      # Project law template
     │   ├── CONTEXT.md                     # Session state template
     │   └── lessons.md                     # Project lessons template
-    └── alfred/                            # Pending migration — own workspace, own document set
+    ├── alfred/                            # Pending migration — own workspace, own document set
+    └── claude-delegation-test/            # Verification project — tests new v1.1 scaffold infrastructure
+        ├── CLAUDE.md
+        ├── CONTEXT.md
+        ├── lessons.md
+        ├── .vscode/tasks.json             # Auto-fires ag-switch.sh on VS Code folder open
+        ├── _mcp/project_mcps.md           # Human-readable MCP list for this project
+        └── src/                           # Source code root
 ```
 
 ---
 
-## 4. The Constitution Layer (GEMINI.md v2.9)
+## 4. The Constitution Layer (GEMINI.md v3.2)
 
 **What it governs:** All AG sessions, all projects, all agents. Project-level `CLAUDE.md` files may override specific rules locally but may never contradict safety or destructive operation protocols.
 
@@ -161,10 +180,11 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 
 | Skill | Purpose | Maintenance |
 |---|---|---|
-| `creating-skills` | Interviews user and generates new `SKILL.md` files with zero ambiguity | Hand-crafted — review manually when skill creation patterns change |
+| `creating-skills` | Interviews user and generates new `SKILL.md` files with zero ambiguity | Hand-crafted |
 | `error-handling-patterns` | Error handling patterns for implementation tasks | Hand-crafted |
-| `find-skills` | Skill discovery via `npx skills` CLI | Hand-crafted — review manually when skill discovery patterns change |
+| `find-skills` | Skill discovery via `npx skills` CLI | Hand-crafted |
 | `gemini-api-dev` | Current Gemini SDK syntax — prevents deprecated `google.generativeai` code | CLI-managed — update monthly |
+| `mcp-tool-manager` | Dynamically enable/disable MCP tools in `_mcp_profiles/[project].json` | Hand-crafted |
 | `planning` | Roadmap and task decomposition | Hand-crafted |
 | `skill-scanner` | Scans trusted repos for skills matching project domains (see Section 8) | Hand-crafted |
 | `troubleshooting-diagnostics` | SRE-style root cause analysis | Hand-crafted |
@@ -279,11 +299,14 @@ You
 
 ### Required Files (Every Project)
 
-| File | Purpose |
+| File/Folder | Purpose |
 |---|---|
 | `CLAUDE.md` | Project law — inherits GEMINI.md, declares stack, schema, MCP name, any local overrides |
 | `CONTEXT.md` | Session state — updated at end of every session (accomplished, pending, unresolved decisions) |
 | `lessons.md` | Project-level discoveries — flag global candidates with `Global Candidate: Yes` |
+| `.vscode/tasks.json` | Auto-fires `ag-switch.sh` on VS Code folder open — syncs MCP profile |
+| `_mcp/project_mcps.md` | Human-readable list of MCPs active in this project |
+| `src/` | Source code root |
 
 ### Creating a New Project
 
@@ -294,20 +317,26 @@ bash ~/AG_master_files/_scripts/new-project.sh
 ```
 
 **What the script does:**
-1. Prompts for project name (lowercase, no spaces) and whether Supabase is needed
-2. Scaffolds from `_template/` with pre-filled `CLAUDE.md`, `CONTEXT.md`, `lessons.md`
-3. If Supabase: prompts for `project_ref`, inherits access token from global entry, registers scoped MCP in `mcp_config.json`
-4. Commits and pushes to GitHub automatically
+1. **Preflight check:** Verifies `node`, `npm`, `npx`, and `claude` exist in `/usr/local/bin` — exits with error if missing
+2. Prompts for project name (lowercase, no spaces) and whether Supabase is needed
+3. Scaffolds from `_template/` with pre-filled `CLAUDE.md`, `CONTEXT.md`, `lessons.md`
+4. Creates `.vscode/tasks.json` to auto-fire `ag-switch.sh` on folder open
+5. Creates `_mcp/project_mcps.md` and `src/` directory
+6. If Supabase: prompts for `project_ref`, inherits access token from global entry, registers scoped MCP in `mcp_config.json`
+7. Generates `_mcp_profiles/[project].json` with selected MCPs
+8. Commits and pushes to GitHub automatically
 
-**After script:** Restart AG to activate new MCP connections.
+**After script:** Open project in VS Code — `tasks.json` will auto-fire `ag-switch.sh`. Click **Refresh** in the MCP panel. Then open Claude Code.
 
 ### Project Startup Sequence (After Script)
 
-1. Open project folder in AG
-2. Run BLAST Phase 1 (Blueprint) — define stack, schema, domains
-3. Invoke Skill Scanner: *"Run the Skill Scanner for this project"*
-4. Do Skill-to-Agent mapping (`_protocols/AGENT_TEAM.md` Section 9)
-5. Begin implementation
+See `_protocols/PROJECT_KICKOFF.md` for the full mandatory 6-step sequence. Summary:
+1. Open project folder in VS Code (→ `tasks.json` auto-fires `ag-switch.sh`)
+2. Click **Refresh** in the MCP panel — BEFORE opening Claude Code
+3. Run BLAST Phase 1 (Blueprint) — define stack, schema, domains
+4. Invoke Skill Scanner: *"Run the Skill Scanner for this project"*
+5. Do Skill-to-Agent mapping (`_protocols/AGENT_TEAM.md` Section 9)
+6. Begin implementation via the Manual Handoff Ritual
 
 ### Skill Scanner (Project Kickoff Tool)
 
@@ -341,6 +370,8 @@ bash ~/AG_master_files/_scripts/new-project.sh
 |---|---|---|
 | `_template` | ✅ Active scaffold | Copy this for every new project — never modify directly |
 | `alfred` | ⬜ Pending migration | Own workspace, own document set — dedicated session required |
+| `scraper` | ✅ Active | Airbnb scraper project — Python backend, Flutter frontend |
+| `claude-delegation-test` | ✅ Scaffold only | Verification project for AG Roadmap v1.1 — tests new infra, local only |
 
 Alfred is treated as an independent project. Migration involves: copy into `projects/alfred/`, align its `CLAUDE.md` with current GEMINI.md rules, review agent team against `_protocols/AGENT_TEAM.md`, update `CONTEXT.md`, promote any global lessons candidates.
 
@@ -351,17 +382,21 @@ Alfred is treated as an independent project. Migration involves: copy into `proj
 | # | Symptom | Fix | Prevention |
 |---|---|---|---|
 | 1 | `node`, `npm`, `npx`, `claude` not found in AG's MCP manager or background processes | Create nvm symlinks to `/usr/local/bin/` (see Section 2) | Run all four symlinks immediately after any Node.js update |
-| 2 | Gemini generates deprecated Gemini API code despite skill installed | Skills Library directive in GEMINI.md — Gemini scans `_skills/` before any task | Any new capability governing Gemini must be declared in GEMINI.md explicitly |
-| 3 | "cannot list directory" errors for Linux absolute paths and Windows drives | Known AG limitation — Gemini's filesystem tool probes multiple path formats before finding correct UNC path | Log and ignore — Gemini finds the workspace correctly every time. Not fixable via config |
-| 4 | All npx-based MCPs fail: `npx: executable not found in %PATH%` | Route all npx commands through WSL: `"command": "wsl", "args": ["npx", "-y", "..."]` | Any MCP using Node tools must route through `wsl` command |
-| 5 | Firecrawl: `FIRECRAWL_API_KEY must be provided` despite key in `env` block | Pass key inline: `"args": ["env", "FIRECRAWL_API_KEY=...", "npx", "-y", "firecrawl-mcp"]` | For WSL-routed MCPs, always use inline `env` in args — never the `env` block |
-| 6 | Supabase MCP `type: http` config silently fails | AG uses `mcp_config.json` which only supports stdio servers — use npx + WSL routing + access token | Never use HTTP format for AG MCPs |
-| 7 | `git revert HEAD` deleted a newly created file from filesystem | `git revert` undoes the entire commit including file creation — always run `git log --oneline` before reverting | Never use `git revert` to undo a file addition without checking commit scope first |
-| 8 | `cat >>` appends to GEMINI.md produce broken markdown formatting | All GEMINI.md edits go through Gemini in the editor only | Never append to GEMINI.md via terminal |
-| 9 | Gemini pre-fills `new-project.sh` prompts instead of asking interactively | Explicit rule in GEMINI.md Section 11 — never pre-fill script inputs | Script prompts must always be answered by user interactively |
-| 10 | `*.Identifier` files cluttering workspace (Windows metadata on WSL2 drag-drop) | `find ~/AG_master_files -name "*.Identifier" -delete` — already blocked by `.gitignore` | Never apply system-wide registry changes — cosmetic issue, solve within AG |
-| 11 | Agent Manager agents can't resolve WSL2 paths | `AGENTS.md` at workspace root with explicit absolute paths | Always maintain `AGENTS.md` at root |
-| 12 | API keys exposed in `mcp_config.json` opened in editor | Rotate all exposed keys immediately | Never open `mcp_config.json` in the visible editor during a session or screenshare |
+| 2 | `nvm which current` returns `N/A` — symlinks step fails | Run `nvm use node` first to activate a version, then use `$(which node)` instead | Set a default: `nvm alias default node` after installing |
+| 3 | Gemini generates deprecated Gemini API code despite skill installed | Skills Library directive in GEMINI.md — Gemini scans `_skills/` before any task | Any new capability governing Gemini must be declared in GEMINI.md explicitly |
+| 4 | "cannot list directory" errors for Linux absolute paths and Windows drives | Known AG limitation — Gemini's filesystem tool probes multiple path formats before finding correct UNC path | Log and ignore — Gemini finds the workspace correctly every time. Not fixable via config |
+| 5 | All npx-based MCPs fail: `npx: executable not found in %PATH%` | Route all npx commands through WSL: `"command": "wsl", "args": ["npx", "-y", "..."]` | Any MCP using Node tools must route through `wsl` command |
+| 6 | Firecrawl: `FIRECRAWL_API_KEY must be provided` despite key in `env` block | Pass key inline: `"args": ["env", "FIRECRAWL_API_KEY=...", "npx", "-y", "firecrawl-mcp"]` | For WSL-routed MCPs, always use inline `env` in args — never the `env` block |
+| 7 | Supabase MCP `type: http` config silently fails | AG uses `mcp_config.json` which only supports stdio servers — use npx + WSL routing + access token | Never use HTTP format for AG MCPs |
+| 8 | `git revert HEAD` deleted a newly created file from filesystem | `git revert` undoes the entire commit including file creation — always run `git log --oneline` before reverting | Never use `git revert` to undo a file addition without checking commit scope first |
+| 9 | `cat >>` appends to GEMINI.md produce broken markdown formatting | All GEMINI.md edits go through Gemini in the editor only | Never append to GEMINI.md via terminal |
+| 10 | Gemini pre-fills `new-project.sh` prompts instead of asking interactively | Explicit rule in GEMINI.md Section 11 — never pre-fill script inputs | Script prompts must always be answered by user interactively |
+| 11 | `*.Identifier` files cluttering workspace (Windows metadata on WSL2 drag-drop) | `find ~/AG_master_files -name "*.Identifier" -delete` — already blocked by `.gitignore` | Never apply system-wide registry changes — cosmetic issue, solve within AG |
+| 12 | Agent Manager agents can't resolve WSL2 paths | `AGENTS.md` at workspace root with explicit absolute paths | Always maintain `AGENTS.md` at root |
+| 13 | API keys exposed in `mcp_config.json` opened in editor | Rotate all exposed keys immediately | Never open `mcp_config.json` in the visible editor during a session or screenshare |
+| 14 | Flutter MCP 404 — `@flutter/mcp` does not exist on npm | Flutter MCP is a Dart SDK command — use `"command": "wsl", "args": ["dart", "mcp-server"]` | Never search npm for Flutter/Dart MCP; check `docs.flutter.dev/ai/mcp-server` for the canonical config |
+| 15 | Pinecone MCP 404 — `@mcp-pinecone/server` does not exist | Correct official package is `@pinecone-database/mcp` | Always verify npm package names against the official GitHub repo before adding to `mcp_config.json` |
+| 16 | `dart mcp-server` not found in non-interactive shell despite `.bashrc` PATH | Create symlink: `sudo ln -sf /usr/lib/dart/bin/dart /usr/local/bin/dart` | Run dart symlink immediately after installing Dart SDK via apt |
 
 ---
 
@@ -383,12 +418,11 @@ git push
 
 ```bash
 bash ~/AG_master_files/_scripts/new-project.sh
-# → Restart AG
-# → Open project folder
-# → Run BLAST Phase 1
-# → Invoke Skill Scanner
-# → Do Skill-to-Agent mapping
-# → Begin implementation
+# → Script runs preflight, scaffolds project, generates MCP profile
+# → Open project folder in VS Code
+# → tasks.json auto-fires ag-switch.sh — click Refresh in MCP panel
+# → THEN open Claude Code
+# → Follow PROJECT_KICKOFF.md 6-step sequence
 ```
 
 ### Desktop Replication (When Ready)

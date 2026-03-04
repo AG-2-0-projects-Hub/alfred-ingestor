@@ -1,0 +1,7 @@
+{
+    "mcpServers": [
+        "vercel",
+        "pinecone",
+        "make"
+    ]
+}
