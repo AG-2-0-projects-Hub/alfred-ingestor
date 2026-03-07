@@ -22,8 +22,10 @@
 **MCP config (source of truth):** `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`
 Add all new MCPs here via the AG MCP panel as always. Never edit directly for project scoping.
 
-**MCP registry (auto-synced, do not edit):** `~/AG_master_files/_mcp_profiles/global.json`
-Automatically synced from mcp_config.json by ag-switch on every run. Gitignored.
+**MCP steady state (do not edit manually):** `~/AG_master_files/_mcp_profiles/global.json`
+Master registry — all MCPs, all tools disabled by default.
+ag-switch resets mcp_config.json from this on every session start.
+New MCPs added via AG panel are absorbed here automatically on next ag-switch run. Gitignored.
 
 **MCP profiles (per-project):** `~/AG_master_files/_mcp_profiles/[project].json`
 Declares which MCPs a project needs. No API keys. Committed to git.
@@ -79,7 +81,8 @@ Declares which MCPs a project needs. No API keys. Committed to git.
 * **Destructive Gate:** Never execute destructive terminal commands (`rm -rf`, `DROP TABLE`, `DELETE FROM`) without generating a manual review artifact first.
 * **Credential Safety:** Always check for `.env` or `.geminiignore` before reading files or generating code involving credentials.
 * **API Keys Protocol:** API keys always go in `mcp_config.json` or `.env` — never hardcoded in any file.
-* **Local Config Protocol:** `mcp_config.json` stays local only — back it up manually (e.g., encrypted note, password manager). `_mcp_profiles/global.json` also stays local only — it mirrors the API keys from mcp_config.json and must also be backed up manually. Neither file is ever committed to git.
+* **Local Config Protocol:** `mcp_config.json` stays local only — back it up manually (e.g., encrypted note, password manager). `_mcp_profiles/global.json` also stays local only — it is the steady state master that
+ag-switch resets mcp_config.json from. Contains API keys and all tool disabled lists. Neither file is ever committed to git.
 * **Key Rotation Protocol:** If a key is ever accidentally committed: rotate it immediately, then remove it from git history.
 
 ### Destructive Operations Protocol
@@ -304,7 +307,8 @@ When instructed to create a new project, always execute:
 Never scaffold projects manually or ad-hoc.
 This script is the single source of truth for project creation.
 Wait for the script to complete before proceeding with any project work.
-- Never add MCPs directly to global.json — always add to mcp_config.json first, ag-switch will sync automatically
+- Never edit global.json manually — always add MCPs via the AG panel (mcp_config.json).
+ag-switch absorbs new entries into global.json automatically on next session start.
 
 ---
 

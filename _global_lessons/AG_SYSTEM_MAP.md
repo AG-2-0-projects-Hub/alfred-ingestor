@@ -99,8 +99,8 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 │   └── new-project.sh                     # Project creation automation — single source of truth
 │
 ├── _mcp_profiles/                         # Per-project scoped MCP lists (no keys, committed to git)
-│   ├── global.json                        # Auto-synced mirror of mcp_config.json — gitignored
-│   └── [project].json                     # Declares which MCPs a project needs
+│   ├── global.json                        # Steady state master (all tools disabled) — gitignored
+│   └── [project].json                     # Named profiles with explicit tool allowlists
 │
 ├── _global_lessons/
 │   ├── lessons.md                         # Promoted cross-project technical knowledge
@@ -201,12 +201,16 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 ### Core Constraint
 AG's MCP manager runs on the **Windows host**, not WSL2. All `npx`-based MCPs must route through WSL. Any config using `"command": "npx"` must be rewritten to `"command": "wsl"`.
 
-### Config File Location
+### Config File Location & Flow
 
 | Context | Path |
 |---|---|
 | Windows | `C:\Users\San_8\.gemini\antigravity\mcp_config.json` |
 | WSL2 | `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json` |
+
+1. **global.json**: Steady state master. All MCPs present, all tools disabled by default.
+2. **mcp_config.json**: Live active config for AG. Resets from global.json on every run.
+3. **[project].json**: Named profiles with explicit tool allowlists (no keys, committed to git).
 
 **Security rule:** `mcp_config.json` is in `.gitignore` — never committed. Back up keys in a password manager. If a key is accidentally committed: rotate immediately, remove from git history.
 

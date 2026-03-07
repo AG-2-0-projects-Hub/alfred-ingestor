@@ -12,33 +12,33 @@ declaration. AG reads mcp_config.json as always — it never knows the differenc
 
 **Architecture:**
 ```
-mcp_config.json                        ← SOURCE OF TRUTH. Add all new MCPs here
-                                          via the AG MCP panel as always.
-                                          API keys live here originally.
-                                          Never committed to git.
-_mcp_profiles/global.json             ← Auto-synced mirror of mcp_config.json.
-                                          Keys are copied here by ag-switch,
-                                          not entered here directly.
-                                          Gitignored. NEVER edit manually.
-_mcp_profiles/[project].json          ← List of MCP names only (no keys).
-                                          Committed to git. Safe to share.
+mcp_config.json                       ← Live active config. Add all new MCPs here
+                                        via the AG MCP panel as always.
+                                        Never committed to git.
+_mcp_profiles/global.json             ← Steady state master. All MCPs present,
+                                        all tools disabled.
+                                        ag-switch absorbs new MCPs here automatically.
+                                        Gitignored. NEVER edit manually.
+_mcp_profiles/[project].json          ← Named profiles with explicit tool allowlists.
+                                        (No API keys). Committed to git.
 _scripts/ag-switch.sh                 ← The engine. On every run:
-                                          1. Syncs mcp_config.json → global.json
-                                          2. Builds scoped mcp_config.json from
-                                             profile + keys in global.json
-_skills/mcp-manager/SKILL.md          ← Governs all MCP operations for Gemini
+                                        0. Absorbs missing MCPs into global.json
+                                        1. Resets mcp_config.json from global.json
+                                        2. Applies project profile, enabling declared tools
+_skills/mcp-tool-manager/SKILL.md     ← Edits project profiles. NEVER touches global.json
 ```
 
 **How it works step by step:**
 1. You add a new MCP to mcp_config.json via the AG MCP panel as always
-2. ag-switch syncs that entry into global.json automatically on next run
-3. You tell Gemini to add the MCP to the relevant project's profile
-4. ag-switch builds a scoped mcp_config.json with only that project's MCPs
-5. AG reads the result — only the right tools are live for this project
+2. ag-switch absorbs that entry into global.json automatically on next run (tools disabled)
+3. You tell Gemini to run mcp-tool-manager to add the tools to a named profile in [project].json
+4. ag-switch resets mcp_config.json, then enables only the tools declared in the active profile
+5. AG reads the result — only the right tools are live for this task
 
 **How to start a project session:**
-Open project folder in AG. Gemini reads GEMINI.md Section 14 and runs ag-switch.
+Open project folder in AG. tasks.json auto-fires ag-switch (applies base profile).
 Hit Refresh in the AG MCP panel. Done.
+Mid-session task switch: run ag-switch [project] [task-profile], then hit Refresh.
 
 **How to add an MCP to a project mid-session:**
 1. Add it to mcp_config.json via the AG MCP panel (as always)

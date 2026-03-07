@@ -146,14 +146,14 @@ EOF
 echo -e "${GREEN}✓ Created projects/${PROJECT_NAME}/${NC}"
 echo -e "${GREEN}✓ CLAUDE.md, CONTEXT.md, lessons.md populated${NC}"
 
-# --- Step 4: Register scoped Supabase MCP in global.json + mcp_config.json ---
+# --- Step 4: Register scoped Supabase MCP in mcp_config.json ---
 if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
   echo ""
   echo -e "Registering scoped Supabase MCP..."
 
   if [[ ! -f "$MCP_CONFIG" ]]; then
     echo -e "${RED}Error: MCP config not found at: $MCP_CONFIG${NC}"
-    echo -e "${YELLOW}Add this entry manually to your MCP config and global.json:${NC}"
+    echo -e "${YELLOW}Add this entry manually to mcp_config.json:${NC}"
     echo ""
     echo "\"${MCP_NAME}\": {"
     echo "  \"command\": \"wsl\","
@@ -164,34 +164,9 @@ if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
 import json, sys
 
 config_path = "${MCP_CONFIG}"
-global_path = "${GLOBAL_PROFILE}"
 mcp_name = "${MCP_NAME}"
 project_ref = "${SUPABASE_PROJECT_REF}"
 
-def add_supabase_entry(cfg, mcp_name, project_ref):
-    """Add scoped supabase entry, inheriting token from global supabase entry."""
-    token = None
-    for arg in cfg["mcpServers"].get("supabase", {}).get("args", []):
-        if arg.startswith("SUPABASE_ACCESS_TOKEN="):
-            token = arg.split("=", 1)[1]
-            break
-
-    if not token:
-        print("Error: SUPABASE_ACCESS_TOKEN not found in global supabase entry. Configure it first.")
-        sys.exit(1)
-
-    if mcp_name in cfg["mcpServers"]:
-        print(f"Warning: {mcp_name} already exists — skipping.")
-        return False
-
-    cfg["mcpServers"][mcp_name] = {
-        "command": "wsl",
-        "args": ["env", f"SUPABASE_ACCESS_TOKEN={token}", "npx", "-y",
-                 "@supabase/mcp-server-supabase@latest", f"--project-ref={project_ref}"]
-    }
-    return True
-
-# Add to mcp_config.json
 try:
     with open(config_path, 'r') as f:
         config = json.load(f)
@@ -203,46 +178,46 @@ if "mcpServers" not in config:
     print("Error: mcpServers block not found in mcp_config.json.")
     sys.exit(1)
 
-added = add_supabase_entry(config, mcp_name, project_ref)
-if added:
+# Inherit token from global supabase entry
+token = None
+for arg in config["mcpServers"].get("supabase", {}).get("args", []):
+    if arg.startswith("SUPABASE_ACCESS_TOKEN="):
+        token = arg.split("=", 1)[1]
+        break
+
+if not token:
+    print("Error: SUPABASE_ACCESS_TOKEN not found in global supabase entry. Configure it first.")
+    sys.exit(1)
+
+if mcp_name in config["mcpServers"]:
+    print(f"Warning: {mcp_name} already exists — skipping.")
+else:
+    config["mcpServers"][mcp_name] = {
+        "command": "wsl",
+        "args": ["env", f"SUPABASE_ACCESS_TOKEN={token}", "npx", "-y",
+                 "@supabase/mcp-server-supabase@latest", f"--project-ref={project_ref}"]
+    }
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
-    print(f"ok_config")
-
-# global.json is synced automatically by ag-switch on next run — no direct write needed here
-print("note: global.json will be synced by ag-switch on next session start")
+    print(f"ok: added '{mcp_name}' to mcp_config.json")
+    print("Note: global.json will absorb this entry automatically on next ag-switch run.")
 PYEOF
 
     if [[ $? -eq 0 ]]; then
-      echo -e "${GREEN}✓ Added '${MCP_NAME}' to mcp_config.json and global.json${NC}"
+      echo -e "${GREEN}✓ Added '${MCP_NAME}' to mcp_config.json${NC}"
     fi
   fi
 fi
 
-# --- Step 5: Generate MCP profile ---
+# --- Step 5: Generate MCP profile (named profiles structure) ---
 echo ""
 echo -e "Setting up MCP profile..."
-
-# Ensure profiles dir exists
 mkdir -p "$PROFILES_DIR"
 
-# Check if global.json exists
-if [[ ! -f "$GLOBAL_PROFILE" ]]; then
-  echo -e "${YELLOW}global.json not found. Creating from current mcp_config.json...${NC}"
-  if [[ -f "$MCP_CONFIG" ]]; then
-    cp "$MCP_CONFIG" "$GLOBAL_PROFILE"
-    echo -e "${GREEN}✓ Created global.json from mcp_config.json${NC}"
-    echo -e "${YELLOW}Note: global.json is gitignored (contains API keys). Back it up manually.${NC}"
-  else
-    echo -e "${RED}Warning: mcp_config.json not found. Create global.json manually at:${NC}"
-    echo -e "  $GLOBAL_PROFILE"
-  fi
-fi
-
-# Show available MCPs from global.json
+# Show available MCPs
 if [[ -f "$GLOBAL_PROFILE" ]]; then
   echo ""
-  echo -e "${CYAN}Available MCPs in global.json:${NC}"
+  echo -e "${CYAN}Available MCPs (from global.json):${NC}"
   python3 -c "
 import json
 with open('$GLOBAL_PROFILE') as f:
@@ -251,18 +226,29 @@ servers = list(cfg.get('mcpServers', {}).keys())
 for i, s in enumerate(servers, 1):
     print(f'  {i}. {s}')
 "
+elif [[ -f "$MCP_CONFIG" ]]; then
+  echo ""
+  echo -e "${CYAN}Available MCPs (from mcp_config.json):${NC}"
+  python3 -c "
+import json
+with open('$MCP_CONFIG') as f:
+    cfg = json.load(f)
+servers = list(cfg.get('mcpServers', {}).keys())
+for i, s in enumerate(servers, 1):
+    print(f'  {i}. {s}')
+"
 fi
 
 echo ""
-echo -e "${YELLOW}Which MCPs does this project need?${NC}"
+echo -e "${YELLOW}Which MCPs does this project need for its BASE profile?${NC}"
 echo -e "Enter MCP names separated by spaces (e.g. context7 github notion)"
 if [[ -n "$MCP_NAME" ]]; then
   echo -e "${CYAN}Note: ${MCP_NAME} will be added automatically (Supabase scoped)${NC}"
 fi
 echo ""
-read -p "MCPs for this project: " SELECTED_MCPS_INPUT
+read -p "Base MCPs: " BASE_MCPS_INPUT
 
-# Build the profile JSON
+# Build named profile JSON
 python3 << PYEOF
 import json, sys, os
 
@@ -270,40 +256,46 @@ profiles_dir = "$PROFILES_DIR"
 project_name = "$PROJECT_NAME"
 mcp_name = "$MCP_NAME"
 global_path = "$GLOBAL_PROFILE"
-selected_input = "$SELECTED_MCPS_INPUT"
+mcp_config_path = "$MCP_CONFIG"
+base_input = "$BASE_MCPS_INPUT"
 
-# Parse selected MCPs
-selected = [s.strip() for s in selected_input.split() if s.strip()]
+# Parse selected base MCPs
+base_mcps = [s.strip() for s in base_input.split() if s.strip()]
 
 # Always include scoped Supabase MCP if created
-if mcp_name and mcp_name not in selected:
-    selected.append(mcp_name)
+if mcp_name and mcp_name not in base_mcps:
+    base_mcps.append(mcp_name)
 
-# Validate against global.json
-if os.path.exists(global_path):
-    with open(global_path) as f:
-        global_cfg = json.load(f)
-    available = list(global_cfg.get("mcpServers", {}).keys())
-    invalid = [s for s in selected if s not in available]
+# Validate against available MCPs
+ref_path = global_path if os.path.exists(global_path) else mcp_config_path
+if os.path.exists(ref_path):
+    with open(ref_path) as f:
+        ref_cfg = json.load(f)
+    available = list(ref_cfg.get("mcpServers", {}).keys())
+    invalid = [s for s in base_mcps if s not in available]
     if invalid:
-        print(f"Warning: these MCPs are not in global.json and will be skipped: {invalid}")
-        selected = [s for s in selected if s in available]
+        print(f"Warning: these MCPs are not available and will be skipped: {invalid}")
+        base_mcps = [s for s in base_mcps if s in available]
 
-if not selected:
-    print("Warning: no valid MCPs selected. Profile will be empty.")
+if not base_mcps:
+    print("Warning: no valid MCPs selected. Profile will have an empty base.")
 
-profile = {"mcpServers": selected}
+# Build profile with base section only (task profiles added later via mcp-tool-manager)
+profile = {
+    "base": {mcp: [] for mcp in base_mcps}
+}
+
 profile_path = os.path.join(profiles_dir, f"{project_name}.json")
-
 with open(profile_path, 'w') as f:
     json.dump(profile, f, indent=2)
 
-print(f"Profile created with {len(selected)} MCPs:")
-for s in selected:
-    print(f"  • {s}")
+print(f"✓ Profile created: _mcp_profiles/{project_name}.json")
+print(f"  Base MCPs: {base_mcps}")
+print(f"  Note: Tool allowlists are empty — run mcp-tool-manager to define which tools to enable.")
 PYEOF
 
 echo -e "${GREEN}✓ MCP profile created: _mcp_profiles/${PROJECT_NAME}.json${NC}"
+echo -e "${YELLOW}  Run mcp-tool-manager skill after kickoff to populate tool allowlists.${NC}"
 
 # --- Step 6: Git commit ---
 echo ""
@@ -321,11 +313,11 @@ echo -e "${GREEN}  Project '${PROJECT_NAME}' is ready!${NC}"
 echo -e "${CYAN}=======================================${NC}"
 echo ""
 echo -e "Next steps:"
-echo -e "  1. ${YELLOW}Restart AG${NC} to activate the new MCP connection"
-echo -e "  2. Open: ${CYAN}projects/${PROJECT_NAME}/${NC}"
-echo -e "  3. ${YELLOW}Run:${NC} bash ~/AG_master_files/_scripts/ag-switch.sh"
-echo -e "     Then hit ${YELLOW}Refresh${NC} in the MCP panel"
-echo -e "  4. Run BLAST Phase 1 (Blueprint) to define stack and schema"
+echo -e "  1. ${YELLOW}Restart AG${NC} to activate new MCP connections"
+echo -e "  2. Open: ${CYAN}projects/${PROJECT_NAME}/${NC} in VS Code"
+echo -e "  3. ${YELLOW}Hit Refresh${NC} in the MCP panel (tasks.json auto-fires ag-switch)"
+echo -e "  4. Run BLAST Phase 1 (Blueprint)"
+echo -e "  5. Run ${CYAN}mcp-tool-manager${NC} skill to define tool allowlists for this project"
 if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
   echo ""
   echo -e "Supabase MCP: ${CYAN}${MCP_NAME}${NC} scoped to project_ref: ${CYAN}${SUPABASE_PROJECT_REF}${NC}"

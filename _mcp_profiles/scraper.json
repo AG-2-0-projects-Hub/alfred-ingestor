@@ -1,9 +1,13 @@
 {
-    "mcpServers": [
-        "context7",
-        "github",
-        "supabase-scraper",
-        "firecrawl-mcp",
-        "make"
-    ]
+  "base": {
+    "context7": ["resolve-library-id", "query-docs"],
+    "github": ["get_file_contents", "push_files", "create_or_update_file"]
+  },
+  "db-work": {
+    "supabase-scraper": ["execute_sql", "list_tables", "apply_migration"]
+  },
+  "scraping": {
+    "firecrawl-mcp": ["scrape", "crawl", "map"],
+    "make": ["run_scenario", "list_scenarios"]
+  }
 }
