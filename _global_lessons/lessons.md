@@ -64,3 +64,10 @@ those tools per session, leaving all other projects unaffected.
 **Full documentation:** See `_global_lessons/mcp-system-lessons-entry.md`
 
 **Global Candidate:** Yes — promoted here.
+
+## 2026-04-09 — Ag/Gemini Terminal Command Reliability in WSL2
+**Context:** Executing bash and git commands via the `run_command` tool in WSL2.
+**Discovery:** Gemini cannot reliably execute terminal commands via `run_command` in long sessions or when CWD context is lost. *Never* disable workspace validation as a fix for this behavior.
+**Impact:** Prevents getting stuck in execution loops and avoids incorrect fixes like disabling workspace validation.
+**Workaround:** The user should run git and bash commands directly in the WSL2 terminal outside of Antigravity.
+**Global Candidate:** Yes
