@@ -218,10 +218,13 @@ for mcp_name, tools in tools_to_enable.items():
     if mcp_name not in servers:
         warnings.append(f"  ⚠ '{mcp_name}' in profile but not in mcp_config.json — skipping")
         continue
-    disabled = servers[mcp_name].get("disabled", [])
-    new_disabled = [t for t in disabled if t not in tools]
-    servers[mcp_name]["disabled"] = new_disabled
+    disabled_tools = servers[mcp_name].get("disabledTools", [])
+    new_disabled_tools = [t for t in disabled_tools if t not in tools]
+    servers[mcp_name]["disabledTools"] = new_disabled_tools
+    servers[mcp_name]["disabled"] = False
     enabled_summary.append(f"  • {mcp_name}: {tools}")
+
+mcp_config["mcpServers"] = servers
 
 with open(mcp_config_path, 'w') as f:
     json.dump(mcp_config, f, indent=2)
