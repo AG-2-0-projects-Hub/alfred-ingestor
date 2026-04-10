@@ -23,8 +23,8 @@
 Add all new MCPs here via the AG MCP panel as always. Never edit directly for project scoping.
 
 **MCP steady state (do not edit manually):** `~/AG_master_files/_mcp_profiles/global.json`
-Master registry — all MCPs, all tools disabled by default.
-ag-switch resets mcp_config.json from this on every session start.
+Master registry — all MCPs, all tools restrictively listed using `disabledTools`.
+ag-switch resets mcp_config.json from this on every session start. (Agents never touch mcp_config.json directly — only ag-switch does.)
 New MCPs added via AG panel are absorbed here automatically on next ag-switch run. Gitignored.
 
 **MCP profiles (per-project):** `~/AG_master_files/_mcp_profiles/[project].json`
@@ -82,7 +82,7 @@ Declares which MCPs a project needs. No API keys. Committed to git.
 * **Credential Safety:** Always check for `.env` or `.geminiignore` before reading files or generating code involving credentials.
 * **API Keys Protocol:** API keys always go in `mcp_config.json` or `.env` — never hardcoded in any file.
 * **Local Config Protocol:** `mcp_config.json` stays local only — back it up manually (e.g., encrypted note, password manager). `_mcp_profiles/global.json` also stays local only — it is the steady state master that
-ag-switch resets mcp_config.json from. Contains API keys and all tool disabled lists. Neither file is ever committed to git.
+ag-switch resets mcp_config.json from. Contains API keys and `disabledTools` configuration. (Again, agents never interact with mcp_config.json directly — only ag-switch does.) Neither file is ever committed to git.
 * **Key Rotation Protocol:** If a key is ever accidentally committed: rotate it immediately, then remove it from git history.
 
 ### Destructive Operations Protocol
@@ -315,7 +315,7 @@ ag-switch absorbs new entries into global.json automatically on next session sta
 ## 14. Session Start Protocol
 
 When a session begins and a project folder is open:
-1. VS Code opens and `ag-switch` fires automatically via `.vscode/tasks.json`.
+1. VS Code opens and you must run `ag-switch` manually (e.g., via terminal or running the Sync AG MCP Profile task in VS Code).
 2. Read `CLAUDE.md` to confirm the project name (if needed for context).
 3. Tell the user: "MCP profile switched to [project]. Hit Refresh in the MCP panel."
 4. **Refresh must happen BEFORE opening Claude Code.**

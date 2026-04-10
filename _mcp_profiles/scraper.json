@@ -8,6 +8,6 @@
   },
   "scraping": {
     "firecrawl-mcp": ["scrape", "crawl", "map"],
-    "make": ["run_scenario", "list_scenarios"]
+    "make": ["scenarios_run", "scenarios_list"]
   }
 }

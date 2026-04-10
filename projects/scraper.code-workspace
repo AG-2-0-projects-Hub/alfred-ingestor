@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "scraper"
+		},
+		{
+			"path": "../_skills"
+		},
+		{
+			"path": "../_mcp_profiles"
+		}
+	],
+	"settings": {}
+}

@@ -83,9 +83,6 @@ echo ""
 echo -e "Creating project scaffold..."
 
 cp -r "$TEMPLATE_DIR" "$PROJECT_DIR"
-mkdir -p "$PROJECT_DIR/_mcp"
-touch "$PROJECT_DIR/_mcp/project_mcps.md"
-mkdir -p "$PROJECT_DIR/src"
 mkdir -p "$PROJECT_DIR/.vscode"
 
 cat > "$PROJECT_DIR/.vscode/tasks.json" << 'EOF'
@@ -96,9 +93,6 @@ cat > "$PROJECT_DIR/.vscode/tasks.json" << 'EOF'
       "label": "Sync AG MCP Profile",
       "type": "shell",
       "command": "bash ~/AG_master_files/_scripts/ag-switch.sh",
-      "runOptions": {
-        "runOn": "folderOpen"
-      },
       "presentation": {
         "echo": true,
         "reveal": "never",
@@ -143,8 +137,52 @@ cat > "$PROJECT_DIR/CONTEXT.md" << EOF
 **Unresolved Decisions:** —
 EOF
 
+cat > "$PROJECT_DIR/QUICKSTART.md" << EOF
+# ${PROJECT_NAME} — Quickstart
+
+## Switch MCP Profile
+Activates the right tools for your current task. Run this at the start of every session or when switching tasks.
+\`\`\`
+bash ~/AG_master_files/_scripts/ag-switch.sh ${PROJECT_NAME}
+bash ~/AG_master_files/_scripts/ag-switch.sh ${PROJECT_NAME} [task-profile]
+\`\`\`
+Or via shortcut: \`Ctrl+Shift+P → Run Task → Sync AG MCP Profile\`
+Check \`mcp-profile.json\` in this workspace for available task profiles.
+
+## Kick Off This Project
+Run these in order at the start of a new project:
+1. Tell Gemini: "Run BLAST Phase 1" — defines stack, schema, and project domains
+2. Tell Gemini: "Run the Skill Scanner" — finds the most relevant skills for this project
+3. Tell Gemini: "Run mcp-tool-manager" — populates tool allowlists in the MCP profile
+
+## Available Skills
+Browse the \`_skills/\` folder in this workspace to see all available global skills.
+Tell Gemini to use a skill: "Read and follow \`_skills/[skill-name]/SKILL.md\`"
+
+## Session Start
+\`\`\`
+git pull
+bash ~/AG_master_files/_scripts/ag-switch.sh ${PROJECT_NAME}
+\`\`\`
+
+## Session End
+\`\`\`
+git add . && git commit -m "Session: [description]" && git push
+\`\`\`
+EOF
+
+cat > "$PROJECT_DIR/${PROJECT_NAME}.code-workspace" << EOF
+{
+  "folders": [
+    { "path": "." },
+    { "path": "../../_skills", "name": "_skills" },
+    { "path": "../../_mcp_profiles", "name": "_mcp_profiles" }
+  ]
+}
+EOF
+
 echo -e "${GREEN}✓ Created projects/${PROJECT_NAME}/${NC}"
-echo -e "${GREEN}✓ CLAUDE.md, CONTEXT.md, lessons.md populated${NC}"
+echo -e "${GREEN}✓ CLAUDE.md, CONTEXT.md, QUICKSTART.md, lessons.md populated${NC}"
 
 # --- Step 4: Register scoped Supabase MCP in mcp_config.json ---
 if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
@@ -211,87 +249,27 @@ fi
 
 # --- Step 5: Generate MCP profile (named profiles structure) ---
 echo ""
-echo -e "Setting up MCP profile..."
+echo -e "Creating empty MCP profile..."
 mkdir -p "$PROFILES_DIR"
 
-# Show available MCPs
-if [[ -f "$GLOBAL_PROFILE" ]]; then
-  echo ""
-  echo -e "${CYAN}Available MCPs (from global.json):${NC}"
-  python3 -c "
-import json
-with open('$GLOBAL_PROFILE') as f:
-    cfg = json.load(f)
-servers = list(cfg.get('mcpServers', {}).keys())
-for i, s in enumerate(servers, 1):
-    print(f'  {i}. {s}')
-"
-elif [[ -f "$MCP_CONFIG" ]]; then
-  echo ""
-  echo -e "${CYAN}Available MCPs (from mcp_config.json):${NC}"
-  python3 -c "
-import json
-with open('$MCP_CONFIG') as f:
-    cfg = json.load(f)
-servers = list(cfg.get('mcpServers', {}).keys())
-for i, s in enumerate(servers, 1):
-    print(f'  {i}. {s}')
-"
-fi
-
-echo ""
-echo -e "${YELLOW}Which MCPs does this project need for its BASE profile?${NC}"
-echo -e "Enter MCP names separated by spaces (e.g. context7 github notion)"
-if [[ -n "$MCP_NAME" ]]; then
-  echo -e "${CYAN}Note: ${MCP_NAME} will be added automatically (Supabase scoped)${NC}"
-fi
-echo ""
-read -p "Base MCPs: " BASE_MCPS_INPUT
-
-# Build named profile JSON
 python3 << PYEOF
-import json, sys, os
+import json, os
 
 profiles_dir = "$PROFILES_DIR"
 project_name = "$PROJECT_NAME"
 mcp_name = "$MCP_NAME"
-global_path = "$GLOBAL_PROFILE"
-mcp_config_path = "$MCP_CONFIG"
-base_input = "$BASE_MCPS_INPUT"
 
-# Parse selected base MCPs
-base_mcps = [s.strip() for s in base_input.split() if s.strip()]
+profile = {"base": {}}
 
-# Always include scoped Supabase MCP if created
-if mcp_name and mcp_name not in base_mcps:
-    base_mcps.append(mcp_name)
-
-# Validate against available MCPs
-ref_path = global_path if os.path.exists(global_path) else mcp_config_path
-if os.path.exists(ref_path):
-    with open(ref_path) as f:
-        ref_cfg = json.load(f)
-    available = list(ref_cfg.get("mcpServers", {}).keys())
-    invalid = [s for s in base_mcps if s not in available]
-    if invalid:
-        print(f"Warning: these MCPs are not available and will be skipped: {invalid}")
-        base_mcps = [s for s in base_mcps if s in available]
-
-if not base_mcps:
-    print("Warning: no valid MCPs selected. Profile will have an empty base.")
-
-# Build profile with base section only (task profiles added later via mcp-tool-manager)
-profile = {
-    "base": {mcp: [] for mcp in base_mcps}
-}
+if mcp_name:
+    profile["base"][mcp_name] = []
 
 profile_path = os.path.join(profiles_dir, f"{project_name}.json")
 with open(profile_path, 'w') as f:
     json.dump(profile, f, indent=2)
 
-print(f"✓ Profile created: _mcp_profiles/{project_name}.json")
-print(f"  Base MCPs: {base_mcps}")
-print(f"  Note: Tool allowlists are empty — run mcp-tool-manager to define which tools to enable.")
+print(f"✓ Empty profile created: _mcp_profiles/{project_name}.json")
+print(f"  Run mcp-tool-manager after BLAST Phase 1 to populate tool allowlists.")
 PYEOF
 
 echo -e "${GREEN}✓ MCP profile created: _mcp_profiles/${PROJECT_NAME}.json${NC}"
@@ -314,8 +292,8 @@ echo -e "${CYAN}=======================================${NC}"
 echo ""
 echo -e "Next steps:"
 echo -e "  1. ${YELLOW}Restart AG${NC} to activate new MCP connections"
-echo -e "  2. Open: ${CYAN}projects/${PROJECT_NAME}/${NC} in VS Code"
-echo -e "  3. ${YELLOW}Hit Refresh${NC} in the MCP panel (tasks.json auto-fires ag-switch)"
+echo -e "  2. Open: ${CYAN}projects/${PROJECT_NAME}/${PROJECT_NAME}.code-workspace${NC} in VS Code"
+echo -e "  3. ${YELLOW}Run ag-switch${NC} to load the MCP profile, then Hit Refresh in the MCP panel"
 echo -e "  4. Run BLAST Phase 1 (Blueprint)"
 echo -e "  5. Run ${CYAN}mcp-tool-manager${NC} skill to define tool allowlists for this project"
 if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
