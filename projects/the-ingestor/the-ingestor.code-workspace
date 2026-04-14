@@ -1,0 +1,7 @@
+{
+  "folders": [
+    { "path": "." },
+    { "path": "../../_skills", "name": "_skills" },
+    { "path": "../../_mcp_profiles", "name": "_mcp_profiles" }
+  ]
+}
