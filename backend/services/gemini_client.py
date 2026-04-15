@@ -13,7 +13,7 @@ import time
 from google import genai
 from google.genai import types
 
-MODEL = "gemini-2.5-pro"  # Blueprint spec
+MODEL = "gemini-3.0-pro"
 
 # ─── Prompt A — PDF / DOCX (verbatim from blueprint Route 0) ─────────────────
 SYSTEM_INSTRUCTION_A = "You are a Data Extractor. Your job is to read documents and extract key facts for a rental property."
