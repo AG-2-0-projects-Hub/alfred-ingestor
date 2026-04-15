@@ -9,7 +9,8 @@ SSE event format:
 """
 
 import json
-from fastapi import APIRouter
+import os
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -30,7 +31,7 @@ def _event(file: str, status: str, message: str = "") -> str:
 
 
 @router.post("/ingest")
-async def ingest(req: IngestRequest):
+async def ingest(req: IngestRequest, request: Request):
     property_id = req.property_id
 
     async def stream():
@@ -77,11 +78,20 @@ async def ingest(req: IngestRequest):
             supabase_client.update_status(property_id, "Ingest_Error")
             yield _event("(fatal)", "error", str(fatal))
 
+    # Explicitly set CORS origin on the streaming response.
+    # FastAPI's CORSMiddleware should handle this, but streaming responses can
+    # race the middleware header injection in some Render/proxy configurations.
+    origin = request.headers.get("origin", "")
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    if origin:
+        sse_headers["Access-Control-Allow-Origin"] = origin
+        sse_headers["Access-Control-Allow-Credentials"] = "true"
+
     return StreamingResponse(
         stream(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=sse_headers,
     )

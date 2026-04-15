@@ -8,9 +8,17 @@ load_dotenv()
 
 app = FastAPI(title="The Ingestor")
 
+# Parse FRONTEND_URL as comma-separated so multiple origins can be listed in
+# the Render env var (e.g. "https://alfred-ingestor.vercel.app,http://localhost:3000").
+# Strip trailing slashes so a misconfigured env var doesn't silently break CORS.
+_raw_origins = os.getenv("FRONTEND_URL", "http://localhost:3000")
+_origins = [u.strip().rstrip("/") for u in _raw_origins.split(",") if u.strip()]
+if not _origins:
+    _origins = ["http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
