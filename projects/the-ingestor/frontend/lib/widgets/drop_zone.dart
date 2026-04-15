@@ -44,7 +44,10 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
       setState(() => entry.success = true);
       widget.onFileResult(filename, true);
     } catch (e) {
-      setState(() => entry.success = false);
+      setState(() {
+        entry.success = false;
+        entry.error = e.toString();
+      });
       widget.onFileResult(filename, false);
     }
   }
@@ -134,6 +137,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
 class _FileUploadState {
   final String filename;
   bool? success;
+  String? error;
   _FileUploadState({required this.filename});
 }
 
@@ -143,28 +147,40 @@ class _FileChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = state.success == null
-        ? const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2))
-        : Icon(
-            state.success! ? Icons.check_circle : Icons.cancel,
-            size: 16,
-            color: state.success! ? Colors.green : Colors.red,
-          );
+    final Widget icon;
+    if (state.success == null) {
+      icon = const SizedBox(
+          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2));
+    } else if (state.success!) {
+      icon = const Icon(Icons.check_circle, size: 16, color: Colors.green);
+    } else {
+      icon = const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red);
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          icon,
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(state.filename,
-                style: const TextStyle(fontSize: 13),
-                overflow: TextOverflow.ellipsis),
+          Row(
+            children: [
+              icon,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(state.filename,
+                    style: const TextStyle(fontSize: 13),
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ],
           ),
+          if (state.success == false && state.error != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 24, top: 2, bottom: 2),
+              child: Text(
+                state.error!,
+                style: TextStyle(fontSize: 11, color: Colors.red.shade700),
+              ),
+            ),
         ],
       ),
     );
