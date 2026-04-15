@@ -3,6 +3,30 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## Lesson: mcp-tool-manager skill does not affect Claude Code's MCP config
+**Date:** 2026-04-15
+**Component:** MCP / Tool Management
+**Global Candidate: Yes**
+
+### Finding
+`mcp-tool-manager` edits `~/AG_master_files/_mcp_profiles/global.json`, which `ag-switch.sh` compiles into Gemini's config at `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`. It has no effect on Claude Code's MCP config, which lives in `C:\Users\San_8\.claude\settings.json` on the Windows host and is managed separately via the Claude Code MCP panel in the AG IDE.
+
+### Impact
+Invoking `mcp-tool-manager` from inside a Claude Code session to "activate" a Supabase server will appear to succeed (global.json is updated) but the tools will never appear in the current or any future Claude Code session — because the target config file is different.
+
+### Fix / Required Setup Step
+To make a Supabase (or any MCP server) available in Claude Code:
+1. Open the Claude Code MCP panel in AG (Windows side)
+2. Add the server entry manually — same format as global.json but written to `C:\Users\San_8\.claude\settings.json`
+3. Restart Claude Code / click Refresh
+
+This is a **one-time setup step per MCP server** — not something `mcp-tool-manager` can automate from the WSL side.
+
+### Workaround used this session
+Used the Supabase Management REST API directly (`api.supabase.com/v1/projects/{ref}/...`) with the access token from `global.json` to manage storage buckets and policies — fully equivalent to the MCP tool path.
+
+---
+
 ## Incident: FormatException: Invalid UTF-8 byte (at offset 41) — flutter run -d chrome
 **Date:** 2026-04-14  
 **Severity:** High  
