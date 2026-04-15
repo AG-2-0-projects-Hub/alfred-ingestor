@@ -16,6 +16,7 @@ class FileStatusList extends StatelessWidget {
         ...statuses.map((s) => _FileStatusRow(
               filename: s['file'] ?? '',
               status: s['status'] ?? '',
+              message: s['message'] ?? '',
             )),
       ],
     );
@@ -25,26 +26,44 @@ class FileStatusList extends StatelessWidget {
 class _FileStatusRow extends StatelessWidget {
   final String filename;
   final String status;
+  final String message;
 
-  const _FileStatusRow({required this.filename, required this.status});
+  const _FileStatusRow({
+    required this.filename,
+    required this.status,
+    this.message = '',
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _StatusIcon(status: status),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              filename,
-              style: const TextStyle(fontSize: 13),
-              overflow: TextOverflow.ellipsis,
-            ),
+          Row(
+            children: [
+              _StatusIcon(status: status),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  filename,
+                  style: const TextStyle(fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatusLabel(status: status),
+            ],
           ),
-          const SizedBox(width: 8),
-          _StatusLabel(status: status),
+          if (status == 'error' && message.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 28, top: 2),
+              child: Text(
+                message,
+                style: const TextStyle(fontSize: 11, color: Colors.red),
+              ),
+            ),
         ],
       ),
     );

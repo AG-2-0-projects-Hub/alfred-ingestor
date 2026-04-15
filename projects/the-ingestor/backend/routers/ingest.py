@@ -8,6 +8,7 @@ SSE event format:
 
 """
 
+import asyncio
 import json
 import os
 from fastapi import APIRouter, Request
@@ -35,36 +36,37 @@ async def ingest(req: IngestRequest, request: Request):
     property_id = req.property_id
 
     async def stream():
-        # 1. Upsert property row (belt-and-suspenders; frontend may have done this already)
-        supabase_client.insert_property(property_id, req.property_name, req.airbnb_url)
-        supabase_client.update_status(property_id, "Ingesting")
+        # 1. Upsert property row — run blocking I/O in a thread so the event loop stays free
+        await asyncio.to_thread(supabase_client.insert_property, property_id, req.property_name, req.airbnb_url)
+        await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
 
         # 2. List files
-        files = supabase_client.list_upload_files(property_id)
+        files = await asyncio.to_thread(supabase_client.list_upload_files, property_id)
         if not files:
             yield _event("(none)", "done", "No files found in storage.")
-            supabase_client.update_status(property_id, "Ingested")
+            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
             return
 
         # Emit queued for all files upfront
         for f in files:
             yield _event(f["name"], "queued")
 
-        # 3. Process sequentially
+        # 3. Process sequentially — each blocking call runs in a thread pool so
+        #    SSE events are flushed between files and the server stays responsive.
         try:
             for f in files:
                 name = f["name"]
                 yield _event(name, "processing")
                 try:
-                    data = supabase_client.download_file(property_id, name)
+                    data = await asyncio.to_thread(supabase_client.download_file, property_id, name)
                     sha = hash_guard.sha256_of(data)
 
                     if hash_guard.already_processed(sha):
                         yield _event(name, "skipped", "Duplicate — already ingested.")
                         continue
 
-                    markdown = file_processor.process_file(name, data)
-                    supabase_client.append_ingested_markdown(property_id, markdown)
+                    markdown = await asyncio.to_thread(file_processor.process_file, name, data)
+                    await asyncio.to_thread(supabase_client.append_ingested_markdown, property_id, markdown)
                     hash_guard.mark_processed(sha)
                     yield _event(name, "done")
 
@@ -72,10 +74,10 @@ async def ingest(req: IngestRequest, request: Request):
                     yield _event(name, "error", str(exc))
 
             # 4. Final status → Ingested
-            supabase_client.update_status(property_id, "Ingested")
+            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
 
         except Exception as fatal:
-            supabase_client.update_status(property_id, "Ingest_Error")
+            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
             yield _event("(fatal)", "error", str(fatal))
 
     # Explicitly set CORS origin on the streaming response.

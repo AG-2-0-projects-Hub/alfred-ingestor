@@ -118,12 +118,13 @@ class _IngestScreenState extends State<IngestScreen> {
   void _handleSseEvent(Map<String, dynamic> event) {
     final file = event['file'] as String? ?? '';
     final status = event['status'] as String? ?? '';
+    final message = event['message'] as String? ?? '';
     setState(() {
       final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
       if (idx >= 0) {
-        _fileStatuses[idx] = {'file': file, 'status': status};
+        _fileStatuses[idx] = {'file': file, 'status': status, 'message': message};
       } else {
-        _fileStatuses.add({'file': file, 'status': status});
+        _fileStatuses.add({'file': file, 'status': status, 'message': message});
       }
     });
   }
