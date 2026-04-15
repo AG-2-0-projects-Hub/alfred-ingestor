@@ -30,25 +30,32 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
   bool _isDragging = false;
   final List<_FileUploadState> _uploads = [];
 
+  /// Supabase Storage rejects keys with characters outside [A-Za-z0-9._\-/ ].
+  /// Replace anything else (e.g. `~`) with `_` so uploads always succeed.
+  String _sanitizeFilename(String filename) {
+    return filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
+  }
+
   Future<void> _uploadBytes(String filename, Uint8List bytes) async {
-    final entry = _FileUploadState(filename: filename);
+    final safeFilename = _sanitizeFilename(filename);
+    final entry = _FileUploadState(filename: safeFilename);
     setState(() => _uploads.add(entry));
 
     try {
-      final mime = lookupMimeType(filename) ?? 'application/octet-stream';
-      final path = '${widget.propertyId}/user_uploads/$filename';
+      final mime = lookupMimeType(safeFilename) ?? 'application/octet-stream';
+      final path = '${widget.propertyId}/user_uploads/$safeFilename';
       await Supabase.instance.client.storage
           .from('Property_assets')
           .uploadBinary(path, bytes,
               fileOptions: FileOptions(contentType: mime, upsert: true));
       setState(() => entry.success = true);
-      widget.onFileResult(filename, true);
+      widget.onFileResult(safeFilename, true);
     } catch (e) {
       setState(() {
         entry.success = false;
         entry.error = e.toString();
       });
-      widget.onFileResult(filename, false);
+      widget.onFileResult(safeFilename, false);
     }
   }
 
