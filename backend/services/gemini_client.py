@@ -229,7 +229,7 @@ def upload_file(data: bytes, filename: str, mime_type: str) -> str:
     response = client.files.upload(
         file=data,
         config=types.UploadFileConfig(
-            name=filename,
+            display_name=filename,
             mime_type=mime_type,
         ),
     )
