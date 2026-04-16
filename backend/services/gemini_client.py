@@ -8,12 +8,12 @@ and adapted for audio and tabular data — originals not present in any
 spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
 """
 
+import asyncio
 import os
-import time
 from google import genai
 from google.genai import types
 
-MODEL = "gemini-3.0-pro"
+MODEL = "gemini-2.5-pro"
 
 # ─── Prompt A — PDF / DOCX (verbatim from blueprint Route 0) ─────────────────
 SYSTEM_INSTRUCTION_A = "You are a Data Extractor. Your job is to read documents and extract key facts for a rental property."
@@ -223,83 +223,87 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
-def upload_file(data: bytes, filename: str, mime_type: str) -> str:
+async def upload_file(data: bytes, filename: str, mime_type: str) -> str:
     """Upload bytes to the Gemini File API. Returns the file URI."""
     client = _get_client()
-    response = client.files.upload(
-        file=data,
-        config=types.UploadFileConfig(
-            display_name=filename,
-            mime_type=mime_type,
-        ),
+    response = await asyncio.to_thread(
+        lambda: client.files.upload(
+            file=data,
+            config=types.UploadFileConfig(
+                display_name=filename,
+                mime_type=mime_type,
+            ),
+        )
     )
     # Wait until file is ACTIVE
     file_name = response.name
     for _ in range(30):
-        file_info = client.files.get(name=file_name)
+        file_info = await asyncio.to_thread(lambda: client.files.get(name=file_name))
         if file_info.state == types.FileState.ACTIVE:
             return file_info.uri
-        time.sleep(2)
+        await asyncio.sleep(2)
     raise TimeoutError(f"Gemini file {file_name} did not become ACTIVE in time.")
 
 
-def delete_file(uri: str) -> None:
+async def delete_file(uri: str) -> None:
     """Delete a file from the Gemini File API by URI."""
     client = _get_client()
     # Extract name from URI e.g. "https://generativelanguage.googleapis.com/v1beta/files/abc123"
     name = uri.rstrip("/").split("/")[-1]
     try:
-        client.files.delete(name=f"files/{name}")
+        await asyncio.to_thread(lambda: client.files.delete(name=f"files/{name}"))
     except Exception:
         pass  # Best-effort cleanup
 
 
-def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
+async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=[types.Content(role="user", parts=parts)],
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-        ),
+    response = await asyncio.to_thread(
+        lambda: client.models.generate_content(
+            model=MODEL,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+            ),
+        )
     )
     return response.text
 
 
-def process_with_prompt_a(file_uri: str, mime_type: str) -> str:
+async def process_with_prompt_a(file_uri: str, mime_type: str) -> str:
     """Prompt A: PDF uploaded to Gemini File API."""
     parts = [
         types.Part(text=USER_PROMPT_A),
         types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
     ]
-    return _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
+    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
-def process_with_prompt_a_text(extracted_text: str) -> str:
+async def process_with_prompt_a_text(extracted_text: str) -> str:
     """Prompt A: DOCX/DOC text extracted natively, sent as plain text."""
     parts = [types.Part(text=USER_PROMPT_A + "\n\n" + extracted_text)]
-    return _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
+    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
-def process_with_prompt_b(file_uri: str, mime_type: str) -> str:
+async def process_with_prompt_b(file_uri: str, mime_type: str) -> str:
     """Prompt B: Image uploaded to Gemini File API."""
     parts = [
         types.Part(text=USER_PROMPT_B),
         types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
     ]
-    return _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
+    return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
 
 
-def process_with_prompt_c(file_uri: str, mime_type: str) -> str:
+async def process_with_prompt_c(file_uri: str, mime_type: str) -> str:
     """Prompt C: Audio uploaded to Gemini File API."""
     parts = [
         types.Part(text=USER_PROMPT_C),
         types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
     ]
-    return _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
+    return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
 
 
-def process_with_prompt_d(table_text: str) -> str:
+async def process_with_prompt_d(table_text: str) -> str:
     """Prompt D: Sheets/CSV data read natively, sent as plain text."""
     parts = [types.Part(text=USER_PROMPT_D + "\n\n" + table_text)]
-    return _generate(SYSTEM_INSTRUCTION_D, USER_PROMPT_D, parts)
+    return await _generate(SYSTEM_INSTRUCTION_D, USER_PROMPT_D, parts)

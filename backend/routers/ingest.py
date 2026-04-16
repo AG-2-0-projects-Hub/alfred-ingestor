@@ -65,7 +65,7 @@ async def ingest(req: IngestRequest, request: Request):
                         yield _event(name, "skipped", "Duplicate — already ingested.")
                         continue
 
-                    markdown = await asyncio.to_thread(file_processor.process_file, name, data)
+                    markdown = await file_processor.process_file(name, data)
                     await asyncio.to_thread(supabase_client.append_ingested_markdown, property_id, markdown)
                     hash_guard.mark_processed(sha)
                     yield _event(name, "done")

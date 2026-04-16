@@ -43,60 +43,60 @@ def _ext(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
-def process_file(filename: str, data: bytes) -> str:
+async def process_file(filename: str, data: bytes) -> str:
     """Route file to the correct Gemini prompt. Returns Markdown."""
     ext = _ext(filename)
 
     if ext == "pdf":
-        return _process_via_file_api(filename, data, "pdf")
+        return await _process_via_file_api(filename, data, "pdf")
 
     if ext in _IMAGE_EXTS:
-        return _process_image(filename, data, ext)
+        return await _process_image(filename, data, ext)
 
     if ext in _AUDIO_EXTS:
-        return _process_audio(filename, data, ext)
+        return await _process_audio(filename, data, ext)
 
     if ext in _DOCX_EXTS:
-        return _process_docx(data)
+        return await _process_docx(data)
 
     if ext in _SHEET_EXTS:
-        return _process_sheet(filename, data, ext)
+        return await _process_sheet(filename, data, ext)
 
     # Fallback: treat as plain text → Prompt A
     text = data.decode("utf-8", errors="replace")
-    return gemini_client.process_with_prompt_a_text(text)
+    return await gemini_client.process_with_prompt_a_text(text)
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
 
-def _process_via_file_api(filename: str, data: bytes, ext: str) -> str:
+async def _process_via_file_api(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "application/octet-stream")
-    uri = gemini_client.upload_file(data, filename, mime)
+    uri = await gemini_client.upload_file(data, filename, mime)
     try:
-        return gemini_client.process_with_prompt_a(uri, mime)
+        return await gemini_client.process_with_prompt_a(uri, mime)
     finally:
-        gemini_client.delete_file(uri)
+        await gemini_client.delete_file(uri)
 
 
-def _process_image(filename: str, data: bytes, ext: str) -> str:
+async def _process_image(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "image/jpeg")
-    uri = gemini_client.upload_file(data, filename, mime)
+    uri = await gemini_client.upload_file(data, filename, mime)
     try:
-        return gemini_client.process_with_prompt_b(uri, mime)
+        return await gemini_client.process_with_prompt_b(uri, mime)
     finally:
-        gemini_client.delete_file(uri)
+        await gemini_client.delete_file(uri)
 
 
-def _process_audio(filename: str, data: bytes, ext: str) -> str:
+async def _process_audio(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "audio/webm")
-    uri = gemini_client.upload_file(data, filename, mime)
+    uri = await gemini_client.upload_file(data, filename, mime)
     try:
-        return gemini_client.process_with_prompt_c(uri, mime)
+        return await gemini_client.process_with_prompt_c(uri, mime)
     finally:
-        gemini_client.delete_file(uri)
+        await gemini_client.delete_file(uri)
 
 
-def _process_docx(data: bytes) -> str:
+async def _process_docx(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
     # Also grab table cells
@@ -106,13 +106,13 @@ def _process_docx(data: bytes) -> str:
             if cells:
                 paragraphs.append(" | ".join(cells))
     extracted = "\n\n".join(paragraphs)
-    return gemini_client.process_with_prompt_a_text(extracted)
+    return await gemini_client.process_with_prompt_a_text(extracted)
 
 
-def _process_sheet(filename: str, data: bytes, ext: str) -> str:
+async def _process_sheet(filename: str, data: bytes, ext: str) -> str:
     if ext == "csv":
         df = pd.read_csv(io.BytesIO(data))
     else:
         df = pd.read_excel(io.BytesIO(data))
     table_text = df.to_markdown(index=False) if hasattr(df, "to_markdown") else df.to_string(index=False)
-    return gemini_client.process_with_prompt_d(table_text)
+    return await gemini_client.process_with_prompt_d(table_text)

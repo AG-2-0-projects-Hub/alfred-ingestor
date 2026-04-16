@@ -44,14 +44,17 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
     setState(() => _isRecording = true);
   }
 
+  String _sanitizeFilename(String filename) =>
+      filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
+
   Future<void> _stop() async {
     setState(() => _isRecording = false);
     final path = await _recorder.stop();
     if (path == null) return;
 
     setState(() => _isUploading = true);
-    final filename =
-        'voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final filename = _sanitizeFilename(
+        'voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a');
     try {
       // On web, record returns a blob URL; read via XFile abstraction
       final bytes = await _readRecordingBytes(path);
