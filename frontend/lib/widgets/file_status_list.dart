@@ -56,7 +56,7 @@ class _FileStatusRow extends StatelessWidget {
               _StatusLabel(status: status),
             ],
           ),
-          if (status == 'error' && message.isNotEmpty)
+          if ((status == 'error' || status == 'timeout') && message.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 28, top: 2),
               child: Text(
@@ -91,6 +91,8 @@ class _StatusIcon extends StatelessWidget {
         return const Icon(Icons.skip_next, size: 18, color: Colors.orange);
       case 'error':
         return const Icon(Icons.error, size: 18, color: Colors.red);
+      case 'timeout':
+        return const Icon(Icons.timer_off, size: 18, color: Colors.orange);
       default:
         return const SizedBox(width: 18);
     }
@@ -109,6 +111,7 @@ class _StatusLabel extends StatelessWidget {
       'done' => ('Done', Colors.green),
       'skipped' => ('Skipped', Colors.orange),
       'error' => ('Error', Colors.red),
+      'timeout' => ('Timeout — try again', Colors.orange),
       _ => (status, Colors.grey),
     };
     return Text(label,

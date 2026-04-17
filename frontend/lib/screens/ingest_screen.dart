@@ -86,16 +86,27 @@ class _IngestScreenState extends State<IngestScreen> {
             });
 
       final response = await http.Client().send(request);
-      await for (final chunk in response.stream.transform(utf8.decoder)) {
-        for (final line in chunk.split('\n')) {
-          if (line.startsWith('data: ')) {
-            final raw = line.substring(6).trim();
-            if (raw.isEmpty) continue;
-            try {
-              _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
-            } catch (_) {}
+      try {
+        // With heartbeats every 10 s, a 90 s timeout means the backend has been
+        // completely silent for 9 consecutive heartbeat windows — treat as dead.
+        await for (final chunk in response.stream
+            .transform(utf8.decoder)
+            .timeout(const Duration(seconds: 90),
+                onTimeout: (sink) => sink.close())) {
+          for (final line in chunk.split('\n')) {
+            if (line.startsWith('data: ')) {
+              final raw = line.substring(6).trim();
+              if (raw.isEmpty) continue;
+              try {
+                _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
+              } catch (_) {}
+            }
           }
         }
+      } finally {
+        // Any file still queued or processing when the stream ends (normally,
+        // via timeout, or via exception) never received a terminal event.
+        _markPendingFilesAsTimeout();
       }
 
       // Fetch ingested markdown from Supabase once stream ends.
@@ -119,12 +130,32 @@ class _IngestScreenState extends State<IngestScreen> {
     final file = event['file'] as String? ?? '';
     final status = event['status'] as String? ?? '';
     final message = event['message'] as String? ?? '';
+    // Heartbeats are keepalive signals — they reset the stream timeout but
+    // must not overwrite the displayed file status (keep spinner showing).
+    if (status == 'heartbeat' || status == 'stream_closed') return;
     setState(() {
       final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
       if (idx >= 0) {
         _fileStatuses[idx] = {'file': file, 'status': status, 'message': message};
       } else {
         _fileStatuses.add({'file': file, 'status': status, 'message': message});
+      }
+    });
+  }
+
+  /// Mark any file still queued or processing as timed out.
+  /// Called whenever the SSE stream ends — normally, via timeout, or on error.
+  void _markPendingFilesAsTimeout() {
+    setState(() {
+      for (var i = 0; i < _fileStatuses.length; i++) {
+        final s = _fileStatuses[i]['status'];
+        if (s == 'queued' || s == 'processing') {
+          _fileStatuses[i] = {
+            'file': _fileStatuses[i]['file']!,
+            'status': 'timeout',
+            'message': 'No response — try again',
+          };
+        }
       }
     });
   }
