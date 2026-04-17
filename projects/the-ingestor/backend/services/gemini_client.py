@@ -227,23 +227,21 @@ def _get_client() -> genai.Client:
 async def upload_file(data: bytes, filename: str, mime_type: str) -> str:
     """Upload bytes to the Gemini File API. Returns the file URI."""
     client = _get_client()
-    response = await asyncio.to_thread(
-        lambda: client.files.upload(
-            file=io.BytesIO(data),
-            config=types.UploadFileConfig(
-                display_name=filename,
-                mime_type=mime_type,
-            ),
-        )
+    response = await client.aio.files.upload(
+        file=io.BytesIO(data),
+        config=types.UploadFileConfig(
+            display_name=filename,
+            mime_type=mime_type,
+        ),
     )
     # Wait until file is ACTIVE
     file_name = response.name
     for _ in range(30):
-        file_info = await asyncio.to_thread(lambda: client.files.get(name=file_name))
+        file_info = await client.aio.files.get(name=file_name)
         if file_info.state == types.FileState.ACTIVE:
             return file_info.uri
         await asyncio.sleep(2)
-    raise TimeoutError(f"Gemini file {file_name} did not become ACTIVE in time.")
+    raise RuntimeError(f"Gemini file {file_name} did not become ACTIVE in time.")
 
 
 async def delete_file(uri: str) -> None:
@@ -252,21 +250,19 @@ async def delete_file(uri: str) -> None:
     # Extract name from URI e.g. "https://generativelanguage.googleapis.com/v1beta/files/abc123"
     name = uri.rstrip("/").split("/")[-1]
     try:
-        await asyncio.to_thread(lambda: client.files.delete(name=f"files/{name}"))
+        await client.aio.files.delete(name=f"files/{name}")
     except Exception:
         pass  # Best-effort cleanup
 
 
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
-    response = await asyncio.to_thread(
-        lambda: client.models.generate_content(
-            model=MODEL,
-            contents=[types.Content(role="user", parts=parts)],
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-            ),
-        )
+    response = await client.aio.models.generate_content(
+        model=MODEL,
+        contents=[types.Content(role="user", parts=parts)],
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
     )
     return response.text
 
