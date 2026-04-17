@@ -4,7 +4,7 @@ POST /api/ingest — triggers sequential file processing over SSE.
 Payload: { "property_id": "<ID>" }
 
 SSE event format:
-  data: {"file": "<name>", "status": "queued"|"processing"|"done"|"skipped"|"error", "message": "..."}
+  data: {"file": "<name>", "status": "queued"|"processing"|"heartbeat"|"done"|"skipped"|"error", "message": "..."}
 
 """
 
@@ -36,49 +36,74 @@ async def ingest(req: IngestRequest, request: Request):
     property_id = req.property_id
 
     async def stream():
-        # 1. Upsert property row — run blocking I/O in a thread so the event loop stays free
-        await asyncio.to_thread(supabase_client.insert_property, property_id, req.property_name, req.airbnb_url)
-        await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
-
-        # 2. List files
-        files = await asyncio.to_thread(supabase_client.list_upload_files, property_id)
-        if not files:
-            yield _event("(none)", "done", "No files found in storage.")
-            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
-            return
-
-        # Emit queued for all files upfront
-        for f in files:
-            yield _event(f["name"], "queued")
-
-        # 3. Process sequentially — each blocking call runs in a thread pool so
-        #    SSE events are flushed between files and the server stays responsive.
+        # Track the in-flight processing task so we can cancel it on disconnect.
+        current_task: asyncio.Task | None = None
         try:
+            # 1. Upsert property row — run blocking I/O in a thread so the event loop stays free
+            await asyncio.to_thread(supabase_client.insert_property, property_id, req.property_name, req.airbnb_url)
+            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
+
+            # 2. List files
+            files = await asyncio.to_thread(supabase_client.list_upload_files, property_id)
+            if not files:
+                yield _event("(none)", "done", "No files found in storage.")
+                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
+                return
+
+            # Emit queued for all files upfront
             for f in files:
-                name = f["name"]
-                yield _event(name, "processing")
-                try:
-                    data = await asyncio.to_thread(supabase_client.download_file, property_id, name)
-                    sha = hash_guard.sha256_of(data)
+                yield _event(f["name"], "queued")
 
-                    if hash_guard.already_processed(sha):
-                        yield _event(name, "skipped", "Duplicate — already ingested.")
-                        continue
+            # 3. Process sequentially — each blocking call runs in a thread pool so
+            #    SSE events are flushed between files and the server stays responsive.
+            try:
+                for f in files:
+                    name = f["name"]
+                    yield _event(name, "processing")
+                    try:
+                        data = await asyncio.to_thread(supabase_client.download_file, property_id, name)
+                        sha = hash_guard.sha256_of(data)
 
-                    markdown = await file_processor.process_file(name, data)
-                    await asyncio.to_thread(supabase_client.append_ingested_markdown, property_id, markdown)
-                    hash_guard.mark_processed(sha)
-                    yield _event(name, "done")
+                        if hash_guard.already_processed(sha):
+                            yield _event(name, "skipped", "Duplicate — already ingested.")
+                            continue
 
-                except Exception as exc:
-                    yield _event(name, "error", str(exc))
+                        # Wrap processing in a task so we can yield heartbeat events
+                        # every 10 s while Gemini runs. asyncio.shield protects the task
+                        # from being cancelled by wait_for's internal timeout logic.
+                        current_task = asyncio.create_task(
+                            file_processor.process_file(name, data)
+                        )
+                        while not current_task.done():
+                            try:
+                                await asyncio.wait_for(
+                                    asyncio.shield(current_task), timeout=10
+                                )
+                            except asyncio.TimeoutError:
+                                yield _event(name, "heartbeat", "Still processing...")
+                        markdown = await current_task  # re-raises if the task failed
+                        current_task = None
 
-            # 4. Final status → Ingested
-            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
+                        await asyncio.to_thread(supabase_client.append_ingested_markdown, property_id, markdown)
+                        hash_guard.mark_processed(sha)
+                        yield _event(name, "done")
 
-        except Exception as fatal:
-            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
-            yield _event("(fatal)", "error", str(fatal))
+                    except Exception as exc:
+                        yield _event(name, "error", str(exc))
+
+                # 4. Final status → Ingested
+                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
+
+            except Exception as fatal:
+                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
+                yield _event("(fatal)", "error", str(fatal))
+
+        except BaseException:
+            # CancelledError / GeneratorExit — cancel any in-flight Gemini task so it
+            # doesn't keep a thread-pool thread alive after the client disconnects.
+            if current_task and not current_task.done():
+                current_task.cancel()
+            raise
 
     # Explicitly set CORS origin on the streaming response.
     # FastAPI's CORSMiddleware should handle this, but streaming responses can
