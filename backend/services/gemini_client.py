@@ -9,6 +9,7 @@ spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
 """
 
 import asyncio
+import io
 import os
 from google import genai
 from google.genai import types
@@ -228,7 +229,7 @@ async def upload_file(data: bytes, filename: str, mime_type: str) -> str:
     client = _get_client()
     response = await asyncio.to_thread(
         lambda: client.files.upload(
-            file=data,
+            file=io.BytesIO(data),
             config=types.UploadFileConfig(
                 display_name=filename,
                 mime_type=mime_type,
