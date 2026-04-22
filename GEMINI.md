@@ -18,7 +18,7 @@
 **Host:** Windows 11 (Santohub)
 **Runtime:** WSL2 — Ubuntu 24.04
 **Workspace root:** `~/AG_master_files/` (WSL2)
-**Windows access path:** `\\wsl.localhost\Ubuntu-24.04\home\santoskoy\AG_master_files`
+**Windows access path:** `\\wsl.localhost\Ubuntu\home\santoskoy\AG_master_files`
 **MCP config (source of truth):** `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`
 Add all new MCPs here via the AG MCP panel as always. Never edit directly for project scoping.
 
@@ -35,6 +35,15 @@ Declares which MCPs a project needs. No API keys. Committed to git.
 - Never use absolute Linux paths (`/home/...`, `/usr/...`)
 - Never search Windows drives (`C:\`, `D:\`)
 - When in doubt, paths start from `~/AG_master_files/`
+- **Path format rule:** Never use `/Ubuntu/home/...` as a file path — this 
+  hallucination creates files on the Windows C: drive in a ghost `C:\Ubuntu` 
+  folder, not in WSL2. 
+  - **Valid formats:** relative paths from workspace root (preferred), or 
+    `~/AG_master_files/` (bash). 
+  - **Windows/UNC format:** `\\wsl.localhost\Ubuntu\home\santoskoy\AG_master_files\` 
+    is valid for IDE access but should not be used in bash commands.
+  - After any file creation, verify existence immediately using native IDE 
+    filesystem tools (do not use `ls` or terminal commands).
 - **Shell Rule:** Claude's shell is non-interactive — never assume `.bashrc`-loaded tools are visible without symlinks.
 
 **System map:** If context is lost or architecture is unclear, read `_global_lessons/AG_SYSTEM_MAP.md`
@@ -249,6 +258,8 @@ folder matches the task domain, read its SKILL.md and follow it.
 Skills are the source of truth for their domain — do not proceed without reading them first.
 **Global Skills Path Rule:** You must read from the absolute path `~/AG_master_files/_skills/` instead of relying on local project symlinks. Do not attempt to use `_skills` symlinks inside a project folder.
 
+**Mandatory Audit Rule:** Any skill from outside `_skills/_scanner/trusted-repos.md` MUST pass `skill-auditor` before install. No exceptions.
+
 ---
 
 ## 11. Shared Resources (Single Source of Truth)
@@ -323,13 +334,33 @@ When a session begins and a project folder is open:
 
 ---
 
+## 15. Git Push Protocol (User Executed)
+
+Due to terminal reliability constraints (see Global Lessons 2026-04-09), **the agent must never execute git pushes autonomously**. Instead, the agent must prompt the user to execute the following in their external WSL2 terminal:
+
+* **When working in a project folder:**
+  Never use plain `git push` — this only pushes to `origin` (AG_master_files) and silently misses the project-specific remote.
+  **Command to provide to user:** 
+  `git subtree push --prefix=projects/[project-name] [remote-name] main`
+  *(Note: Remote name must be verified first)*
+
+* **When working at AG_master_files root:** 
+  Plain `git push` is correct — this is the intended origin for global config, protocols, and skills.
+
+* **Verification:**
+  After the user pushes in either context, instruct the user to verify success by confirming the remote SHA matches their local SHA (`git log --oneline -1` vs the remote's last commit). If the push is reported as successful but the SHA is unverified, treat the deployment as failed.
+
+---
+
 ## Document Version & Maintenance
 
-**Version:** 3.2
-**Last Updated:** 2026-03-01
+**Version:** 3.4
+**Last Updated:** 2026-04-22
 **Review Cycle:** Update when operational patterns reveal new failure modes or needed constraints.
 
 ### Version History
+* **v3.4 (2026-04-22):** Added Section 15 (Git Push Protocol) to prevent autonomous git execution loops and enforce subtree pushes.
+* **v3.3 (2026-04-22):** Added WSL2 path format rule to Section 2, corrected UNC path reference.
 * **v3.2 (2026-03-01):** MCP Profile System added (Section 14), MCP config references corrected in Sections 2 and 4 to reflect the three-layer architecture: mcp_config.json (source of truth) → global.json (auto-synced mirror) → [project].json (scoped profile).
 * **v3.1 (2026-03-01):** Updated MCP config paths in Section 2, added global.json sync rule in Section 13.
 * **v3.0 (2026-03-01):** Added Section 14 — Session Start Protocol.

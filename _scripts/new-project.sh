@@ -140,6 +140,9 @@ EOF
 cat > "$PROJECT_DIR/QUICKSTART.md" << EOF
 # ${PROJECT_NAME} — Quickstart
 
+## How ag-switch.sh Works
+AG-Switch dynamically updates your AI tools (MCP profiles) based on your current project and task. It ensures that Gemini and Claude Code only have access to the specific integrations, APIs, and databases meant for this project, keeping the AI focused and context isolated.
+
 ## Switch MCP Profile
 Activates the right tools for your current task. Run this at the start of every session or when switching tasks.
 \`\`\`
@@ -154,6 +157,16 @@ Run these in order at the start of a new project:
 1. Tell Gemini: "Run BLAST Phase 1" — defines stack, schema, and project domains
 2. Tell Gemini: "Run the Skill Scanner" — finds the most relevant skills for this project
 3. Tell Gemini: "Run mcp-tool-manager" — populates tool allowlists in the MCP profile
+
+## Project Kickoff Instructions
+This project includes a mandatory 6-step kickoff sequence to ensure a stable progression from idea to implementation. 
+See the local \`PROJECT_KICKOFF.md\` for the full protocol. The summary is:
+1. **Brainstorm & Plan**: Tell Gemini to figure out the mechanical Logic Digest.
+2. **BLAST Phase 1**: Tell Gemini to "Run BLAST Phase 1" to define the tech stack and data schema.
+3. **Skill Scanner**: Tell Gemini to "Run the skill scanner" to pull in relevant \`_skills\`.
+4. **Local Law**: Gemini populates \`CLAUDE.md\` with the approved stack/schema.
+5. **Implementation Kickoff**: Gemini creates \`CLAUDE_DELEGATION_PHASES_1.md\` for Claude Code.
+6. **Session End**: Update \`CONTEXT.md\`.
 
 ## Available Skills
 Browse the \`_skills/\` folder in this workspace to see all available global skills.
@@ -182,7 +195,7 @@ cat > "$PROJECT_DIR/${PROJECT_NAME}.code-workspace" << EOF
 EOF
 
 echo -e "${GREEN}✓ Created projects/${PROJECT_NAME}/${NC}"
-echo -e "${GREEN}✓ CLAUDE.md, CONTEXT.md, QUICKSTART.md, lessons.md populated${NC}"
+echo -e "${GREEN}✓ CLAUDE.md, CONTEXT.md, QUICKSTART.md, PROJECT_KICKOFF.md populated${NC}"
 
 # --- Step 4: Register scoped Supabase MCP in mcp_config.json ---
 if [[ -n "$SUPABASE_PROJECT_REF" ]]; then
@@ -245,6 +258,18 @@ PYEOF
       echo -e "${GREEN}✓ Added '${MCP_NAME}' to mcp_config.json${NC}"
     fi
   fi
+fi
+
+# --- Step 4b: Set up project subtree remote ---
+echo ""
+read -p "GitHub remote URL for this project (leave blank to skip): " REMOTE_URL
+
+if [[ -n "$REMOTE_URL" ]]; then
+  cd "$AG_ROOT"
+  git remote add "$PROJECT_NAME" "$REMOTE_URL"
+  echo -e "${GREEN}✓ Remote '${PROJECT_NAME}' added: ${REMOTE_URL}${NC}"
+  echo -e "${YELLOW}Push when ready with:${NC}"
+  echo -e "  git subtree push --prefix=projects/${PROJECT_NAME} ${PROJECT_NAME} main"
 fi
 
 # --- Step 5: Generate MCP profile (named profiles structure) ---

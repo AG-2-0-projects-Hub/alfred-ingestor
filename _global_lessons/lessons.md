@@ -71,3 +71,28 @@ those tools per session, leaving all other projects unaffected.
 **Impact:** Prevents getting stuck in execution loops and avoids incorrect fixes like disabling workspace validation.
 **Workaround:** The user should run git and bash commands directly in the WSL2 terminal outside of Antigravity.
 **Global Candidate:** Yes
+
+## [2026-04-22] — Gemini file creation without disk write verification
+
+**Context:** Gemini creating files during skill installation and session work
+**Discovery:** Gemini opens files in editor tabs without confirming the write 
+succeeded. Files appear "created" but may never exist on disk — especially 
+after a session crash/recovery where writes silently go to temp buffers.
+**Impact:** Always verify file creation immediately after any file creation task 
+using native IDE filesystem tools (do not use `ls` or terminal commands). If 
+the file doesn't appear in the directory listing — it doesn't exist. A file 
+visible in an editor tab is not proof of disk write.
+**Global Candidate:** Yes — applies to every session, every project.
+
+---
+
+## [2026-04-22] — Post-crash session write failures are silent
+
+**Context:** AG session crashed and recovered mid-work
+**Discovery:** After an AG crash and recovery, filesystem write tools silently 
+write to temporary buffers instead of disk. No error is thrown. The agent 
+reports success. Files do not exist.
+**Impact:** After any AG crash — do not attempt to continue the session. 
+Kill AG entirely and restart fresh. Any "writes" after a crash recovery 
+should be treated as unverified until confirmed with native filesystem tools.
+**Global Candidate:** Yes — applies to every session, every project.
