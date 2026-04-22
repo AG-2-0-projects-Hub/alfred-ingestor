@@ -1,11 +1,11 @@
 # AG_SYSTEM_MAP.md
-**Version:** 1.1 | **Created:** 2026-03-01 | **Updated:** 2026-03-04 | **Status:** Current state — post-AG-Improvement-Roadmap-v1.1
+**Version:** 1.2 | **Created:** 2026-03-01 | **Updated:** 2026-04-22 | **Status:** Current state — post-troubleshooting-session
 
 > **Purpose:** Context dump for broken or fresh AG sessions. Contains the full architecture, config, paths, and logic of the AG environment as of AG Improvement Roadmap v1.1 completion. Drop this into any session that has lost context.
 >
 > **Storage:** `~/AG_master_files/_global_lessons/AG_SYSTEM_MAP.md` — load only when context is lost or architecture is unclear. Not loaded in normal sessions.
 >
-> **Governing document:** `GEMINI.md` v3.2 is the law. This document describes; GEMINI.md prescribes.
+> **Governing document:** `GEMINI.md` v3.4 is the law. This document describes; GEMINI.md prescribes.
 
 ---
 
@@ -67,11 +67,11 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 ## 3. File System Architecture
 
 **WSL2 root:** `~/AG_master_files/`
-**Windows access path:** `\\wsl.localhost\Ubuntu-24.04\home\santoskoy\AG_master_files`
+**Windows access path:** `\\wsl.localhost\Ubuntu\home\santoskoy\AG_master_files`
 
 ```
 ~/AG_master_files/
-├── GEMINI.md                              # The Constitution — v3.2 — global law for all sessions
+├── GEMINI.md                              # The Constitution — v3.4 — global law for all sessions
 ├── CLAUDE.md                              # Claude Code operating rules — extends GEMINI.md
 ├── AGENTS.md                              # Agent Manager path resolution anchor
 
@@ -123,7 +123,7 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 
 ---
 
-## 4. The Constitution Layer (GEMINI.md v3.2)
+## 4. The Constitution Layer (GEMINI.md v3.4)
 
 **What it governs:** All AG sessions, all projects, all agents. Project-level `CLAUDE.md` files may override specific rules locally but may never contradict safety or destructive operation protocols.
 
@@ -139,6 +139,7 @@ Both point to Python 3.12. `python` command created via symlink — both work id
 | Skills First | Scan `_skills/` before any task — read matching `SKILL.md` and follow it |
 | Answer First | Do not execute unrequested actions — propose, wait for confirmation |
 | Workspace Boundary | AG never touches anything outside `~/AG_master_files/` — system-wide changes flagged to user, never executed autonomously |
+| Git Push | Never execute git pushes autonomously — prompt user with correct subtree command. See Section 15 |
 
 **Promotion hierarchy (lessons):**
 
@@ -327,6 +328,7 @@ bash ~/AG_master_files/_scripts/new-project.sh
 4. Creates `.vscode/tasks.json` to auto-fire `ag-switch.sh` on folder open
 5. Creates `_mcp/project_mcps.md` and `src/` directory
 6. If Supabase: prompts for `project_ref`, inherits access token from global entry, registers scoped MCP in `mcp_config.json`
+6b. Prompts for GitHub remote URL for the project — if provided, adds it as a named git remote scoped to this project for subtree pushes
 7. Generates `_mcp_profiles/[project].json` with selected MCPs
 8. Commits and pushes to GitHub automatically
 
@@ -376,6 +378,7 @@ See `_protocols/PROJECT_KICKOFF.md` for the full mandatory 6-step sequence. Summ
 | `alfred` | ⬜ Pending migration | Own workspace, own document set — dedicated session required |
 | `scraper` | ✅ Active | Airbnb scraper project — Python backend, Flutter frontend |
 | `claude-delegation-test` | ✅ Scaffold only | Verification project for AG Roadmap v1.1 — tests new infra, local only |
+| `the-ingestor` | ✅ Active | Alfred ingestor micro-project — own subtree remote `alfred-ingestor` at `github.com/AG-2-0-projects-Hub/alfred-ingestor` |
 
 Alfred is treated as an independent project. Migration involves: copy into `projects/alfred/`, align its `CLAUDE.md` with current GEMINI.md rules, review agent team against `_protocols/AGENT_TEAM.md`, update `CONTEXT.md`, promote any global lessons candidates.
 
@@ -401,6 +404,8 @@ Alfred is treated as an independent project. Migration involves: copy into `proj
 | 14 | Flutter MCP 404 — `@flutter/mcp` does not exist on npm | Flutter MCP is a Dart SDK command — use `"command": "wsl", "args": ["dart", "mcp-server"]` | Never search npm for Flutter/Dart MCP; check `docs.flutter.dev/ai/mcp-server` for the canonical config |
 | 15 | Pinecone MCP 404 — `@mcp-pinecone/server` does not exist | Correct official package is `@pinecone-database/mcp` | Always verify npm package names against the official GitHub repo before adding to `mcp_config.json` |
 | 16 | `dart mcp-server` not found in non-interactive shell despite `.bashrc` PATH | Create symlink: `sudo ln -sf /usr/lib/dart/bin/dart /usr/local/bin/dart` | Run dart symlink immediately after installing Dart SDK via apt |
+| 17 | Gemini "creates" files visible in editor tab but not on disk | Verify file existence immediately after creation using native IDE filesystem tools — not `ls` | A file visible in an editor tab is not proof of disk write |
+| 18 | After AG crash/recovery, filesystem writes silently go to temp buffers — no error thrown | Kill AG entirely and restart fresh — do not continue a recovered session | Any writes after a crash recovery must be verified with native filesystem tools before trusting |
 
 ---
 
@@ -412,10 +417,15 @@ Alfred is treated as an independent project. Migration involves: copy into `proj
 # Start:
 cd ~/AG_master_files && git pull
 
-# End:
+# End (AG_master_files root — plain push is correct):
 git add .
 git commit -m "Session: [description of what was done]"
 git push
+
+# End (inside a project folder — always subtree push, user executes):
+# Agent provides this command, user runs it in external WSL2 terminal:
+git subtree push --prefix=projects/[project-name] [remote-name] main
+# Then verify remote SHA matches local before treating as complete
 ```
 
 ### Starting a New Project
