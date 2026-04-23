@@ -100,6 +100,16 @@ async def ingest(req: IngestRequest, request: Request):
                     await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
                     return  # REQ-28: abort — do not process files
 
+                # Persist scraped_markdown from ingestor side (REQ-27 reliability —
+                # scraper also writes this, but its Supabase creds may be unset)
+                if scraped_markdown:
+                    try:
+                        await asyncio.to_thread(
+                            supabase_client.save_scraped_markdown, property_id, scraped_markdown
+                        )
+                    except Exception as exc:
+                        print(f"save_scraped_markdown failed (non-fatal): {exc}")
+
                 # Upload hero image (non-fatal on failure) (REQ-18)
                 thumbnail_url = _parse_thumbnail_url(scraped_markdown)
                 if thumbnail_url:

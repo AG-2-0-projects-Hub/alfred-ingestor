@@ -44,7 +44,7 @@ def get_canonical_property(airbnb_url: str) -> dict | None:
         .maybe_single()
         .execute()
     )
-    return result.data or None
+    return result.data if result else None
 
 
 def update_status(property_id: str, status: str) -> None:
@@ -52,6 +52,14 @@ def update_status(property_id: str, status: str) -> None:
     client = get_client()
     client.table("properties").update(
         {"status": status, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
+def save_scraped_markdown(property_id: str, scraped_markdown: str) -> None:
+    """Write scraped_markdown to the property row. Called by ingestor after scraper response. (REQ-27 reliability)"""
+    client = get_client()
+    client.table("properties").update(
+        {"scraped_markdown": scraped_markdown, "updated_at": _now()}
     ).eq("id", property_id).execute()
 
 
