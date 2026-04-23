@@ -14,11 +14,18 @@ const _supportedExtensions = [
 
 class DropZoneWidget extends StatefulWidget {
   final String propertyId;
+
+  /// Called immediately when a supported file is selected (before upload completes).
+  /// Used by IngestScreen to add the file to the "Files to Ingest" list (REQ-13, REQ-15).
+  final void Function(String filename) onFileAdded;
+
+  /// Called after the upload attempt completes with success/failure.
   final void Function(String filename, bool success) onFileResult;
 
   const DropZoneWidget({
     super.key,
     required this.propertyId,
+    required this.onFileAdded,
     required this.onFileResult,
   });
 
@@ -28,18 +35,14 @@ class DropZoneWidget extends StatefulWidget {
 
 class _DropZoneWidgetState extends State<DropZoneWidget> {
   bool _isDragging = false;
-  final List<_FileUploadState> _uploads = [];
+  String? _unsupportedError;
 
-  /// Supabase Storage rejects keys with characters outside [A-Za-z0-9._\-/ ].
-  /// Replace anything else (e.g. `~`) with `_` so uploads always succeed.
-  String _sanitizeFilename(String filename) {
-    return filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
-  }
+  String _sanitizeFilename(String filename) =>
+      filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
 
   Future<void> _uploadBytes(String filename, Uint8List bytes) async {
     final safeFilename = _sanitizeFilename(filename);
-    final entry = _FileUploadState(filename: safeFilename);
-    setState(() => _uploads.add(entry));
+    widget.onFileAdded(safeFilename); // notify IngestScreen immediately (REQ-15)
 
     try {
       final mime = lookupMimeType(safeFilename) ?? 'application/octet-stream';
@@ -48,18 +51,14 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
           .from('Property_assets')
           .uploadBinary(path, bytes,
               fileOptions: FileOptions(contentType: mime, upsert: true));
-      setState(() => entry.success = true);
       widget.onFileResult(safeFilename, true);
     } catch (e) {
-      setState(() {
-        entry.success = false;
-        entry.error = e.toString();
-      });
       widget.onFileResult(safeFilename, false);
     }
   }
 
   Future<void> _pickFiles() async {
+    setState(() => _unsupportedError = null);
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: true,
@@ -80,11 +79,21 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropTarget(
-          onDragEntered: (_) => setState(() => _isDragging = true),
+          onDragEntered: (_) => setState(() {
+            _isDragging = true;
+            _unsupportedError = null;
+          }),
           onDragExited: (_) => setState(() => _isDragging = false),
           onDragDone: (details) async {
             setState(() => _isDragging = false);
             for (final file in details.files) {
+              final ext = file.name.split('.').last.toLowerCase();
+              if (!_supportedExtensions.contains(ext)) {
+                // REQ-09: reject unsupported types inline, do NOT upload
+                setState(() =>
+                    _unsupportedError = '${file.name} — unsupported file type');
+                continue;
+              }
               final bytes = await file.readAsBytes();
               await _uploadBytes(file.name, Uint8List.fromList(bytes));
             }
@@ -93,7 +102,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
             onTap: _pickFiles,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              height: 140,
+              height: 120,
               decoration: BoxDecoration(
                 color: _isDragging
                     ? Colors.indigo.shade50
@@ -110,86 +119,39 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                 children: [
                   Icon(
                     Icons.cloud_upload_outlined,
-                    size: 40,
+                    size: 36,
                     color: _isDragging ? Colors.indigo : Colors.grey,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     _isDragging
                         ? 'Drop files here'
-                        : 'Drag & drop files or tap to browse',
+                        : 'Drag & drop or tap to browse',
                     style: TextStyle(
-                        color: _isDragging ? Colors.indigo : Colors.grey.shade600),
+                        color: _isDragging
+                            ? Colors.indigo
+                            : Colors.grey.shade600),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
-                    'PDF | DOCX | Images | Sheets | Audio',
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade500),
+                    'PDF · DOCX · Images · Sheets · Audio',
+                    style:
+                        TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
                 ],
               ),
             ),
           ),
         ),
-        if (_uploads.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          ..._uploads.map((u) => _FileChip(state: u)),
-        ],
-      ],
-    );
-  }
-}
-
-class _FileUploadState {
-  final String filename;
-  bool? success;
-  String? error;
-  _FileUploadState({required this.filename});
-}
-
-class _FileChip extends StatelessWidget {
-  final _FileUploadState state;
-  const _FileChip({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget icon;
-    if (state.success == null) {
-      icon = const SizedBox(
-          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2));
-    } else if (state.success!) {
-      icon = const Icon(Icons.check_circle, size: 16, color: Colors.green);
-    } else {
-      icon = const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red);
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              icon,
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(state.filename,
-                    style: const TextStyle(fontSize: 13),
-                    overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
-          if (state.success == false && state.error != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 24, top: 2, bottom: 2),
-              child: Text(
-                state.error!,
-                style: TextStyle(fontSize: 11, color: Colors.red.shade700),
-              ),
+        if (_unsupportedError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _unsupportedError!,
+              style: TextStyle(fontSize: 12, color: Colors.red.shade700),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }

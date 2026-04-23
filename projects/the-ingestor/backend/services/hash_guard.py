@@ -1,38 +1,18 @@
-import hashlib
-import os
+"""
+File fingerprinting using the properties.file_fingerprints JSONB column.
+Format: { filename: byte_size_as_int }
 
-# Simple in-memory store per process. For a production restart-safe guard,
-# persist hashes to a Supabase table or Redis.
-_processed: set[str] = set()
-
-_GUARD_FILE = os.path.join(os.path.dirname(__file__), ".processed_hashes")
+file_status() is a pure function — callers own the Supabase I/O.
+"""
 
 
-def _load() -> None:
-    if os.path.exists(_GUARD_FILE):
-        with open(_GUARD_FILE) as f:
-            for line in f:
-                h = line.strip()
-                if h:
-                    _processed.add(h)
-
-
-def _persist(sha: str) -> None:
-    with open(_GUARD_FILE, "a") as f:
-        f.write(sha + "\n")
-
-
-_load()
-
-
-def sha256_of(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def already_processed(sha: str) -> bool:
-    return sha in _processed
-
-
-def mark_processed(sha: str) -> None:
-    _processed.add(sha)
-    _persist(sha)
+def file_status(fingerprints: dict, filename: str, size: int) -> str:
+    """
+    Returns:
+      'skip'   — identical name AND size already recorded (REQ-10)
+      'update' — same name, different size (REQ-11)
+      'new'    — first time this filename appears for the property (REQ-12)
+    """
+    if filename not in fingerprints:
+        return "new"
+    return "skip" if fingerprints[filename] == size else "update"
