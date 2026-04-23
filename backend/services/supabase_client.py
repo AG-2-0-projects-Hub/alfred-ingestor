@@ -41,7 +41,7 @@ def get_canonical_property(airbnb_url: str) -> dict | None:
         client.table("properties")
         .select("id, status, name")
         .eq("airbnb_url", airbnb_url)
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     return result.data or None
@@ -81,7 +81,7 @@ def get_file_fingerprints(property_id: str) -> dict:
         client.table("properties")
         .select("file_fingerprints")
         .eq("id", property_id)
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     return (result.data or {}).get("file_fingerprints") or {}
