@@ -9,16 +9,13 @@ class FileStatusList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text('File Processing',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ...statuses.map((s) => _FileStatusRow(
-              filename: s['file'] ?? '',
-              status: s['status'] ?? '',
-              message: s['message'] ?? '',
-            )),
-      ],
+      children: statuses
+          .map((s) => _FileStatusRow(
+                filename: s['file'] ?? '',
+                status: s['status'] ?? '',
+                message: s['message'] ?? '',
+              ))
+          .toList(),
     );
   }
 }
@@ -87,6 +84,10 @@ class _StatusIcon extends StatelessWidget {
         );
       case 'done':
         return const Icon(Icons.check_circle, size: 18, color: Colors.green);
+      case 'already_in_db':
+        return const Icon(Icons.storage, size: 18, color: Colors.blueGrey);
+      case 'file_updated':
+        return const Icon(Icons.update, size: 18, color: Colors.blue);
       case 'skipped':
         return const Icon(Icons.skip_next, size: 18, color: Colors.orange);
       case 'error':
@@ -109,6 +110,8 @@ class _StatusLabel extends StatelessWidget {
       'queued' => ('Queued', Colors.grey),
       'processing' => ('Processing...', Colors.blue),
       'done' => ('Done', Colors.green),
+      'already_in_db' => ('Already in database', Colors.blueGrey),
+      'file_updated' => ('File updated in database', Colors.blue),
       'skipped' => ('Skipped', Colors.orange),
       'error' => ('Error', Colors.red),
       'timeout' => ('Timeout — try again', Colors.orange),

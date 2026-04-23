@@ -17,63 +17,76 @@ class IngestScreen extends StatefulWidget {
 }
 
 class _IngestScreenState extends State<IngestScreen> {
-  final _nameController = TextEditingController();
+  final _nicknameController = TextEditingController();
   final _urlController = TextEditingController();
   late final String _propertyId;
+  String? _resolvedPropertyId; // canonical ID from (system) SSE event (REQ-19)
   bool _isIngesting = false;
-  final List<Map<String, String>> _fileStatuses = [];
+  final List<Map<String, String>> _filesToIngest = []; // pre-ingest list (REQ-15)
+  final List<Map<String, String>> _fileStatuses = []; // post-ingest SSE (REQ-16)
   String? _ingestedMarkdown;
+  String? _officialPropertyName; // parsed from scraped_markdown (REQ-03)
+  String? _heroImageUrl; // signed URL for hero image (REQ-18)
 
   @override
   void initState() {
     super.initState();
     _propertyId = _generateUuidV4();
-    _nameController.addListener(() => setState(() {}));
+    _urlController.addListener(() => setState(() {})); // drives canIngest (REQ-02)
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
+    _nicknameController.dispose();
     _urlController.dispose();
     super.dispose();
   }
 
-  /// Generates a UUID v4 without external packages.
   String _generateUuidV4() {
     final rng = Random.secure();
     final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
+  // Called immediately when a file is selected/recorded — before upload (REQ-13, REQ-15)
+  void _onFileAdded(String filename) {
+    setState(() {
+      _filesToIngest.add({'file': filename, 'status': 'processing', 'message': ''});
+    });
+  }
+
+  // Called after upload completes — update pre-ingest status badge (REQ-15)
+  void _onFileResult(String filename, bool success) {
+    setState(() {
+      final idx = _filesToIngest.indexWhere((e) => e['file'] == filename);
+      if (idx >= 0) {
+        _filesToIngest[idx] = {
+          'file': filename,
+          'status': success ? 'queued' : 'error',
+          'message': success ? '' : 'Upload failed',
+        };
+      }
+    });
+  }
+
   Future<void> _startIngest() async {
-    final name = _nameController.text.trim();
-    if (name.isEmpty || _isIngesting) return;
+    final url = _urlController.text.trim();
+    if (url.isEmpty || _isIngesting) return;
 
     setState(() {
       _isIngesting = true;
+      _resolvedPropertyId = null;
       _fileStatuses.clear();
       _ingestedMarkdown = null;
+      _officialPropertyName = null;
+      _heroImageUrl = null;
     });
 
-    // Upsert property row so files already uploaded under this UUID are linked.
-    try {
-      await Supabase.instance.client.from('properties').upsert({
-        'id': _propertyId,
-        'name': name,
-        'airbnb_url': _urlController.text.trim(),
-        'status': 'Ingesting',
-      });
-    } catch (e) {
-      _showError('Failed to register property: $e');
-      setState(() => _isIngesting = false);
-      return;
-    }
-
-    // Call backend — stream SSE events.
+    // Backend owns the Supabase upsert (REQ-19) — no frontend write here.
     final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     try {
       final request =
@@ -81,14 +94,13 @@ class _IngestScreenState extends State<IngestScreen> {
             ..headers['Content-Type'] = 'application/json'
             ..body = jsonEncode({
               'property_id': _propertyId,
-              'property_name': name,
-              'airbnb_url': _urlController.text.trim(),
+              'property_name': _nicknameController.text.trim(),
+              'airbnb_url': url,
             });
 
       final response = await http.Client().send(request);
       try {
-        // With heartbeats every 10 s, a 90 s timeout means the backend has been
-        // completely silent for 9 consecutive heartbeat windows — treat as dead.
+        // 90 s silence = backend dead (heartbeats every 10 s reset the timer).
         await for (final chunk in response.stream
             .transform(utf8.decoder)
             .timeout(const Duration(seconds: 90),
@@ -104,20 +116,28 @@ class _IngestScreenState extends State<IngestScreen> {
           }
         }
       } finally {
-        // Any file still queued or processing when the stream ends (normally,
-        // via timeout, or via exception) never received a terminal event.
         _markPendingFilesAsTimeout();
       }
 
-      // Fetch ingested markdown from Supabase once stream ends.
+      // Fetch both markdowns using canonical property ID (REQ-03, REQ-18)
+      final effectiveId = _resolvedPropertyId ?? _propertyId;
       final result = await Supabase.instance.client
           .from('properties')
-          .select('ingested_markdown')
-          .eq('id', _propertyId)
+          .select('ingested_markdown, scraped_markdown')
+          .eq('id', effectiveId)
           .maybeSingle();
+
       if (result != null) {
-        setState(
-            () => _ingestedMarkdown = result['ingested_markdown'] as String?);
+        final ingested = result['ingested_markdown'] as String?;
+        final scraped = result['scraped_markdown'] as String?;
+        final name = _parseOfficialName(scraped);
+        final heroUrl = await _getHeroImageUrl(effectiveId);
+        setState(() {
+          _ingestedMarkdown = ingested;
+          _officialPropertyName = name;
+          _heroImageUrl = heroUrl;
+          _filesToIngest.clear(); // files have moved to "Files Ingested" (REQ-16)
+        });
       }
     } catch (e) {
       _showError('Ingest failed: $e');
@@ -130,9 +150,15 @@ class _IngestScreenState extends State<IngestScreen> {
     final file = event['file'] as String? ?? '';
     final status = event['status'] as String? ?? '';
     final message = event['message'] as String? ?? '';
-    // Heartbeats are keepalive signals — they reset the stream timeout but
-    // must not overwrite the displayed file status (keep spinner showing).
+
     if (status == 'heartbeat' || status == 'stream_closed') return;
+
+    // System event — capture canonical property ID (REQ-19, REQ-20)
+    if (file == '(system)' && status == 'property_id') {
+      setState(() => _resolvedPropertyId = message);
+      return;
+    }
+
     setState(() {
       final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
       if (idx >= 0) {
@@ -143,8 +169,6 @@ class _IngestScreenState extends State<IngestScreen> {
     });
   }
 
-  /// Mark any file still queued or processing as timed out.
-  /// Called whenever the SSE stream ends — normally, via timeout, or on error.
   void _markPendingFilesAsTimeout() {
     setState(() {
       for (var i = 0; i < _fileStatuses.length; i++) {
@@ -160,6 +184,25 @@ class _IngestScreenState extends State<IngestScreen> {
     });
   }
 
+  // Extract official listing name from scraped_markdown (REQ-03)
+  String? _parseOfficialName(String? markdown) {
+    if (markdown == null) return null;
+    final match =
+        RegExp(r'\*\*Property Name:\*\*\s*(.+)').firstMatch(markdown);
+    return match?.group(1)?.trim();
+  }
+
+  // Generate a 1-hour signed URL for the hero image (REQ-18)
+  Future<String?> _getHeroImageUrl(String propertyId) async {
+    try {
+      return await Supabase.instance.client.storage
+          .from('Property_assets')
+          .createSignedUrl('$propertyId/hero_image/main.jpg', 3600);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -168,8 +211,8 @@ class _IngestScreenState extends State<IngestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canIngest =
-        _nameController.text.trim().isNotEmpty && !_isIngesting;
+    // canIngest: URL required, nickname is optional (REQ-02)
+    final canIngest = _urlController.text.trim().isNotEmpty && !_isIngesting;
 
     return Scaffold(
       appBar: AppBar(
@@ -184,22 +227,22 @@ class _IngestScreenState extends State<IngestScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Property Name ──────────────────────────────────────────
+                // ── Nickname (optional) — REQ-02 ───────────────────────────
                 TextField(
-                  controller: _nameController,
+                  controller: _nicknameController,
                   decoration: const InputDecoration(
-                    labelText: 'Property Name *',
+                    labelText: 'Nickname (Optional)',
                     hintText: 'e.g. Beach House Malibu',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // ── Airbnb URL ─────────────────────────────────────────────
+                // ── Airbnb URL (required) — REQ-02 ─────────────────────────
                 TextField(
                   controller: _urlController,
                   decoration: const InputDecoration(
-                    labelText: 'Airbnb URL',
+                    labelText: 'Airbnb URL *',
                     hintText: 'https://www.airbnb.com/rooms/...',
                     border: OutlineInputBorder(),
                   ),
@@ -218,16 +261,33 @@ class _IngestScreenState extends State<IngestScreen> {
                 const SizedBox(height: 8),
                 DropZoneWidget(
                   propertyId: _propertyId,
-                  onFileResult: (_, __) {},
+                  onFileAdded: _onFileAdded, // REQ-15
+                  onFileResult: _onFileResult,
                 ),
                 const SizedBox(height: 16),
 
                 // ── Voice Recorder ─────────────────────────────────────────
                 VoiceRecorderWidget(
                   propertyId: _propertyId,
-                  onRecordingResult: (_, __) {},
+                  onFileAdded: _onFileAdded, // REQ-13
+                  onRecordingResult: _onFileResult,
                 ),
-                const SizedBox(height: 36),
+
+                // ── Files to Ingest — REQ-15 ────────────────────────────────
+                if (_filesToIngest.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Files to Ingest',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  FileStatusList(statuses: _filesToIngest),
+                ],
+
+                const SizedBox(height: 28),
 
                 // ── INGEST NOW ─────────────────────────────────────────────
                 FilledButton(
@@ -256,22 +316,58 @@ class _IngestScreenState extends State<IngestScreen> {
                       : const Text('INGEST NOW'),
                 ),
 
-                // ── Per-file SSE status ────────────────────────────────────
+                // ── Files Ingested — REQ-16, REQ-17 ────────────────────────
                 if (_fileStatuses.isNotEmpty) ...[
                   const SizedBox(height: 28),
+                  Text(
+                    'Files Ingested',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
                   FileStatusList(statuses: _fileStatuses),
                 ],
 
-                // ── Extracted Knowledge ────────────────────────────────────
+                // ── Extracted Knowledge — REQ-03, REQ-18 ──────────────────
                 if (_ingestedMarkdown != null &&
                     _ingestedMarkdown!.isNotEmpty) ...[
                   const SizedBox(height: 40),
                   const Divider(),
                   const SizedBox(height: 20),
-                  const Text(
+
+                  // Hero image (REQ-18)
+                  if (_heroImageUrl != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        _heroImageUrl!,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Official property name as h1 (REQ-03)
+                  if (_officialPropertyName != null) ...[
+                    Text(
+                      _officialPropertyName!,
+                      style: const TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+
+                  Text(
                     'Extracted Knowledge',
                     style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500),
                   ),
                   const SizedBox(height: 16),
                   Container(

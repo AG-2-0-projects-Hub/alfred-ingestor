@@ -1,19 +1,28 @@
 """
 POST /api/ingest — triggers sequential file processing over SSE.
 
-Payload: { "property_id": "<ID>" }
+REQ-19: idempotent via canonical property lookup on airbnb_url
+REQ-20: 409 lock when status == Ingesting
+REQ-21: atomic status — only sets Ingested when ALL files succeed
+REQ-22: file fingerprints stored in JSONB column
+REQ-26: scraper called before any file processing
+REQ-28: scraper failure surfaces error and aborts
 
 SSE event format:
-  data: {"file": "<name>", "status": "queued"|"processing"|"heartbeat"|"done"|"skipped"|"error", "message": "..."}
+  data: {"file": "<name>", "status": "queued|processing|heartbeat|done|already_in_db|file_updated|error", "message": "..."}
 
+System events:
+  data: {"file": "(system)", "status": "property_id", "message": "<canonical_id>"}
 """
 
 import asyncio
 import json
 import os
+import re
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
+import httpx
 
 from services import supabase_client, hash_guard, file_processor
 
@@ -31,19 +40,77 @@ def _event(file: str, status: str, message: str = "") -> str:
     return f"data: {payload}\n\n"
 
 
+def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
+    match = re.search(r'\*\*Thumbnail:\*\*\s*(\S+)', scraped_markdown)
+    return match.group(1).strip() if match else None
+
+
 @router.post("/ingest")
 async def ingest(req: IngestRequest, request: Request):
-    property_id = req.property_id
+    airbnb_url = req.airbnb_url.strip()
+    temp_id = req.property_id
+
+    # Resolve canonical property and enforce 409 lock BEFORE opening SSE stream (REQ-20)
+    property_id = temp_id
+    if airbnb_url:
+        canonical = await asyncio.to_thread(supabase_client.get_canonical_property, airbnb_url)
+        if canonical:
+            property_id = canonical["id"]
+            if canonical.get("status") == "Ingesting":
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "Ingestion already in progress for this property."},
+                )
 
     async def stream():
-        # Track the in-flight processing task so we can cancel it on disconnect.
         current_task: asyncio.Task | None = None
         try:
-            # 1. Upsert property row — run blocking I/O in a thread so the event loop stays free
-            await asyncio.to_thread(supabase_client.insert_property, property_id, req.property_name, req.airbnb_url)
+            # Emit resolved canonical ID so frontend knows which row to poll (REQ-19)
+            yield _event("(system)", "property_id", property_id)
+
+            # Move uploads from temp folder to canonical folder when IDs differ (REQ-19)
+            if property_id != temp_id:
+                await asyncio.to_thread(
+                    supabase_client.move_files_in_storage, temp_id, property_id
+                )
+
+            # Upsert property row then set Ingesting (REQ-20)
+            await asyncio.to_thread(
+                supabase_client.insert_property, property_id, req.property_name, airbnb_url
+            )
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
 
-            # 2. List files
+            # Call scraper before any file processing (REQ-26)
+            scraped_markdown = ""
+            if airbnb_url:
+                scraper_url = os.environ.get("SCRAPER_URL", "").rstrip("/")
+                if not scraper_url:
+                    yield _event("(scrape)", "error", "SCRAPER_URL not configured.")
+                    await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
+                    return
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as http:
+                        resp = await http.post(
+                            f"{scraper_url}/scrape", json={"url": airbnb_url}
+                        )
+                        resp.raise_for_status()
+                        scraped_markdown = resp.json().get("data", "")
+                except Exception as exc:
+                    yield _event("(scrape)", "error", f"Scraping failed: {exc}")
+                    await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
+                    return  # REQ-28: abort — do not process files
+
+                # Upload hero image (non-fatal on failure) (REQ-18)
+                thumbnail_url = _parse_thumbnail_url(scraped_markdown)
+                if thumbnail_url:
+                    try:
+                        await asyncio.to_thread(
+                            supabase_client.upload_hero_image, property_id, thumbnail_url
+                        )
+                    except Exception as exc:
+                        print(f"Hero image upload failed (non-fatal): {exc}")
+
+            # List files
             files = await asyncio.to_thread(supabase_client.list_upload_files, property_id)
             if not files:
                 yield _event("(none)", "done", "No files found in storage.")
@@ -54,23 +121,35 @@ async def ingest(req: IngestRequest, request: Request):
             for f in files:
                 yield _event(f["name"], "queued")
 
-            # 3. Process sequentially — each blocking call runs in a thread pool so
-            #    SSE events are flushed between files and the server stays responsive.
+            # Load fingerprints once (REQ-10, REQ-11, REQ-22)
+            fingerprints = await asyncio.to_thread(
+                supabase_client.get_file_fingerprints, property_id
+            )
+
+            # Process files sequentially
+            error_count = 0
             try:
                 for f in files:
                     name = f["name"]
-                    yield _event(name, "processing")
+                    # Size from storage metadata; falls back to 0 (will be treated as "new")
+                    size = (f.get("metadata") or {}).get("size") or 0
+
+                    fp_status = hash_guard.file_status(fingerprints, name, size)
+                    if fp_status == "skip":
+                        yield _event(name, "already_in_db", "Identical file — already in database.")
+                        continue
+
+                    is_update = fp_status == "update"
+                    yield _event(
+                        name, "processing",
+                        "Reprocessing updated file." if is_update else ""
+                    )
+
                     try:
-                        data = await asyncio.to_thread(supabase_client.download_file, property_id, name)
-                        sha = hash_guard.sha256_of(data)
+                        data = await asyncio.to_thread(
+                            supabase_client.download_file, property_id, name
+                        )
 
-                        if hash_guard.already_processed(sha):
-                            yield _event(name, "skipped", "Duplicate — already ingested.")
-                            continue
-
-                        # Wrap processing in a task so we can yield heartbeat events
-                        # every 10 s while Gemini runs. asyncio.shield protects the task
-                        # from being cancelled by wait_for's internal timeout logic.
                         current_task = asyncio.create_task(
                             file_processor.process_file(name, data)
                         )
@@ -81,33 +160,37 @@ async def ingest(req: IngestRequest, request: Request):
                                 )
                             except asyncio.TimeoutError:
                                 yield _event(name, "heartbeat", "Still processing...")
-                        markdown = await current_task  # re-raises if the task failed
+                        markdown = await current_task
                         current_task = None
 
-                        await asyncio.to_thread(supabase_client.append_ingested_markdown, property_id, markdown)
-                        hash_guard.mark_processed(sha)
-                        yield _event(name, "done")
+                        await asyncio.to_thread(
+                            supabase_client.append_ingested_markdown, property_id, markdown
+                        )
+                        fingerprints[name] = size  # record fingerprint only on success (REQ-22)
+                        yield _event(name, "file_updated" if is_update else "done")
 
                     except Exception as exc:
                         yield _event(name, "error", str(exc))
+                        error_count += 1
 
-                # 4. Final status → Ingested
-                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
+                # Persist all fingerprint updates (REQ-22)
+                await asyncio.to_thread(
+                    supabase_client.update_file_fingerprints, property_id, fingerprints
+                )
+
+                # Atomic status transition — Ingested only if zero errors (REQ-21)
+                final_status = "Ingested" if error_count == 0 else "Ingest_Error"
+                await asyncio.to_thread(supabase_client.update_status, property_id, final_status)
 
             except Exception as fatal:
                 await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
                 yield _event("(fatal)", "error", str(fatal))
 
         except BaseException:
-            # CancelledError / GeneratorExit — cancel any in-flight Gemini task so it
-            # doesn't keep a thread-pool thread alive after the client disconnects.
             if current_task and not current_task.done():
                 current_task.cancel()
             raise
 
-    # Explicitly set CORS origin on the streaming response.
-    # FastAPI's CORSMiddleware should handle this, but streaming responses can
-    # race the middleware header injection in some Render/proxy configurations.
     origin = request.headers.get("origin", "")
     sse_headers = {
         "Cache-Control": "no-cache",

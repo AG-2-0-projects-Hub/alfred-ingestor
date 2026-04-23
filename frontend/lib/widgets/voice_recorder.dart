@@ -7,11 +7,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class VoiceRecorderWidget extends StatefulWidget {
   final String propertyId;
+
+  /// Called immediately when recording stops and the filename is known,
+  /// before the upload completes. Adds the file to the "Files to Ingest" list (REQ-13).
+  final void Function(String filename) onFileAdded;
+
+  /// Called after the upload attempt completes with success/failure.
   final void Function(String filename, bool success) onRecordingResult;
 
   const VoiceRecorderWidget({
     super.key,
     required this.propertyId,
+    required this.onFileAdded,
     required this.onRecordingResult,
   });
 
@@ -32,14 +39,13 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
       );
       return;
     }
-
     await _recorder.start(
       const RecordConfig(
         encoder: AudioEncoder.aacLc,
         sampleRate: 44100,
         bitRate: 128000,
       ),
-      path: '', // Web mode -- uses in-memory stream
+      path: '',
     );
     setState(() => _isRecording = true);
   }
@@ -52,11 +58,14 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
     final path = await _recorder.stop();
     if (path == null) return;
 
-    setState(() => _isUploading = true);
     final filename = _sanitizeFilename(
         'voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a');
+
+    // Notify IngestScreen immediately so the file appears in "Files to Ingest" (REQ-13)
+    widget.onFileAdded(filename);
+
+    setState(() => _isUploading = true);
     try {
-      // On web, record returns a blob URL; read via XFile abstraction
       final bytes = await _readRecordingBytes(path);
       await Supabase.instance.client.storage
           .from('Property_assets')
@@ -75,7 +84,6 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
   }
 
   Future<Uint8List> _readRecordingBytes(String path) async {
-    // On Flutter Web, `path` is a blob URL. Fetch as arraybuffer via dart:html.
     final response = await html.HttpRequest.request(
       path,
       responseType: 'arraybuffer',
@@ -112,7 +120,8 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
             ),
             onPressed: _isRecording ? _stop : _start,
             icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-            label: Text(_isRecording ? 'Stop Recording' : 'Record Voice Note'),
+            label:
+                Text(_isRecording ? 'Stop Recording' : 'Record Voice Note'),
           ),
         if (_isRecording) ...[
           const SizedBox(width: 12),
