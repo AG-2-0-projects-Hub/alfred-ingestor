@@ -2,6 +2,7 @@
 
 **Active Workspace:** `projects/the-ingestor/` — all file operations scoped here unless explicitly stated otherwise.
 **Inherits:** AG Global Constitution (GEMINI.md)
+**Also inherits:** Root `CLAUDE.md` — read it at session start.
 **Overrides:** None
 **Stack:** [Define after BLAST Blueprint phase]
 **Data Schema:** [Define after BLAST Blueprint phase]
