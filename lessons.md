@@ -66,18 +66,3 @@ corrected to `https://gcxxilzfhwlsjcvtpsvj.supabase.co`.
 - [ ] App loads at http://localhost:8080 in browser
 
 ---
-
-## 2026-05-04 — Claude Code Shell Environment (Git Bash vs WSL2)
-
-**Context:** Attempting to run `npx skills find` via Claude Code inside the-ingestor project.
-
-**Discovery:** Claude Code launches in Git Bash (Windows) by default, not WSL2. 
-Node, npm, and npx are installed in WSL2 only — invisible to Git Bash. All bare 
-`npx`, `node`, `python` commands fail with "command not found" unless prefixed 
-with `wsl bash -c`.
-
-**Impact:** Added Section 9 (Shell Execution Environment) to root `CLAUDE.md` 
-enforcing `wsl bash -c` prefix for all terminal commands. Added root `CLAUDE.md` 
-inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
-
-**Global Candidate:** Yes — applies to every machine and every project.

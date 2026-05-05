@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import '../widgets/drop_zone.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
-import '../widgets/conflict_questionnaire.dart';
 
 class IngestScreen extends StatefulWidget {
   const IngestScreen({super.key});
@@ -23,21 +22,11 @@ class _IngestScreenState extends State<IngestScreen> {
   late final String _propertyId;
   String? _resolvedPropertyId; // canonical ID from (system) SSE event (REQ-19)
   bool _isIngesting = false;
-  bool _isMerging = false;
   final List<Map<String, String>> _filesToIngest = []; // pre-ingest list (REQ-15)
   final List<Map<String, String>> _fileStatuses = []; // post-ingest SSE (REQ-16)
   String? _ingestedMarkdown;
   String? _officialPropertyName; // parsed from scraped_markdown (REQ-03)
   String? _heroImageUrl; // signed URL for hero image (REQ-18)
-  String? _propertyStatus;
-  Map<String, dynamic>? _masterJson;
-
-  static const _postMergeStatuses = {
-    'Merged',
-    'Conflict_Pending',
-    'Trained',
-    'Fully_Trained',
-  };
 
   @override
   void initState() {
@@ -95,8 +84,6 @@ class _IngestScreenState extends State<IngestScreen> {
       _ingestedMarkdown = null;
       _officialPropertyName = null;
       _heroImageUrl = null;
-      _propertyStatus = null;
-      _masterJson = null;
     });
 
     // Backend owns the Supabase upsert (REQ-19) — no frontend write here.
@@ -132,11 +119,11 @@ class _IngestScreenState extends State<IngestScreen> {
         _markPendingFilesAsTimeout();
       }
 
-      // Fetch markdowns, status, and master_json using canonical property ID (REQ-03, REQ-18)
+      // Fetch both markdowns using canonical property ID (REQ-03, REQ-18)
       final effectiveId = _resolvedPropertyId ?? _propertyId;
       final result = await Supabase.instance.client
           .from('properties')
-          .select('ingested_markdown, scraped_markdown, status, master_json')
+          .select('ingested_markdown, scraped_markdown')
           .eq('id', effectiveId)
           .maybeSingle();
 
@@ -149,8 +136,6 @@ class _IngestScreenState extends State<IngestScreen> {
           _ingestedMarkdown = ingested;
           _officialPropertyName = name;
           _heroImageUrl = heroUrl;
-          _propertyStatus = result['status'] as String?;
-          _masterJson = result['master_json'] as Map<String, dynamic>?;
           _filesToIngest.clear(); // files have moved to "Files Ingested" (REQ-16)
         });
       }
@@ -218,128 +203,16 @@ class _IngestScreenState extends State<IngestScreen> {
     }
   }
 
-  Future<void> _runMerge() async {
-    final id = _resolvedPropertyId ?? _propertyId;
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
-    setState(() => _isMerging = true);
-    try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/merge/$id'),
-        headers: {'Content-Type': 'application/json'},
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _propertyStatus = data['status'] as String?;
-          _masterJson = data['master_json'] as Map<String, dynamic>?;
-        });
-      } else {
-        _showError('Merge failed (${response.statusCode})');
-      }
-    } catch (e) {
-      _showError('Merge failed: $e');
-    } finally {
-      setState(() => _isMerging = false);
-    }
-  }
-
-  void _onResolved(String status, Map<String, dynamic> masterJson) {
-    setState(() {
-      _propertyStatus = status;
-      _masterJson = masterJson;
-    });
-  }
-
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
-  Widget _buildStatusBadge(String status) {
-    final label = switch (status) {
-      'Ingested' => 'Ingested — Ready to Merge',
-      'Merged' => 'Merged',
-      'Conflict_Pending' => 'Conflicts Pending Review',
-      'Trained' => 'Trained',
-      'Fully_Trained' => 'Fully Trained',
-      _ => status,
-    };
-    final color = switch (status) {
-      'Ingested' => Colors.amber.shade700,
-      'Merged' || 'Trained' => Colors.green.shade700,
-      'Conflict_Pending' => Colors.orange.shade800,
-      'Fully_Trained' => Colors.indigo.shade700,
-      _ => Colors.grey.shade700,
-    };
-    return Row(
-      children: [
-        const Text('Status:',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: color.withAlpha(30),
-            border: Border.all(color: color.withAlpha(100)),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMasterJsonViewer() {
-    if (_masterJson == null) return const SizedBox.shrink();
-    final prettyJson = const JsonEncoder.withIndent('  ').convert(_masterJson);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Master JSON',
-          style: Theme.of(context)
-              .textTheme
-              .titleSmall
-              ?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 400),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: SingleChildScrollView(
-            child: SelectableText(
-              prettyJson,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                height: 1.5,
-                color: Color(0xFFD4D4D4),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     // canIngest: URL required, nickname is optional (REQ-02)
     final canIngest = _urlController.text.trim().isNotEmpty && !_isIngesting;
-    final effectiveId = _resolvedPropertyId ?? _propertyId;
-    final conflictReport = _masterJson?['conflict_report'] as List<dynamic>?;
 
     return Scaffold(
       appBar: AppBar(
@@ -526,76 +399,6 @@ class _IngestScreenState extends State<IngestScreen> {
                       ),
                     ),
                   ),
-                ],
-
-                // ── Pipeline ───────────────────────────────────────────────
-                if (_propertyStatus != null) ...[
-                  const SizedBox(height: 40),
-                  const Divider(),
-                  const SizedBox(height: 20),
-
-                  // Status Badge
-                  _buildStatusBadge(_propertyStatus!),
-
-                  // Merge Now button
-                  if (_propertyStatus == 'Ingested') ...[
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _isMerging ? null : _runMerge,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                        backgroundColor: Colors.indigo.shade600,
-                        textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.4),
-                      ),
-                      child: _isMerging
-                          ? const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2.5, color: Colors.white),
-                                ),
-                                SizedBox(width: 12),
-                                Text('Merging...'),
-                              ],
-                            )
-                          : const Text('MERGE NOW'),
-                    ),
-                  ],
-
-                  // Master JSON Viewer
-                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    _buildMasterJsonViewer(),
-                  ],
-
-                  // Conflict Questionnaire
-                  if (_propertyStatus == 'Conflict_Pending' &&
-                      conflictReport != null &&
-                      conflictReport.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    Text(
-                      'Resolve Conflicts',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 12),
-                    ConflictQuestionnaireWidget(
-                      key: ValueKey(conflictReport.length),
-                      propertyId: effectiveId,
-                      conflictReport: conflictReport,
-                      backendUrl:
-                          dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
-                      onResolved: _onResolved,
-                    ),
-                  ],
                 ],
 
                 const SizedBox(height: 48),
