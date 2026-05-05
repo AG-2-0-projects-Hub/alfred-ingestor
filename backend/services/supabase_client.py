@@ -135,6 +135,83 @@ def move_files_in_storage(src_id: str, dest_id: str) -> None:
             print(f"move_files_in_storage: failed to move {src_path} → {dest_path}: {exc}")
 
 
+# ── Merge / Resolve ───────────────────────────────────────────────────────────
+
+def get_property_for_merge(property_id: str) -> dict | None:
+    """Fetch fields needed by the merge endpoint."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select("status, scraped_markdown, ingested_markdown, master_json")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def save_merge_result(
+    property_id: str,
+    master_json_dict: dict,
+    status: str,
+    conflict_status: str,
+) -> None:
+    """Write master_json, status, and Conflict_status after a successful merge."""
+    client = get_client()
+    client.table("properties").update({
+        "master_json": master_json_dict,
+        "status": status,
+        "Conflict_status": conflict_status,
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
+
+
+def get_property_for_resolve(property_id: str) -> dict | None:
+    """Fetch fields needed by the resolve endpoint."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select("status, master_json, resolution_history")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def save_resolve_result(
+    property_id: str,
+    master_json_dict: dict,
+    history_text_entry: str,
+    history_json_entry: dict | None,
+    status: str,
+    conflict_status: str,
+) -> None:
+    """Append history_text_entry to resolution_history (append-only),
+    replace resolution_history_json, and write the updated master_json."""
+    client = get_client()
+    existing_result = (
+        client.table("properties")
+        .select("resolution_history")
+        .eq("id", property_id)
+        .single()
+        .execute()
+    )
+    existing = (existing_result.data or {}).get("resolution_history") or ""
+    if history_text_entry:
+        combined = existing + "\n\n---\n\n" + history_text_entry if existing else history_text_entry
+    else:
+        combined = existing
+    client.table("properties").update({
+        "master_json": master_json_dict,
+        "resolution_history": combined,
+        "resolution_history_json": history_json_entry,
+        "status": status,
+        "Conflict_status": conflict_status,
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
+
+
 def upload_hero_image(property_id: str, image_url: str) -> None:
     """Download thumbnail from Airbnb URL and store under {property_id}/hero_image/main.jpg. (REQ-18)"""
     import httpx
