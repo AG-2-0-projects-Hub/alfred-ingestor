@@ -1,0 +1,1391 @@
+{
+    "name": "Supabase Alfred Airbnb - D - The Resolver",
+    "flow": [
+        {
+            "id": 1,
+            "module": "gateway:CustomWebHook",
+            "version": 1,
+            "parameters": {
+                "hook": 3807231,
+                "maxResults": 1
+            },
+            "mapper": {},
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0,
+                    "name": "Resolver Webhook (questionnaire answered?)"
+                },
+                "restore": {
+                    "parameters": {
+                        "hook": {
+                            "data": {
+                                "editable": "true"
+                            },
+                            "label": "Resolved questionnaire"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "hook",
+                        "type": "hook:gateway-webhook",
+                        "label": "Webhook",
+                        "required": true
+                    },
+                    {
+                        "name": "maxResults",
+                        "type": "number",
+                        "label": "Maximum number of results"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "supabase:searchRows",
+            "version": 1,
+            "parameters": {
+                "__IMTCONN__": 13552822
+            },
+            "mapper": {
+                "limit": "1",
+                "table": "properties",
+                "search": [
+                    [
+                        {
+                            "a": "id",
+                            "b": "{{1.id}}",
+                            "o": "text:eq."
+                        }
+                    ]
+                ]
+            },
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {
+                    "expect": {
+                        "table": {
+                            "mode": "chose",
+                            "label": "properties",
+                            "nested": [
+                                {
+                                    "name": "search",
+                                    "type": "filter",
+                                    "label": "Search criteria",
+                                    "options": {
+                                        "logic": "and",
+                                        "store": [
+                                            {
+                                                "label": "id",
+                                                "value": "id"
+                                            },
+                                            {
+                                                "label": "created_at",
+                                                "value": "created_at"
+                                            },
+                                            {
+                                                "label": "owner_id",
+                                                "value": "owner_id"
+                                            },
+                                            {
+                                                "label": "name",
+                                                "value": "name"
+                                            },
+                                            {
+                                                "label": "airbnb_url",
+                                                "value": "airbnb_url"
+                                            },
+                                            {
+                                                "label": "status",
+                                                "value": "status"
+                                            },
+                                            {
+                                                "label": "master_json",
+                                                "value": "master_json"
+                                            },
+                                            {
+                                                "label": "scraped_markdown",
+                                                "value": "scraped_markdown"
+                                            },
+                                            {
+                                                "label": "ingested_markdown",
+                                                "value": "ingested_markdown"
+                                            },
+                                            {
+                                                "label": "conflict_status",
+                                                "value": "conflict_status"
+                                            },
+                                            {
+                                                "label": "conflict_report",
+                                                "value": "conflict_report"
+                                            },
+                                            {
+                                                "label": "resolution_history",
+                                                "value": "resolution_history"
+                                            }
+                                        ],
+                                        "operators": [
+                                            {
+                                                "label": "Text",
+                                                "options": [
+                                                    {
+                                                        "label": "Equals",
+                                                        "value": "text:eq."
+                                                    },
+                                                    {
+                                                        "label": "Does not equal",
+                                                        "value": "text:neq."
+                                                    },
+                                                    {
+                                                        "label": "Contains (case sensitive)",
+                                                        "value": "text:like."
+                                                    },
+                                                    {
+                                                        "label": "Contains (case insensitive)",
+                                                        "value": "text:ilike."
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "Numbers",
+                                                "options": [
+                                                    {
+                                                        "label": "Equals",
+                                                        "value": "number:eq."
+                                                    },
+                                                    {
+                                                        "label": "Does not equal",
+                                                        "value": "number:neq."
+                                                    },
+                                                    {
+                                                        "label": "Greater than",
+                                                        "value": "number:gt."
+                                                    },
+                                                    {
+                                                        "label": "Less than",
+                                                        "value": "number:lt."
+                                                    },
+                                                    {
+                                                        "label": "Greater than or equal to",
+                                                        "value": "number:gte."
+                                                    },
+                                                    {
+                                                        "label": "Less than or equal to",
+                                                        "value": "number:lte."
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "Date",
+                                                "options": [
+                                                    {
+                                                        "label": "Equals",
+                                                        "value": "date:eq."
+                                                    },
+                                                    {
+                                                        "label": "Does not equal",
+                                                        "value": "date:neq."
+                                                    },
+                                                    {
+                                                        "label": "Later than",
+                                                        "value": "date:gt."
+                                                    },
+                                                    {
+                                                        "label": "Earlier than",
+                                                        "value": "date:lt."
+                                                    },
+                                                    {
+                                                        "label": "Later than or equal to",
+                                                        "value": "date:gte."
+                                                    },
+                                                    {
+                                                        "label": "Earlier than or equal to",
+                                                        "value": "date:lte."
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "Boolean",
+                                                "options": [
+                                                    {
+                                                        "label": "Equals",
+                                                        "value": "boolean:eq."
+                                                    },
+                                                    {
+                                                        "label": "Does not equal",
+                                                        "value": "boolean:neq."
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "parameters": {
+                        "__IMTCONN__": {
+                            "data": {
+                                "scoped": "true",
+                                "connection": "supabase"
+                            },
+                            "label": "Supabase Alfred Connection"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "__IMTCONN__",
+                        "type": "account:supabase",
+                        "label": "Connection",
+                        "required": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "table",
+                        "type": "select",
+                        "label": "Table",
+                        "required": true
+                    },
+                    {
+                        "name": "limit",
+                        "type": "uinteger",
+                        "label": "Limit"
+                    },
+                    {
+                        "name": "search",
+                        "type": "filter",
+                        "label": "Search criteria",
+                        "options": {
+                            "logic": "and",
+                            "store": [
+                                {
+                                    "label": "id",
+                                    "value": "id"
+                                },
+                                {
+                                    "label": "created_at",
+                                    "value": "created_at"
+                                },
+                                {
+                                    "label": "owner_id",
+                                    "value": "owner_id"
+                                },
+                                {
+                                    "label": "name",
+                                    "value": "name"
+                                },
+                                {
+                                    "label": "airbnb_url",
+                                    "value": "airbnb_url"
+                                },
+                                {
+                                    "label": "status",
+                                    "value": "status"
+                                },
+                                {
+                                    "label": "master_json",
+                                    "value": "master_json"
+                                },
+                                {
+                                    "label": "scraped_markdown",
+                                    "value": "scraped_markdown"
+                                },
+                                {
+                                    "label": "ingested_markdown",
+                                    "value": "ingested_markdown"
+                                },
+                                {
+                                    "label": "conflict_status",
+                                    "value": "conflict_status"
+                                },
+                                {
+                                    "label": "conflict_report",
+                                    "value": "conflict_report"
+                                },
+                                {
+                                    "label": "resolution_history",
+                                    "value": "resolution_history"
+                                }
+                            ],
+                            "operators": [
+                                {
+                                    "label": "Text",
+                                    "options": [
+                                        {
+                                            "label": "Equals",
+                                            "value": "text:eq."
+                                        },
+                                        {
+                                            "label": "Does not equal",
+                                            "value": "text:neq."
+                                        },
+                                        {
+                                            "label": "Contains (case sensitive)",
+                                            "value": "text:like."
+                                        },
+                                        {
+                                            "label": "Contains (case insensitive)",
+                                            "value": "text:ilike."
+                                        }
+                                    ]
+                                },
+                                {
+                                    "label": "Numbers",
+                                    "options": [
+                                        {
+                                            "label": "Equals",
+                                            "value": "number:eq."
+                                        },
+                                        {
+                                            "label": "Does not equal",
+                                            "value": "number:neq."
+                                        },
+                                        {
+                                            "label": "Greater than",
+                                            "value": "number:gt."
+                                        },
+                                        {
+                                            "label": "Less than",
+                                            "value": "number:lt."
+                                        },
+                                        {
+                                            "label": "Greater than or equal to",
+                                            "value": "number:gte."
+                                        },
+                                        {
+                                            "label": "Less than or equal to",
+                                            "value": "number:lte."
+                                        }
+                                    ]
+                                },
+                                {
+                                    "label": "Date",
+                                    "options": [
+                                        {
+                                            "label": "Equals",
+                                            "value": "date:eq."
+                                        },
+                                        {
+                                            "label": "Does not equal",
+                                            "value": "date:neq."
+                                        },
+                                        {
+                                            "label": "Later than",
+                                            "value": "date:gt."
+                                        },
+                                        {
+                                            "label": "Earlier than",
+                                            "value": "date:lt."
+                                        },
+                                        {
+                                            "label": "Later than or equal to",
+                                            "value": "date:gte."
+                                        },
+                                        {
+                                            "label": "Earlier than or equal to",
+                                            "value": "date:lte."
+                                        }
+                                    ]
+                                },
+                                {
+                                    "label": "Boolean",
+                                    "options": [
+                                        {
+                                            "label": "Equals",
+                                            "value": "boolean:eq."
+                                        },
+                                        {
+                                            "label": "Does not equal",
+                                            "value": "boolean:neq."
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "interface": [
+                    {
+                        "name": "__IMTLENGTH__",
+                        "type": "uinteger",
+                        "label": "Total number of bundles"
+                    },
+                    {
+                        "name": "__IMTINDEX__",
+                        "type": "uinteger",
+                        "label": "Bundle order position"
+                    },
+                    {
+                        "name": "id",
+                        "type": "text",
+                        "label": "id"
+                    },
+                    {
+                        "name": "created_at",
+                        "type": "text",
+                        "label": "created_at"
+                    },
+                    {
+                        "name": "owner_id",
+                        "type": "text",
+                        "label": "owner_id"
+                    },
+                    {
+                        "name": "name",
+                        "type": "text",
+                        "label": "name"
+                    },
+                    {
+                        "name": "airbnb_url",
+                        "type": "text",
+                        "label": "airbnb_url"
+                    },
+                    {
+                        "name": "status",
+                        "type": "text",
+                        "label": "status"
+                    },
+                    {
+                        "name": "master_json",
+                        "type": "text",
+                        "label": "master_json"
+                    },
+                    {
+                        "name": "scraped_markdown",
+                        "type": "text",
+                        "label": "scraped_markdown"
+                    },
+                    {
+                        "name": "ingested_markdown",
+                        "type": "text",
+                        "label": "ingested_markdown"
+                    },
+                    {
+                        "name": "conflict_status",
+                        "type": "text",
+                        "label": "conflict_status"
+                    },
+                    {
+                        "name": "conflict_report",
+                        "type": "text",
+                        "label": "conflict_report"
+                    },
+                    {
+                        "name": "resolution_history",
+                        "type": "text",
+                        "label": "resolution_history"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "gemini-ai:createACompletionGeminiPro",
+            "version": 1,
+            "parameters": {
+                "__IMTCONN__": 13250463
+            },
+            "mapper": {
+                "model": "gemini-2.5-pro",
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "text": "INPUT DATA\nCurrent Master JSON:\n{{2.master_json}}\nHost Resolutions:\n{{1.resolutions}}",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "imageConfig": {},
+                    "temperature": "0.1",
+                    "thinkingConfig": {},
+                    "responseMimeType": "application/json"
+                },
+                "system_instruction": {
+                    "parts": [
+                        {
+                            "text": "# RESOLVER \r\n\r\n## YOUR ROLE\r\nYou are a precise JSON Data Surgeon. Your task is to update a property's Master JSON based on host-provided conflict resolutions, maintain data integrity, and create a detailed audit trail.\r\n\r\n---\r\n\r\n## INPUT DATA\r\n\r\n**Current Master JSON:**\r\n```\r\n{{2.master_json}}\r\n```\r\n\r\n**Host Resolutions:**\r\n```\r\n{{1.resolutions}}\r\n```\r\n\r\n---\r\n\r\n## RESOLUTION PAYLOAD STRUCTURE\r\n\r\nEach resolution in the array follows this format:\r\n```json\r\n{\r\n  \"field\": \"capacity.max_guests\",\r\n  \"value\": \"4\",\r\n  \"input_method\": \"custom\"  // or \"selected\"\r\n}\r\n```\r\n\r\nWhere:\r\n- `field`: JSON path using dot notation (e.g., `\"amenities.pool.depth_meters\"`)\r\n- `value`: The correct value as determined by the host\r\n- `input_method`: Either `\"selected\"` (chose from options) or `\"custom\"` (typed free text)\r\n\r\n---\r\n\r\n## YOUR TASKS\r\n\r\n### 1. UPDATE MASTER JSON VALUES\r\nFor each resolution:\r\n- Navigate to the specified field path using dot notation\r\n- **If field exists:** Update ONLY that specific value, preserving all other data\r\n- **If field does NOT exist:** Create the field dynamically at the correct nested location\r\n- **If field had `_conflict` marker:** Remove the conflict structure entirely and replace with the clean value\r\n\r\n**Example transformation:**\r\n```json\r\n// BEFORE:\r\n{\r\n  \"capacity\": {\r\n    \"max_guests\": {\r\n      \"_conflict\": true,\r\n      \"scraped_value\": 5,\r\n      \"ingested_value\": 3,\r\n      \"_requires_clarification\": \"...\"\r\n    }\r\n  }\r\n}\r\n\r\n// AFTER (if resolution value is 5):\r\n{\r\n  \"capacity\": {\r\n    \"max_guests\": 5\r\n  }\r\n}\r\n```\r\n\r\n### 2. UPDATE CONFLICTS SUMMARY\r\nAfter applying all resolutions, update the `_conflicts_summary` section:\r\n\r\n**Step-by-step logic:**\r\n1. Count how many fields in the resolutions payload had `_conflict` markers\r\n2. Subtract that count from the current `_conflict_count`\r\n3. Remove the resolved field paths from `_conflict_locations` array\r\n4. Set `_has_conflicts` to `false` ONLY if the new `_conflict_count` equals 0\r\n\r\n**Example:**\r\n```json\r\n// BEFORE:\r\n{\r\n  \"_conflicts_summary\": {\r\n    \"_has_conflicts\": true,\r\n    \"_conflict_count\": 5,\r\n    \"_requires_host_review\": true,\r\n    \"_conflict_locations\": [\"capacity.max_guests\", \"pool.depth\", \"wifi.password\", \"pricing.pool_heating\", \"location.coordinates\"]\r\n  }\r\n}\r\n\r\n// Resolutions received: [{field: \"capacity.max_guests\", ...}, {field: \"pool.depth\", ...}]\r\n\r\n// AFTER:\r\n{\r\n  \"_conflicts_summary\": {\r\n    \"_has_conflicts\": true,  // Still true because 3 conflicts remain\r\n    \"_conflict_count\": 3,     // 5 - 2 = 3\r\n    \"_requires_host_review\": true,\r\n    \"_conflict_locations\": [\"wifi.password\", \"pricing.pool_heating\", \"location.coordinates\"]\r\n  }\r\n}\r\n```\r\n\r\n**CRITICAL RULES:**\r\n- Set `_has_conflicts` to `false` ONLY when `_conflict_count` reaches `0`\r\n- Set `_requires_host_review` to `false` ONLY when `_conflict_count` reaches `0`\r\n- If any conflicts remain unresolved, keep `_has_conflicts: true` and `_requires_host_review: true`\r\n- Keep the structure intact (don't delete keys)\r\n\r\n### 3. UPDATE CONFLICT REPORT (SMART FILTERING)\r\n\r\n**DO NOT empty the entire conflict_report array.** Instead, filter it intelligently:\r\n\r\n**Step-by-step logic:**\r\n1. Get the current `conflict_report` array from Master JSON\r\n2. For each item in `conflict_report`:\r\n   - Check if its `id` matches ANY `field` value in the resolutions payload\r\n   - If YES: Remove this item (it's been resolved)\r\n   - If NO: Keep this item (still unresolved)\r\n3. Return the filtered array\r\n\r\n**Example:**\r\n```json\r\n// CURRENT conflict_report:\r\n[\r\n  {id: \"capacity.max_guests\", question: \"...\", options: [...]},\r\n  {id: \"pool.depth\", question: \"...\", options: [...]},\r\n  {id: \"wifi.password\", question: \"...\", options: [...]}\r\n]\r\n\r\n// Resolutions received:\r\n[{field: \"capacity.max_guests\", value: 5}]\r\n\r\n// NEW conflict_report (wifi.password and pool.depth remain):\r\n[\r\n  {id: \"pool.depth\", question: \"...\", options: [...]},\r\n  {id: \"wifi.password\", question: \"...\", options: [...]}\r\n]\r\n```\r\n\r\n**CRITICAL:** Only set `conflict_report` to `[]` if ALL conflicts have been resolved (when the filtered array is empty).\r\n\r\n### 4. CREATE RESOLUTION HISTORY ENTRY\r\nGenerate a detailed log entry in this exact format:\r\n\r\n```json\r\n{\r\n  \"date\": \"{{timestamp}}\",\r\n  \"resolved_via\": \"web_questionnaire\",\r\n  \"changes\": [\r\n    {\r\n      \"field\": \"capacity.max_guests\",\r\n      \"old_value\": {\"_conflict\": true, \"scraped_value\": 5, \"ingested_value\": 3},\r\n      \"new_value\": 3,\r\n      \"input_method\": \"selected\",\r\n      \"was_conflict\": true,\r\n      \"reason\": \"Host confirmed correct value via conflict resolution questionnaire\"\r\n    }\r\n  ],\r\n  \"conflicts_resolved\": [\"capacity.max_guests\"],\r\n  \"total_changes\": 1\r\n}\r\n```\r\n\r\n**Field specifications:**\r\n- `date`: Current timestamp in ISO 8601 format (YYYY-MM-DDTHH:mm:ss.sssZ)\r\n- `resolved_via`: Always `\"web_questionnaire\"` for this module\r\n- `changes`: Array of all modifications made\r\n  - `field`: The JSON path that was updated\r\n  - `old_value`: The previous value (the entire conflict object if it had `_conflict`, or the previous value if it was a regular field, or `null` if newly created)\r\n  - `new_value`: The host's selected/entered value\r\n  - `input_method`: Either `\"selected\"` or `\"custom\"` from the resolution payload\r\n  - `was_conflict`: `true` if this field had a `_conflict` marker in the original Master JSON, `false` otherwise\r\n  - `reason`: Always \"Host confirmed correct value via conflict resolution questionnaire\"\r\n- `conflicts_resolved`: Array containing ONLY the `field` values from the resolutions payload where `was_conflict` is `true`. Do NOT include fields that were newly created or didn't have conflicts. Do NOT hallucinate fields that weren't in the resolutions payload.\r\n- `total_changes`: Count of items in the `changes` array\r\n\r\n**CRITICAL - No Hallucination:**\r\nThe `conflicts_resolved` array must contain ONLY fields that:\r\n1. Were present in the resolutions payload AND\r\n2. Had a `_conflict` marker in the original Master JSON\r\n\r\nIf a field didn't have a conflict, don't include it. If a field wasn't in the resolutions payload, don't include it.\r\n\r\n---\r\n\r\n## ERROR HANDLING\r\n\r\n### If Master JSON is malformed/invalid:\r\nReturn this error object:\r\n```json\r\n{\r\n  \"error\": true,\r\n  \"error_type\": \"invalid_master_json\",\r\n  \"error_message\": \"The current Master JSON is malformed and cannot be parsed\",\r\n  \"original_input\": \"{{2.master_json}}\"\r\n}\r\n```\r\n\r\n### If resolutions array is empty:\r\nReturn the unchanged Master JSON with no history entry:\r\n```json\r\n{\r\n  \"master_json\": {{2.master_json}},\r\n  \"resolution_history\": null,\r\n  \"skipped_reason\": \"No resolutions provided\"\r\n}\r\n```\r\n\r\n### If a field path is invalid or cannot be created:\r\n- Skip that specific resolution\r\n- Log a warning in the history entry under a `warnings` array\r\n- Continue processing other resolutions\r\n- Example:\r\n```json\r\n{\r\n  \"resolution_history\": {\r\n    \"date\": \"...\",\r\n    \"changes\": [...],\r\n    \"warnings\": [\r\n      {\r\n        \"field\": \"invalid.path.here\",\r\n        \"issue\": \"Could not create nested path - parent object does not exist\"\r\n      }\r\n    ]\r\n  }\r\n}\r\n```\r\n\r\n---\r\n\r\n## OUTPUT FORMAT\r\n\r\nReturn ONLY valid JSON in this exact structure:\r\n\r\n```json\r\n{\r\n  \"master_json\": {\r\n    // Full updated Master JSON with all changes applied\r\n  },\r\n  \"resolution_history\": {\r\n    // Resolution history entry as specified above\r\n  }\r\n}\r\n```\r\n\r\n**Critical requirements:**\r\n- No markdown formatting (no ```json```)\r\n- No explanations before or after\r\n- No comments inside the JSON\r\n- Preserve all existing data not mentioned in resolutions\r\n- Maintain proper JSON structure and nesting\r\n- Use proper data types (numbers as numbers, booleans as true/false)\r\n- Output keys must be exactly `\"master_json\"` and `\"resolution_history\"` (not \"new_master_json\" or \"new_history_entry\")\r\n\r\n---\r\n\r\n## VALIDATION CHECKLIST\r\n\r\nBefore returning output, verify:\r\n- [ ] All resolution values have been applied to Master JSON\r\n- [ ] Conflict markers removed from resolved fields\r\n- [ ] `_conflicts_summary._conflict_count` accurately reflects REMAINING conflicts\r\n- [ ] `_conflicts_summary._has_conflicts` is `false` ONLY if count is 0\r\n- [ ] `conflict_report` array filtered correctly (only unresolved conflicts remain)\r\n- [ ] `conflict_report.length` matches `_conflicts_summary._conflict_count`\r\n- [ ] History entry includes all changes with complete metadata\r\n- [ ] `conflicts_resolved` contains ONLY fields from resolutions payload that had conflicts\r\n- [ ] No hallucinated fields in `conflicts_resolved`\r\n- [ ] Output uses correct key names: `master_json` and `resolution_history`\r\n- [ ] Output is valid, parseable JSON\r\n- [ ] No data was accidentally deleted or corrupted\r\n\r\n---\r\n\r\n**Generate the output now.**"
+                        }
+                    ]
+                }
+            },
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0
+                },
+                "restore": {
+                    "expect": {
+                        "model": {
+                            "mode": "chose",
+                            "label": "Gemini 2.5 Pro"
+                        },
+                        "contents": {
+                            "mode": "chose",
+                            "items": [
+                                {
+                                    "role": {
+                                        "mode": "chose",
+                                        "label": "User"
+                                    },
+                                    "parts": {
+                                        "mode": "chose",
+                                        "items": [
+                                            {
+                                                "type": {
+                                                    "mode": "chose",
+                                                    "label": "Text"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        "url_context": {
+                            "mode": "chose"
+                        },
+                        "code_execution": {
+                            "mode": "chose"
+                        },
+                        "safetySettings": {
+                            "mode": "chose"
+                        },
+                        "generationConfig": {
+                            "nested": {
+                                "imageConfig": {
+                                    "nested": {
+                                        "imageSize": {
+                                            "mode": "chose",
+                                            "label": "Empty"
+                                        }
+                                    }
+                                },
+                                "stopSequences": {
+                                    "mode": "chose"
+                                },
+                                "thinkingConfig": {
+                                    "nested": {
+                                        "thinking_level": {
+                                            "mode": "chose",
+                                            "label": "Empty"
+                                        },
+                                        "include_thoughts": {
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "mediaResolution": {
+                                    "mode": "chose",
+                                    "label": "Empty"
+                                },
+                                "responseMimeType": {
+                                    "mode": "chose",
+                                    "label": "JSON Output"
+                                },
+                                "new_responseSchema": {
+                                    "mode": "chose"
+                                },
+                                "responseModalities": {
+                                    "mode": "chose"
+                                }
+                            }
+                        },
+                        "system_instruction": {
+                            "nested": {
+                                "parts": {
+                                    "mode": "chose",
+                                    "items": [
+                                        null
+                                    ]
+                                }
+                            }
+                        },
+                        "google_maps_context": {
+                            "mode": "chose"
+                        },
+                        "google_search_context": {
+                            "mode": "chose"
+                        },
+                        "file_search_store_context": {
+                            "mode": "chose"
+                        },
+                        "function_declarations_context": {
+                            "mode": "chose"
+                        }
+                    },
+                    "parameters": {
+                        "__IMTCONN__": {
+                            "data": {
+                                "scoped": "true",
+                                "connection": "gemini-ai-q9zyjp"
+                            },
+                            "label": "Gemini_Lighthouse_Key"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "__IMTCONN__",
+                        "type": "account:gemini-ai-q9zyjp",
+                        "label": "Connection",
+                        "required": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "model",
+                        "type": "select",
+                        "label": "AI Model",
+                        "required": true
+                    },
+                    {
+                        "name": "contents",
+                        "spec": [
+                            {
+                                "name": "role",
+                                "type": "select",
+                                "label": "Role",
+                                "options": [
+                                    {
+                                        "label": "User",
+                                        "value": "user"
+                                    },
+                                    {
+                                        "label": "Model",
+                                        "value": "model"
+                                    }
+                                ]
+                            },
+                            {
+                                "name": "parts",
+                                "spec": [
+                                    {
+                                        "name": "type",
+                                        "type": "select",
+                                        "label": "Message Type",
+                                        "options": [
+                                            {
+                                                "label": "Text",
+                                                "value": "text",
+                                                "nested": [
+                                                    {
+                                                        "name": "text",
+                                                        "type": "text",
+                                                        "label": "Text",
+                                                        "required": false
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "File",
+                                                "value": "file",
+                                                "nested": [
+                                                    {
+                                                        "name": "file_data",
+                                                        "spec": [
+                                                            {
+                                                                "name": "mime_type",
+                                                                "type": "text",
+                                                                "label": "Mime Type",
+                                                                "required": false
+                                                            },
+                                                            {
+                                                                "help": "You get this from the 'Upload a File' module.",
+                                                                "name": "file_uri",
+                                                                "type": "text",
+                                                                "label": "File URI",
+                                                                "required": false
+                                                            }
+                                                        ],
+                                                        "type": "collection",
+                                                        "label": "File Data",
+                                                        "required": false
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "Function Call",
+                                                "value": "functionCall",
+                                                "nested": [
+                                                    {
+                                                        "name": "functionCall",
+                                                        "spec": [
+                                                            {
+                                                                "help": "The name of the function to call.",
+                                                                "name": "name",
+                                                                "type": "text",
+                                                                "label": "Name",
+                                                                "required": true,
+                                                                "validate": {
+                                                                    "max": 64
+                                                                }
+                                                            },
+                                                            {
+                                                                "help": "The function parameters and values in JSON object format.",
+                                                                "name": "args",
+                                                                "type": "json",
+                                                                "label": "Arguments"
+                                                            },
+                                                            {
+                                                                "help": "The unique ID of the function call.",
+                                                                "name": "id",
+                                                                "type": "text",
+                                                                "label": "Function Call ID"
+                                                            }
+                                                        ],
+                                                        "type": "collection",
+                                                        "label": "Function Call"
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "label": "Function Response",
+                                                "value": "functionResponse",
+                                                "nested": [
+                                                    {
+                                                        "name": "functionResponse",
+                                                        "spec": [
+                                                            {
+                                                                "help": "The name of the function to call.",
+                                                                "name": "name",
+                                                                "type": "text",
+                                                                "label": "Name",
+                                                                "required": true,
+                                                                "validate": {
+                                                                    "max": 64
+                                                                }
+                                                            },
+                                                            {
+                                                                "help": "The function response in JSON object format.",
+                                                                "name": "response",
+                                                                "type": "json",
+                                                                "label": "Response",
+                                                                "required": true
+                                                            }
+                                                        ],
+                                                        "type": "collection",
+                                                        "label": "Function Response"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "thoughtSignature",
+                                        "type": "text",
+                                        "label": "Thought Signature"
+                                    }
+                                ],
+                                "type": "array",
+                                "label": "Parts"
+                            }
+                        ],
+                        "type": "array",
+                        "label": "Messages",
+                        "required": true
+                    },
+                    {
+                        "name": "system_instruction",
+                        "spec": [
+                            {
+                                "name": "parts",
+                                "spec": {
+                                    "name": "value",
+                                    "spec": [
+                                        {
+                                            "name": "text",
+                                            "type": "text",
+                                            "label": "Value"
+                                        }
+                                    ],
+                                    "type": "collection",
+                                    "label": "Prompt"
+                                },
+                                "type": "array",
+                                "label": "Prompts"
+                            }
+                        ],
+                        "type": "collection",
+                        "label": "System Instructions"
+                    },
+                    {
+                        "name": "safetySettings",
+                        "spec": [
+                            {
+                                "name": "category",
+                                "type": "select",
+                                "label": "Category",
+                                "options": [
+                                    {
+                                        "label": "Harassment content",
+                                        "value": "HARM_CATEGORY_HARASSMENT"
+                                    },
+                                    {
+                                        "label": "Hate speech and content",
+                                        "value": "HARM_CATEGORY_HATE_SPEECH"
+                                    },
+                                    {
+                                        "label": "Sexually explicit content.",
+                                        "value": "HARM_CATEGORY_SEXUALLY_EXPLICIT"
+                                    },
+                                    {
+                                        "label": "Dangerous content:",
+                                        "value": "HARM_CATEGORY_DANGEROUS_CONTENT"
+                                    }
+                                ]
+                            },
+                            {
+                                "name": "threshold",
+                                "type": "select",
+                                "label": "Threshold",
+                                "options": [
+                                    {
+                                        "label": "Block low and above.",
+                                        "value": "BLOCK_LOW_AND_ABOVE"
+                                    },
+                                    {
+                                        "label": "Block medium and above.",
+                                        "value": "BLOCK_MEDIUM_AND_ABOVE"
+                                    },
+                                    {
+                                        "label": "Block only high.",
+                                        "value": "BLOCK_ONLY_HIGH"
+                                    },
+                                    {
+                                        "label": "Block none.",
+                                        "value": "BLOCK_NONE"
+                                    }
+                                ]
+                            }
+                        ],
+                        "type": "array",
+                        "label": "Safety Settings"
+                    },
+                    {
+                        "name": "generationConfig",
+                        "spec": [
+                            {
+                                "name": "stopSequences",
+                                "spec": {
+                                    "name": "value",
+                                    "type": "text",
+                                    "label": "Stop Sequence"
+                                },
+                                "type": "array",
+                                "label": "Stop Sequences"
+                            },
+                            {
+                                "name": "responseModalities",
+                                "type": "select",
+                                "label": "Response Modalities",
+                                "multiple": true,
+                                "validate": {
+                                    "enum": [
+                                        "text",
+                                        "image"
+                                    ]
+                                }
+                            },
+                            {
+                                "name": "maxOutputTokens",
+                                "type": "number",
+                                "label": "Max Output Tokens"
+                            },
+                            {
+                                "name": "temperature",
+                                "type": "number",
+                                "label": "Temperature",
+                                "validate": {
+                                    "max": 1,
+                                    "min": 0
+                                }
+                            },
+                            {
+                                "name": "topP",
+                                "type": "number",
+                                "label": "Top P",
+                                "validate": {
+                                    "max": 1,
+                                    "min": 0
+                                }
+                            },
+                            {
+                                "name": "topK",
+                                "type": "number",
+                                "label": "Top K"
+                            },
+                            {
+                                "name": "thinkingConfig",
+                                "spec": [
+                                    {
+                                        "name": "thinkingBudget",
+                                        "type": "number",
+                                        "label": "Thinking Budget"
+                                    },
+                                    {
+                                        "name": "include_thoughts",
+                                        "type": "boolean",
+                                        "label": "Include Thoughts"
+                                    },
+                                    {
+                                        "name": "thinking_level",
+                                        "type": "select",
+                                        "label": "Thinking Level",
+                                        "validate": {
+                                            "enum": [
+                                                "low",
+                                                "high"
+                                            ]
+                                        }
+                                    }
+                                ],
+                                "type": "collection",
+                                "label": "Thinking Config"
+                            },
+                            {
+                                "name": "mediaResolution",
+                                "type": "select",
+                                "label": "Media Resolution",
+                                "validate": {
+                                    "enum": [
+                                        "media_resolution_low",
+                                        "media_resolution_medium",
+                                        "media_resolution_high"
+                                    ]
+                                }
+                            },
+                            {
+                                "name": "imageConfig",
+                                "spec": [
+                                    {
+                                        "name": "imageSize",
+                                        "type": "select",
+                                        "label": "Image Size",
+                                        "validate": {
+                                            "enum": [
+                                                "1K",
+                                                "2K",
+                                                "4K"
+                                            ]
+                                        }
+                                    }
+                                ],
+                                "type": "collection",
+                                "label": "Image Configuration"
+                            },
+                            {
+                                "name": "responseMimeType",
+                                "type": "select",
+                                "label": "Response Format"
+                            },
+                            {
+                                "name": "responseSchema",
+                                "type": "any",
+                                "label": "Response Schema (Deprecated)"
+                            },
+                            {
+                                "name": "new_responseSchema",
+                                "spec": [
+                                    {
+                                        "name": "type",
+                                        "type": "select",
+                                        "label": "Value Type",
+                                        "options": [
+                                            {
+                                                "label": "String",
+                                                "value": "string",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=string"
+                                            },
+                                            {
+                                                "label": "Enum",
+                                                "value": "enum",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=enum"
+                                            },
+                                            {
+                                                "label": "Number",
+                                                "value": "number",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=number"
+                                            },
+                                            {
+                                                "label": "Integer",
+                                                "value": "integer",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=integer"
+                                            },
+                                            {
+                                                "label": "Boolean",
+                                                "value": "boolean",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=boolean"
+                                            },
+                                            {
+                                                "label": "Object",
+                                                "value": "object",
+                                                "nested": "rpc://gemini-ai/1/createResponseSchema?type=object"
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "type": "array",
+                                "label": "Response Schema"
+                            }
+                        ],
+                        "type": "collection",
+                        "label": "Generation configurations"
+                    },
+                    {
+                        "name": "tools",
+                        "type": "any",
+                        "label": "Tools"
+                    },
+                    {
+                        "name": "tool_config",
+                        "type": "any",
+                        "label": "Tool Config"
+                    },
+                    {
+                        "name": "function_declarations_context",
+                        "type": "boolean",
+                        "label": "Function Declarations Grounding"
+                    },
+                    {
+                        "name": "url_context",
+                        "type": "boolean",
+                        "label": "URL Context"
+                    },
+                    {
+                        "name": "google_search_context",
+                        "type": "boolean",
+                        "label": "Google Search Grounding"
+                    },
+                    {
+                        "name": "code_execution",
+                        "type": "boolean",
+                        "label": "Code Execution"
+                    },
+                    {
+                        "name": "google_maps_context",
+                        "type": "boolean",
+                        "label": "Google Maps Grounding"
+                    },
+                    {
+                        "name": "file_search_store_context",
+                        "type": "boolean",
+                        "label": "File Search Store Context"
+                    }
+                ],
+                "advanced": true
+            }
+        },
+        {
+            "id": 4,
+            "module": "supabase:upsertARecord",
+            "version": 1,
+            "parameters": {
+                "__IMTCONN__": 13552822
+            },
+            "mapper": {
+                "id": "{{2.id}}",
+                "table": "properties",
+                "status": "Trained",
+                "master_json": "{{3.result.master_json}}",
+                "conflict_report": "{{3.result.master_json.conflict_report}}",
+                "conflict_status": "{{if(3.result.master_json.`_conflicts_summary`.`_has_conflicts`; \"Waiting\"; \"Resolved\")}}",
+                "resolution_history_json": "{{add(ifempty(2.resolution_history_json; emptyarray); 3.result.resolution_history)}}"
+            },
+            "metadata": {
+                "designer": {
+                    "x": 956,
+                    "y": -2
+                },
+                "restore": {
+                    "expect": {
+                        "table": {
+                            "mode": "chose",
+                            "label": "properties",
+                            "nested": [
+                                {
+                                    "help": "Defaults to gen_random_uuid(). Note:\nThis is a Primary Key.<pk/>",
+                                    "name": "id",
+                                    "type": "text",
+                                    "label": "id",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "Defaults to timezone('utc'::text, now()). ",
+                                    "name": "created_at",
+                                    "type": "text",
+                                    "label": "created_at",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "Defaults to auth.uid(). ",
+                                    "name": "owner_id",
+                                    "type": "text",
+                                    "label": "owner_id",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "name",
+                                    "type": "text",
+                                    "label": "name",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "airbnb_url",
+                                    "type": "text",
+                                    "label": "airbnb_url",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "Defaults to Training. ",
+                                    "name": "status",
+                                    "type": "text",
+                                    "label": "status",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "master_json",
+                                    "type": "text",
+                                    "label": "master_json",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "scraped_markdown",
+                                    "type": "text",
+                                    "label": "scraped_markdown",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "ingested_markdown",
+                                    "type": "text",
+                                    "label": "ingested_markdown",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "This column returns the state of the Conflicts or discrepancies found in the data",
+                                    "name": "conflict_status",
+                                    "type": "text",
+                                    "label": "conflict_status",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "Here the conflicting questions from the Merger will be stored",
+                                    "name": "conflict_report",
+                                    "type": "text",
+                                    "label": "conflict_report",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "This is a LOG where all the conflicts and their resolutions get stored",
+                                    "name": "resolution_history",
+                                    "type": "text",
+                                    "label": "resolution_history",
+                                    "options": null,
+                                    "required": false
+                                },
+                                {
+                                    "help": "",
+                                    "name": "resolution_history_json",
+                                    "type": "text",
+                                    "label": "resolution_history_json",
+                                    "options": null,
+                                    "required": false
+                                }
+                            ]
+                        }
+                    },
+                    "parameters": {
+                        "__IMTCONN__": {
+                            "data": {
+                                "scoped": "true",
+                                "connection": "supabase"
+                            },
+                            "label": "Supabase Alfred Connection"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "__IMTCONN__",
+                        "type": "account:supabase",
+                        "label": "Connection",
+                        "required": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "table",
+                        "type": "select",
+                        "label": "Table",
+                        "required": true
+                    },
+                    {
+                        "name": "id",
+                        "type": "text"
+                    },
+                    {
+                        "name": "created_at",
+                        "type": "text"
+                    },
+                    {
+                        "name": "owner_id",
+                        "type": "text"
+                    },
+                    {
+                        "name": "name",
+                        "type": "text"
+                    },
+                    {
+                        "name": "airbnb_url",
+                        "type": "text"
+                    },
+                    {
+                        "name": "status",
+                        "type": "text"
+                    },
+                    {
+                        "name": "master_json",
+                        "type": "text"
+                    },
+                    {
+                        "name": "scraped_markdown",
+                        "type": "text"
+                    },
+                    {
+                        "name": "ingested_markdown",
+                        "type": "text"
+                    },
+                    {
+                        "name": "conflict_status",
+                        "type": "text"
+                    },
+                    {
+                        "name": "conflict_report",
+                        "type": "text"
+                    },
+                    {
+                        "name": "resolution_history",
+                        "type": "text"
+                    },
+                    {
+                        "name": "resolution_history_json",
+                        "type": "text"
+                    }
+                ],
+                "interface": [
+                    {
+                        "name": "id",
+                        "type": "text",
+                        "label": "id"
+                    },
+                    {
+                        "name": "created_at",
+                        "type": "text",
+                        "label": "created_at"
+                    },
+                    {
+                        "name": "owner_id",
+                        "type": "text",
+                        "label": "owner_id"
+                    },
+                    {
+                        "name": "name",
+                        "type": "text",
+                        "label": "name"
+                    },
+                    {
+                        "name": "airbnb_url",
+                        "type": "text",
+                        "label": "airbnb_url"
+                    },
+                    {
+                        "name": "status",
+                        "type": "text",
+                        "label": "status"
+                    },
+                    {
+                        "name": "master_json",
+                        "type": "text",
+                        "label": "master_json"
+                    },
+                    {
+                        "name": "scraped_markdown",
+                        "type": "text",
+                        "label": "scraped_markdown"
+                    },
+                    {
+                        "name": "ingested_markdown",
+                        "type": "text",
+                        "label": "ingested_markdown"
+                    },
+                    {
+                        "name": "conflict_status",
+                        "type": "text",
+                        "label": "conflict_status"
+                    },
+                    {
+                        "name": "conflict_report",
+                        "type": "text",
+                        "label": "conflict_report"
+                    },
+                    {
+                        "name": "resolution_history",
+                        "type": "text",
+                        "label": "resolution_history"
+                    },
+                    {
+                        "name": "resolution_history_json",
+                        "type": "text",
+                        "label": "resolution_history_json"
+                    }
+                ]
+            }
+        }
+    ],
+    "metadata": {
+        "instant": true,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": []
+    }
+}
