@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:realtime_client/realtime_client.dart' show FilterType;
 
 class ChatLiveScreen extends StatefulWidget {
   final String bookingId;
@@ -26,7 +26,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   bool _isSending = false;
   final _hostController = TextEditingController();
   final _scrollController = ScrollController();
-  RealtimeChannel? _channel;
+  StreamSubscription<List<Map<String, dynamic>>>? _subscription;
 
   @override
   void initState() {
@@ -36,7 +36,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
 
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _subscription?.cancel();
     _hostController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -58,41 +58,24 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   }
 
   void _subscribeToMessages(String conversationId) {
-    _channel?.unsubscribe();
-    _channel = Supabase.instance.client.channel('live:$conversationId');
-    _channel!
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'messages',
-          filter: PostgresChangeFilter(
-            type: FilterType.eq,
-            column: 'conversation_id',
-            value: conversationId,
-          ),
-          callback: (payload) {
-            _reloadMessages(conversationId);
+    _subscription?.cancel();
+    _subscription = Supabase.instance.client
+        .from('messages')
+        .stream(primaryKey: ['id'])
+        .eq('conversation_id', conversationId)
+        .order('created_at', ascending: true)
+        .listen((data) {
+          if (mounted) {
+            setState(() => _messages = data);
+            _scrollToBottom();
             // Auto-switch to intervene when an escalated AI message arrives
-            if (payload.newRecord['is_escalated_interaction'] == true &&
-                _mode == 'autopilot') {
+            if (_mode == 'autopilot' &&
+                data.isNotEmpty &&
+                data.last['is_escalated_interaction'] == true) {
               _setMode('intervene');
             }
-          },
-        )
-        .subscribe();
-    _reloadMessages(conversationId);
-  }
-
-  Future<void> _reloadMessages(String conversationId) async {
-    final data = await Supabase.instance.client
-        .from('messages')
-        .select('sender_type, content, created_at, is_escalated_interaction')
-        .eq('conversation_id', conversationId)
-        .order('created_at', ascending: true);
-    if (mounted) {
-      setState(() => _messages = List<Map<String, dynamic>>.from(data));
-      _scrollToBottom();
-    }
+          }
+        });
   }
 
   void _scrollToBottom() {

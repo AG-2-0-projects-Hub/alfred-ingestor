@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:realtime_client/realtime_client.dart' show FilterType;
 
 class ChatScreen extends StatefulWidget {
   final String bookingId;
@@ -19,7 +19,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isWaiting = false;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
-  RealtimeChannel? _channel;
+  StreamSubscription<List<Map<String, dynamic>>>? _subscription;
 
   @override
   void initState() {
@@ -29,7 +29,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _subscription?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -48,34 +48,18 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _subscribeToMessages(String conversationId) {
-    _channel?.unsubscribe();
-    _channel = Supabase.instance.client.channel('chat:$conversationId');
-    _channel!
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'messages',
-          filter: PostgresChangeFilter(
-            type: FilterType.eq,
-            column: 'conversation_id',
-            value: conversationId,
-          ),
-          callback: (_) => _reloadMessages(conversationId),
-        )
-        .subscribe();
-    _reloadMessages(conversationId);
-  }
-
-  Future<void> _reloadMessages(String conversationId) async {
-    final data = await Supabase.instance.client
+    _subscription?.cancel();
+    _subscription = Supabase.instance.client
         .from('messages')
-        .select('sender_type, content, created_at')
+        .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
-        .order('created_at', ascending: true);
-    if (mounted) {
-      setState(() => _messages = List<Map<String, dynamic>>.from(data));
-      _scrollToBottom();
-    }
+        .order('created_at', ascending: true)
+        .listen((data) {
+          if (mounted) {
+            setState(() => _messages = data);
+            _scrollToBottom();
+          }
+        });
   }
 
   void _scrollToBottom() {
