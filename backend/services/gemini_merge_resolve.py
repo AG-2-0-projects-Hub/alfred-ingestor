@@ -656,3 +656,44 @@ async def run_resolver(master_json: dict, resolutions: list) -> dict:
             f"Gemini Resolver returned invalid JSON: {exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
         ) from exc
+
+
+# ── Knowledge Injector ────────────────────────────────────────────────────────
+
+_INJECTOR_SYSTEM = """You are a Data Surgeon. Given the existing master_json for a property and a piece of new information provided by the host, integrate the new knowledge into the correct fields of master_json. Add new fields if needed, update existing ones if the new info supersedes them. Do not remove any existing data. Do not invent anything. Return the complete updated master_json and a brief changes_log array summarising what changed.
+
+Return a single JSON object with this exact structure:
+{
+  "master_json": { ...complete updated JSON... },
+  "changes_log": [
+    { "field": "access.parking_code", "action": "updated", "new_value": "1234#" }
+  ]
+}"""
+
+_INJECTOR_USER = """Existing master_json:
+{master_json}
+
+New knowledge to integrate:
+{new_text}"""
+
+
+async def run_knowledge_injection(
+    master_json: dict, new_text: str
+) -> dict:
+    """Integrate new_text into master_json via Gemini. Returns {master_json, changes_log}."""
+    client = _get_client()
+    master_json_str = json.dumps(master_json, ensure_ascii=False, indent=2)
+    user_prompt = _fill(_INJECTOR_USER, master_json=master_json_str, new_text=new_text)
+    response = await client.aio.models.generate_content(
+        model=MODEL,
+        contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+        config=types.GenerateContentConfig(system_instruction=_INJECTOR_SYSTEM),
+    )
+    try:
+        return _parse_json_response(response.text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Gemini Knowledge Injector returned invalid JSON: {exc}\n"
+            f"Raw (first 500 chars): {response.text[:500]}"
+        ) from exc
+

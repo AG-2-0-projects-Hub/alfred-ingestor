@@ -23,7 +23,12 @@ def _now() -> str:
 
 # ── Property row ──────────────────────────────────────────────────────────────
 
-def insert_property(property_id: str, name: str = "", airbnb_url: str = "") -> None:
+def insert_property(
+    property_id: str,
+    name: str = "",
+    airbnb_url: str = "",
+    owner_id: str | None = None,
+) -> None:
     """Upsert a row in the properties table, preserving existing fields."""
     client = get_client()
     row: dict = {"id": property_id, "updated_at": _now()}
@@ -31,6 +36,8 @@ def insert_property(property_id: str, name: str = "", airbnb_url: str = "") -> N
         row["name"] = name
     if airbnb_url:
         row["airbnb_url"] = airbnb_url
+    if owner_id:
+        row["owner_id"] = owner_id
     client.table("properties").upsert(row).execute()
 
 
@@ -295,6 +302,53 @@ def update_conversation(conversation_id: str, **fields) -> None:
     client = get_client()
     fields["last_message_at"] = _now()
     client.table("conversations").update(fields).eq("id", conversation_id).execute()
+
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+
+# ── Knowledge injection ───────────────────────────────────────────────────────
+
+def update_master_json(property_id: str, master_json_dict: dict) -> None:
+    """Overwrite master_json only — does not touch status or Conflict_status."""
+    client = get_client()
+    client.table("properties").update(
+        {"master_json": master_json_dict, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
+# ── Guest / booking ───────────────────────────────────────────────────────────
+
+def create_guest(
+    booking_id: str,
+    property_id: str,
+    name: str,
+    guest_chat_url: str,
+    host_chat_url: str,
+) -> dict:
+    """Insert a new guest booking row and return it."""
+    client = get_client()
+    result = client.table("guests").insert({
+        "booking_id": booking_id,
+        "property_id": property_id,
+        "name": name,
+        "preferred_language": "english",
+        "guest_chat_url": guest_chat_url,
+        "host_chat_url": host_chat_url,
+    }).execute()
+    return result.data[0]
+
+
+def get_guests_for_property(property_id: str) -> list[dict]:
+    """Return all guests for a property joined with their conversation row."""
+    client = get_client()
+    result = (
+        client.table("guests")
+        .select("id, booking_id, name, guest_chat_url, host_chat_url, conversations(mode, last_message_at, requires_attention, ai_status)")
+        .eq("property_id", property_id)
+        .order("booking_id")
+        .execute()
+    )
+    return result.data or []
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────

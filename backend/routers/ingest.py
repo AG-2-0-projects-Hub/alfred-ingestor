@@ -24,7 +24,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import httpx
 
-from services import supabase_client, hash_guard, file_processor
+from services import supabase_client, hash_guard, file_processor, gemini_merge_resolve
+import services.gemini_client as gemini_client
 
 router = APIRouter()
 
@@ -45,10 +46,27 @@ def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _get_owner_id(request: Request) -> str | None:
+    """Extract owner UID from Authorization: Bearer <token> header. Returns None on missing/invalid."""
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth[7:].strip()
+    if not token:
+        return None
+    try:
+        client = supabase_client.get_client()
+        response = client.auth.get_user(token)
+        return response.user.id if response and response.user else None
+    except Exception:
+        return None
+
+
 @router.post("/ingest")
 async def ingest(req: IngestRequest, request: Request):
     airbnb_url = req.airbnb_url.strip()
     temp_id = req.property_id
+    owner_id = await asyncio.to_thread(_get_owner_id, request)
 
     # Resolve canonical property and enforce 409 lock BEFORE opening SSE stream (REQ-20)
     property_id = temp_id
@@ -76,7 +94,7 @@ async def ingest(req: IngestRequest, request: Request):
 
             # Upsert property row then set Ingesting (REQ-20)
             await asyncio.to_thread(
-                supabase_client.insert_property, property_id, req.property_name, airbnb_url
+                supabase_client.insert_property, property_id, req.property_name, airbnb_url, owner_id
             )
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
 
@@ -215,3 +233,50 @@ async def ingest(req: IngestRequest, request: Request):
         media_type="text/event-stream",
         headers=sse_headers,
     )
+
+
+# ── Add Knowledge ─────────────────────────────────────────────────────────────
+
+class AddKnowledgeRequest(BaseModel):
+    property_id: str
+    text: str = ""
+    storage_path: str = ""  # voice path: "<uuid>/user_uploads/<filename>"
+
+
+@router.post("/ingest/add-knowledge")
+async def add_knowledge(req: AddKnowledgeRequest, request: Request):
+    if not req.text and not req.storage_path:
+        return JSONResponse(status_code=422, content={"detail": "Provide text or storage_path."})
+
+    # Resolve text from voice if needed
+    knowledge_text = req.text
+    if req.storage_path and not req.text:
+        parts = req.storage_path.split("/")
+        # storage_path format: <property_id>/user_uploads/<filename>
+        if len(parts) >= 3:
+            prop_id_from_path = parts[0]
+            filename = parts[-1]
+            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "m4a"
+            mime = {"m4a": "audio/m4a", "mp3": "audio/mp3", "wav": "audio/wav",
+                    "webm": "audio/webm", "ogg": "audio/ogg"}.get(ext, "audio/m4a")
+            data = await asyncio.to_thread(
+                supabase_client.download_file, prop_id_from_path, filename
+            )
+            uri = await gemini_client.upload_file(data, filename, mime)
+            knowledge_text = await gemini_client.process_with_prompt_c(uri, mime)
+
+    # Fetch current master_json
+    row = await asyncio.to_thread(supabase_client.get_property_for_merge, req.property_id)
+    if not row:
+        return JSONResponse(status_code=404, content={"detail": "Property not found."})
+
+    master_json = row.get("master_json") or {}
+
+    # Run Gemini Knowledge Injector
+    result = await gemini_merge_resolve.run_knowledge_injection(master_json, knowledge_text)
+    updated_json = result.get("master_json", master_json)
+
+    # Persist
+    await asyncio.to_thread(supabase_client.update_master_json, req.property_id, updated_json)
+
+    return {"status": "ok", "master_json": updated_json, "changes_log": result.get("changes_log", [])}

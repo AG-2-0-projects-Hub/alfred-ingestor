@@ -1,4 +1,8 @@
 import asyncio
+import os
+import random
+import re
+import string
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services import supabase_client, gemini_messenger
@@ -121,3 +125,58 @@ async def host_send(req: HostSendRequest):
         ai_status="paused",
     )
     return {"status": "sent"}
+
+
+# ── Guest link generation ─────────────────────────────────────────────────────
+
+class CreateGuestRequest(BaseModel):
+    property_id: str
+    guest_name: str = "Guest"
+
+
+def _slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    return re.sub(r"-+", "-", text)
+
+
+def _random_suffix(n: int = 6) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+
+
+@router.post("/guests")
+async def create_guest(req: CreateGuestRequest):
+    # Fetch property name for the slug
+    prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    slug = _slugify(prop.get("name") or "property")
+    frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0].strip().rstrip("/")
+
+    # Retry on booking_id collision (very unlikely but safe)
+    for _ in range(5):
+        booking_id = f"{slug}-{_random_suffix()}"
+        guest_chat_url = f"{frontend_url}/chat?booking={booking_id}"
+        host_chat_url = f"{frontend_url}/chat-live?booking={booking_id}&property={req.property_id}"
+        try:
+            guest = await asyncio.to_thread(
+                supabase_client.create_guest,
+                booking_id,
+                req.property_id,
+                req.guest_name,
+                guest_chat_url,
+                host_chat_url,
+            )
+            return {
+                "booking_id": booking_id,
+                "guest_chat_url": guest_chat_url,
+                "host_chat_url": host_chat_url,
+            }
+        except Exception as exc:
+            if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
+                continue
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    raise HTTPException(status_code=500, detail="Could not generate unique booking ID")

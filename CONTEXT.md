@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-04-17
+**Last Session:** 2026-05-07
 
 ---
 
@@ -131,9 +131,73 @@
 
 ---
 
+## Session 2026-05-07 (Part 3) — UI Upgrade Implemented
+
+### Status
+Full UI overhaul complete. All code committed. Awaiting Supabase Step B + browser testing.
+
+### Supabase Step A — DONE
+- Email auth enabled ✅
+- RLS enabled on `properties` ✅
+- `owner_only` policy created ✅
+- `UPDATE properties SET owner_id = '<uid>'` — **pending** (run after first login to claim existing rows)
+
+### Supabase Step B — PENDING (do before testing guest link generation)
+- Add `guest_chat_url` + `host_chat_url` columns to `guests` table (see plan §1 Step B)
+- Add RLS policy on `guests` table (optional but recommended)
+
+### What was built
+| File | Change |
+|---|---|
+| `backend/services/supabase_client.py` | `insert_property()` gets `owner_id` param; added `update_master_json()`, `create_guest()`, `get_guests_for_property()` |
+| `backend/services/gemini_merge_resolve.py` | Added `run_knowledge_injection()` (Knowledge Injector prompt) |
+| `backend/routers/ingest.py` | Auth header extraction + `owner_id` stamping; new `POST /api/ingest/add-knowledge` |
+| `backend/routers/messages.py` | New `POST /api/guests` endpoint (slug-based booking ID generation) |
+| `frontend/lib/main.dart` | Auth guard + all new routes; `_AuthWatcher` for logout redirect |
+| `frontend/lib/screens/auth_screen.dart` | NEW — login/signup card |
+| `frontend/lib/screens/dashboard_screen.dart` | NEW — responsive property grid |
+| `frontend/lib/screens/add_property_screen.dart` | NEW — refactored IngestScreen with auth token + back button |
+| `frontend/lib/screens/host_panel_screen.dart` | NEW — per-property conversation list |
+| `frontend/lib/widgets/property_card.dart` | NEW — state-aware card (Processing/Conflict/Ready/Error states) |
+| `frontend/lib/widgets/property_detail_drawer.dart` | NEW — 4-tab side drawer (Overview/Files/Knowledge/Resolve) |
+| `frontend/lib/widgets/generate_guest_link_dialog.dart` | NEW — 2-step dialog: name input → copy-able URLs |
+
+---
+
+## Session 2026-05-07 — Messenger Phase 1 Verified
+
+### Commits deployed
+- `ea6e6d3` — fix: replace onPostgresChanges with .stream() API in both chat screens (already pushed to origin/main, Vercel auto-deployed)
+
+### Test data inserted (Supabase)
+- **guests:** `booking_id=TEST-001`, `property_id=9bea38ea-ac14-4e3a-abbc-b31ab9774e32` (dos rios), `preferred_language=english`
+- **conversations:** pre-created row for TEST-001 (id: `12b4ec10-efe3-44cb-848a-009cbf6e0475`)
+
+### E2E audit results (2026-05-07)
+| Check | Result |
+|---|---|
+| Backend health (`/health`) | ✅ 200 OK |
+| Vercel frontend | ✅ 200 OK |
+| `ea6e6d3` pushed & deployed | ✅ Confirmed (git up to date with origin) |
+| `POST /api/messages/web-incoming` (TEST-001) | ✅ 200 OK, ~11s, Alfred replied correctly |
+| Guest message written to messages table | ✅ Confirmed |
+| AI reply written with sentiment | ✅ `sentiment: "positive"` |
+| Properties with master_json | `dos rios` (Trained), `Bungalow bot` (Ingesting) |
+| Realtime `.stream()` fix | Code verified — cannot test realtime without browser |
+
+### Chat test URLs
+- Guest view: `https://alfred-ingestor.vercel.app/chat?booking=TEST-001`
+- Host live panel: `https://alfred-ingestor.vercel.app/chat-live?booking=TEST-001&property=9bea38ea-ac14-4e3a-abbc-b31ab9774e32`
+
+---
+
 ## Next Steps
-1. Add `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env (restores REQ-27 primary path)
-2. End-to-end REQ-08 test: upload a CSV via UI and trigger ingest
-3. End-to-end REQ-25 audit: upload a minimal 1-page PDF, verify sections with no data show "Not provided"
-4. Confirm live app heartbeat/file processing after `4dab792` deploy
-5. Fix UUID persistence across page refreshes
+1. **Supabase Step B** — Add `guest_chat_url` + `host_chat_url` columns to `guests` table (SQL in plan §1 Step B). Required before generating guest links.
+2. **First login + UID capture** — sign up at deployed Vercel URL, copy UID from Supabase Auth dashboard, run `UPDATE properties SET owner_id = '<uid>';` to claim existing properties.
+3. **Deploy** — push to `main` → Render + Vercel auto-deploy. Verify login page loads and redirects to dashboard.
+4. **Browser verification checklist** — work through all items in `Context/UI_upgrade_plan_Claude.md §5`.
+5. **Messenger browser test** — guest view + host live panel realtime test (both chat URLs still valid).
+6. **Ingest backlog** (lower priority):
+   - Add `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env
+   - End-to-end REQ-08 test (CSV upload)
+   - Fix UUID persistence across page refreshes

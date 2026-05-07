@@ -1,0 +1,546 @@
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
+import '../widgets/drop_zone.dart';
+import '../widgets/voice_recorder.dart';
+import '../widgets/file_status_list.dart';
+import '../widgets/conflict_questionnaire.dart';
+
+class AddPropertyScreen extends StatefulWidget {
+  const AddPropertyScreen({super.key});
+
+  @override
+  State<AddPropertyScreen> createState() => _AddPropertyScreenState();
+}
+
+class _AddPropertyScreenState extends State<AddPropertyScreen> {
+  final _nicknameController = TextEditingController();
+  final _urlController = TextEditingController();
+  late final String _propertyId;
+  String? _resolvedPropertyId;
+  bool _isIngesting = false;
+  bool _isMerging = false;
+  final List<Map<String, String>> _filesToIngest = [];
+  final List<Map<String, String>> _fileStatuses = [];
+  String? _ingestedMarkdown;
+  String? _officialPropertyName;
+  String? _heroImageUrl;
+  String? _propertyStatus;
+  Map<String, dynamic>? _masterJson;
+
+  static const _postMergeStatuses = {
+    'Merged',
+    'Conflict_Pending',
+    'Trained',
+    'Fully_Trained',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _propertyId = _generateUuidV4();
+    _urlController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _nicknameController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  String _generateUuidV4() {
+    final rng = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
+
+  void _onFileAdded(String filename) {
+    setState(() {
+      _filesToIngest.add({'file': filename, 'status': 'processing', 'message': ''});
+    });
+  }
+
+  void _onFileResult(String filename, bool success) {
+    setState(() {
+      final idx = _filesToIngest.indexWhere((e) => e['file'] == filename);
+      if (idx >= 0) {
+        _filesToIngest[idx] = {
+          'file': filename,
+          'status': success ? 'queued' : 'error',
+          'message': success ? '' : 'Upload failed',
+        };
+      }
+    });
+  }
+
+  Future<void> _startIngest() async {
+    final url = _urlController.text.trim();
+    if (url.isEmpty || _isIngesting) return;
+
+    setState(() {
+      _isIngesting = true;
+      _resolvedPropertyId = null;
+      _fileStatuses.clear();
+      _ingestedMarkdown = null;
+      _officialPropertyName = null;
+      _heroImageUrl = null;
+      _propertyStatus = null;
+      _masterJson = null;
+    });
+
+    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+    // Attach the auth token so backend stamps owner_id on the property row.
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+
+    try {
+      final request = http.Request('POST', Uri.parse('$backendUrl/api/ingest'))
+        ..headers['Content-Type'] = 'application/json';
+      if (token != null) request.headers['Authorization'] = 'Bearer $token';
+      request.body = jsonEncode({
+        'property_id': _propertyId,
+        'property_name': _nicknameController.text.trim(),
+        'airbnb_url': url,
+      });
+
+      final response = await http.Client().send(request);
+      try {
+        await for (final chunk in response.stream
+            .transform(utf8.decoder)
+            .timeout(const Duration(seconds: 90),
+                onTimeout: (sink) => sink.close())) {
+          for (final line in chunk.split('\n')) {
+            if (line.startsWith('data: ')) {
+              final raw = line.substring(6).trim();
+              if (raw.isEmpty) continue;
+              try {
+                _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
+              } catch (_) {}
+            }
+          }
+        }
+      } finally {
+        _markPendingFilesAsTimeout();
+      }
+
+      final effectiveId = _resolvedPropertyId ?? _propertyId;
+      final result = await Supabase.instance.client
+          .from('properties')
+          .select('ingested_markdown, scraped_markdown, status, master_json')
+          .eq('id', effectiveId)
+          .maybeSingle();
+
+      if (result != null) {
+        final ingested = result['ingested_markdown'] as String?;
+        final scraped = result['scraped_markdown'] as String?;
+        final name = _parseOfficialName(scraped);
+        final heroUrl = await _getHeroImageUrl(effectiveId);
+        setState(() {
+          _ingestedMarkdown = ingested;
+          _officialPropertyName = name;
+          _heroImageUrl = heroUrl;
+          _propertyStatus = result['status'] as String?;
+          _masterJson = result['master_json'] as Map<String, dynamic>?;
+          _filesToIngest.clear();
+        });
+      }
+    } catch (e) {
+      _showError('Ingest failed: $e');
+    } finally {
+      setState(() => _isIngesting = false);
+    }
+  }
+
+  void _handleSseEvent(Map<String, dynamic> event) {
+    final file = event['file'] as String? ?? '';
+    final status = event['status'] as String? ?? '';
+    final message = event['message'] as String? ?? '';
+
+    if (status == 'heartbeat' || status == 'stream_closed') return;
+
+    if (file == '(system)' && status == 'property_id') {
+      setState(() => _resolvedPropertyId = message);
+      return;
+    }
+
+    setState(() {
+      final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
+      if (idx >= 0) {
+        _fileStatuses[idx] = {'file': file, 'status': status, 'message': message};
+      } else {
+        _fileStatuses.add({'file': file, 'status': status, 'message': message});
+      }
+    });
+  }
+
+  void _markPendingFilesAsTimeout() {
+    setState(() {
+      for (var i = 0; i < _fileStatuses.length; i++) {
+        final s = _fileStatuses[i]['status'];
+        if (s == 'queued' || s == 'processing') {
+          _fileStatuses[i] = {
+            'file': _fileStatuses[i]['file']!,
+            'status': 'timeout',
+            'message': 'No response — try again',
+          };
+        }
+      }
+    });
+  }
+
+  String? _parseOfficialName(String? markdown) {
+    if (markdown == null) return null;
+    final match = RegExp(r'\*\*Property Name:\*\*\s*(.+)').firstMatch(markdown);
+    return match?.group(1)?.trim();
+  }
+
+  Future<String?> _getHeroImageUrl(String propertyId) async {
+    try {
+      return await Supabase.instance.client.storage
+          .from('Property_assets')
+          .createSignedUrl('$propertyId/hero_image/main.jpg', 3600);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _runMerge() async {
+    final id = _resolvedPropertyId ?? _propertyId;
+    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+    setState(() => _isMerging = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/merge/$id'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        setState(() {
+          _propertyStatus = data['status'] as String?;
+          _masterJson = data['master_json'] as Map<String, dynamic>?;
+        });
+      } else {
+        _showError('Merge failed (${response.statusCode})');
+      }
+    } catch (e) {
+      _showError('Merge failed: $e');
+    } finally {
+      setState(() => _isMerging = false);
+    }
+  }
+
+  void _onResolved(String status, Map<String, dynamic> masterJson) {
+    setState(() {
+      _propertyStatus = status;
+      _masterJson = masterJson;
+    });
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  }
+
+  Widget _buildStatusBadge(String status) {
+    final label = switch (status) {
+      'Ingested' => 'Ingested — Ready to Merge',
+      'Merged' => 'Merged',
+      'Conflict_Pending' => 'Conflicts Pending Review',
+      'Trained' => 'Trained',
+      'Fully_Trained' => 'Fully Trained',
+      _ => status,
+    };
+    final color = switch (status) {
+      'Ingested' => Colors.amber.shade700,
+      'Merged' || 'Trained' => Colors.green.shade700,
+      'Conflict_Pending' => Colors.orange.shade800,
+      'Fully_Trained' => Colors.indigo.shade700,
+      _ => Colors.grey.shade700,
+    };
+    return Row(
+      children: [
+        const Text('Status:',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: color.withAlpha(30),
+            border: Border.all(color: color.withAlpha(100)),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: color)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMasterJsonViewer() {
+    if (_masterJson == null) return const SizedBox.shrink();
+    final prettyJson = const JsonEncoder.withIndent('  ').convert(_masterJson);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Master JSON',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 400),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(8)),
+          child: SingleChildScrollView(
+            child: SelectableText(
+              prettyJson,
+              style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 1.5,
+                  color: Color(0xFFD4D4D4)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canIngest = _urlController.text.trim().isNotEmpty && !_isIngesting;
+    final effectiveId = _resolvedPropertyId ?? _propertyId;
+    final conflictReport = _masterJson?['conflict_report'] as List<dynamic>?;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Add Property'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        leading: BackButton(onPressed: () => Navigator.of(context).pop()),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: _nicknameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nickname (Optional)',
+                    hintText: 'e.g. Beach House Malibu',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _urlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Airbnb URL *',
+                    hintText: 'https://www.airbnb.com/rooms/...',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.url,
+                ),
+                const SizedBox(height: 28),
+                Text('Upload Files',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                DropZoneWidget(
+                  propertyId: _propertyId,
+                  onFileAdded: _onFileAdded,
+                  onFileResult: _onFileResult,
+                ),
+                const SizedBox(height: 16),
+                VoiceRecorderWidget(
+                  propertyId: _propertyId,
+                  onFileAdded: _onFileAdded,
+                  onRecordingResult: _onFileResult,
+                ),
+                if (_filesToIngest.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Text('Files to Ingest',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  FileStatusList(statuses: _filesToIngest),
+                ],
+                const SizedBox(height: 28),
+                FilledButton(
+                  onPressed: canIngest ? _startIngest : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    textStyle: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.4),
+                  ),
+                  child: _isIngesting
+                      ? const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.5, color: Colors.white)),
+                            SizedBox(width: 12),
+                            Text('Ingesting...'),
+                          ],
+                        )
+                      : const Text('INGEST NOW'),
+                ),
+                if (_fileStatuses.isNotEmpty) ...[
+                  const SizedBox(height: 28),
+                  Text('Files Ingested',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  FileStatusList(statuses: _fileStatuses),
+                ],
+                if (_ingestedMarkdown != null &&
+                    _ingestedMarkdown!.isNotEmpty) ...[
+                  const SizedBox(height: 40),
+                  const Divider(),
+                  const SizedBox(height: 20),
+                  if (_heroImageUrl != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        _heroImageUrl!,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_officialPropertyName != null) ...[
+                    Text(_officialPropertyName!,
+                        style: const TextStyle(
+                            fontSize: 24, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                  ],
+                  Text('Extracted Knowledge',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: MarkdownBody(
+                      data: _ingestedMarkdown!,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet(
+                        h1: const TextStyle(
+                            fontSize: 22, fontWeight: FontWeight.bold),
+                        h2: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                        h3: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600),
+                        p: const TextStyle(fontSize: 14, height: 1.6),
+                        listBullet:
+                            const TextStyle(fontSize: 14, height: 1.6),
+                      ),
+                    ),
+                  ),
+                ],
+                if (_propertyStatus != null) ...[
+                  const SizedBox(height: 40),
+                  const Divider(),
+                  const SizedBox(height: 20),
+                  _buildStatusBadge(_propertyStatus!),
+                  if (_propertyStatus == 'Ingested') ...[
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _isMerging ? null : _runMerge,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        backgroundColor: Colors.indigo.shade600,
+                        textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.4),
+                      ),
+                      child: _isMerging
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: Colors.white)),
+                                SizedBox(width: 12),
+                                Text('Merging...'),
+                              ],
+                            )
+                          : const Text('MERGE NOW'),
+                    ),
+                  ],
+                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                    const SizedBox(height: 24),
+                    _buildMasterJsonViewer(),
+                  ],
+                  if (_propertyStatus == 'Conflict_Pending' &&
+                      conflictReport != null &&
+                      conflictReport.isNotEmpty) ...[
+                    const SizedBox(height: 28),
+                    Text('Resolve Conflicts',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 12),
+                    ConflictQuestionnaireWidget(
+                      key: ValueKey(conflictReport.length),
+                      propertyId: effectiveId,
+                      conflictReport: conflictReport,
+                      backendUrl:
+                          dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
+                      onResolved: _onResolved,
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 48),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
