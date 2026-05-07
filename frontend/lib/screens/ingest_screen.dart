@@ -9,6 +9,7 @@ import '../widgets/drop_zone.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
+import 'chat_live_screen.dart';
 
 class IngestScreen extends StatefulWidget {
   const IngestScreen({super.key});
@@ -334,6 +335,49 @@ class _IngestScreenState extends State<IngestScreen> {
     );
   }
 
+  void _showOpenChatDialog(BuildContext context, String propertyId) {
+    final bookingController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Open Live Chat'),
+        content: TextField(
+          controller: bookingController,
+          decoration: const InputDecoration(
+            labelText: 'Booking ID',
+            hintText: 'e.g. Booking_123',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final bookingId = bookingController.text.trim();
+              if (bookingId.isEmpty) return;
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChatLiveScreen(
+                    bookingId: bookingId,
+                    propertyId: propertyId,
+                  ),
+                ),
+              );
+            },
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // canIngest: URL required, nickname is optional (REQ-02)
@@ -536,6 +580,26 @@ class _IngestScreenState extends State<IngestScreen> {
 
                   // Status Badge
                   _buildStatusBadge(_propertyStatus!),
+
+                  // Open Chat button (Active properties)
+                  if (_propertyStatus == 'Active') ...[
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _showOpenChatDialog(context, effectiveId),
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('OPEN CHAT'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        side: BorderSide(color: Colors.indigo.shade400),
+                        foregroundColor: Colors.indigo.shade700,
+                        textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.4),
+                      ),
+                    ),
+                  ],
 
                   // Merge Now button
                   if (_propertyStatus == 'Ingested') ...[

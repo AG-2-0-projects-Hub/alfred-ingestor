@@ -212,6 +212,93 @@ def save_resolve_result(
     }).eq("id", property_id).execute()
 
 
+# ── Messenger ─────────────────────────────────────────────────────────────────
+
+def get_guest_by_booking_id(booking_id: str) -> dict | None:
+    client = get_client()
+    result = (
+        client.table("guests")
+        .select("id, name, booking_id, property_id, preferred_language")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def get_property_for_chat(property_id: str) -> dict | None:
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select("id, master_json, name")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def find_or_create_conversation(booking_id: str, property_id: str) -> dict:
+    client = get_client()
+    result = (
+        client.table("conversations")
+        .select("*")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    if result.data:
+        return result.data
+    insert_result = client.table("conversations").insert({
+        "booking_id": booking_id,
+        "property_id": property_id,
+        "requires_attention": False,
+        "mode": "autopilot",
+        "ai_status": "active",
+        "last_message_at": _now(),
+    }).execute()
+    return insert_result.data[0]
+
+
+def get_conversation_messages(conversation_id: str) -> list[dict]:
+    client = get_client()
+    result = (
+        client.table("messages")
+        .select("sender_type, content, created_at")
+        .eq("conversation_id", conversation_id)
+        .order("created_at")
+        .execute()
+    )
+    return result.data or []
+
+
+def insert_message(
+    conversation_id: str,
+    sender_type: str,
+    content: str,
+    sentiment: str | None = None,
+    is_escalated_interaction: bool = False,
+) -> dict:
+    client = get_client()
+    result = client.table("messages").insert({
+        "conversation_id": conversation_id,
+        "sender_type": sender_type,
+        "content": content,
+        "sentiment": sentiment,
+        "status": "delivered",
+        "is_escalated_interaction": is_escalated_interaction,
+    }).execute()
+    return result.data[0]
+
+
+def update_conversation(conversation_id: str, **fields) -> None:
+    client = get_client()
+    fields["last_message_at"] = _now()
+    client.table("conversations").update(fields).eq("id", conversation_id).execute()
+
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+
 def upload_hero_image(property_id: str, image_url: str) -> None:
     """Download thumbnail from Airbnb URL and store under {property_id}/hero_image/main.jpg. (REQ-18)"""
     import httpx
