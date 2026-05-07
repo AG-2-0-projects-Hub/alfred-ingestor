@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
+import '../widgets/archived_chats_dialog.dart';
 import 'add_property_screen.dart';
 import 'host_panel_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
@@ -16,6 +17,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _properties = [];
+  Map<String, int> _chatCounts = {};
   bool _loading = true;
 
   @override
@@ -29,9 +31,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final data = await Supabase.instance.client
           .from('properties')
-          .select('id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
+          .select(
+              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
           .order('created_at', ascending: false);
-      if (mounted) setState(() => _properties = List<Map<String, dynamic>>.from(data));
+
+      final properties = List<Map<String, dynamic>>.from(data);
+
+      // Load guest counts per property for the active chat indicator
+      Map<String, int> counts = {};
+      if (properties.isNotEmpty) {
+        final ids = properties.map((p) => p['id'] as String).toList();
+        final guests = await Supabase.instance.client
+            .from('guests')
+            .select('property_id')
+            .inFilter('property_id', ids);
+        for (final g in guests) {
+          final pid = g['property_id'] as String;
+          counts[pid] = (counts[pid] ?? 0) + 1;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _properties = properties;
+          _chatCounts = counts;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -97,10 +122,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _openArchivedChats(Map<String, dynamic> property) {
+    showDialog(
+      context: context,
+      builder: (_) => ArchivedChatsDialog(
+        propertyId: property['id'] as String,
+        propertyName: property['name'] as String? ?? 'Property',
+      ),
+    );
+  }
+
+  void _openCalendar(Map<String, dynamic> property) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Row(children: [
+          Icon(Icons.calendar_month, color: Colors.indigo.shade700),
+          const SizedBox(width: 10),
+          const Text('Reservations'),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.calendar_month, size: 64, color: Colors.indigo.shade100),
+            const SizedBox(height: 16),
+            Text(
+              property['name'] as String? ?? 'Property',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Reservations calendar coming soon.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final email =
-        Supabase.instance.client.auth.currentUser?.email ?? '';
+    final email = Supabase.instance.client.auth.currentUser?.email ?? '';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
@@ -124,8 +193,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.only(right: 8),
             child: Center(
               child: Text(email,
-                  style: TextStyle(
-                      fontSize: 13, color: Colors.grey.shade600)),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
             ),
           ),
           TextButton.icon(
@@ -174,10 +242,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
           return PropertyCard(
             property: item,
+            activeChatCount: _chatCounts[item['id'] as String] ?? 0,
             onExpand: () => _openDrawer(item),
             onGuestLink: () => _openGuestLink(item),
             onHostChat: () => _openHostChat(item),
             onAddProperty: _openAddProperty,
+            onArchivedChats: () => _openArchivedChats(item),
+            onCalendar: () => _openCalendar(item),
           );
         },
       );

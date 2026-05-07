@@ -131,22 +131,40 @@
 
 ---
 
-## Session 2026-05-07 (Part 3) — UI Upgrade Implemented
+## Session 2026-05-07 (Part 3) — UI Upgrade Implemented + Bug Fixes
 
 ### Status
-Full UI overhaul complete. All code committed. Awaiting Supabase Step B + browser testing.
+UI overhaul complete and bug-fixed. Awaiting commit/push + Supabase manual steps below.
 
 ### Supabase Step A — DONE
 - Email auth enabled ✅
 - RLS enabled on `properties` ✅
 - `owner_only` policy created ✅
-- `UPDATE properties SET owner_id = '<uid>'` — **pending** (run after first login to claim existing rows)
+- `UPDATE properties SET owner_id = 'f86ebcae-683d-4914-837b-caaedca6a19d';` — **pending** (run without angle brackets)
+
+### Supabase Auth config — PENDING (fix broken session/upload state)
+- **Disable "Confirm email"** (Auth → Email) — removes broken confirmation redirect
+- **Site URL** (Auth → URL Configuration) → `https://alfred-ingestor.vercel.app`
+- **Add Redirect URL** → `https://alfred-ingestor.vercel.app/**`
+- **Delete test account** and sign up fresh after these are applied
+
+### Supabase Storage policies — PENDING (required for frontend file uploads)
+```sql
+CREATE POLICY "allow_authenticated_uploads" ON storage.objects
+FOR INSERT TO authenticated WITH CHECK (bucket_id = 'Property_assets');
+
+CREATE POLICY "allow_authenticated_reads" ON storage.objects
+FOR SELECT TO authenticated USING (bucket_id = 'Property_assets');
+
+CREATE POLICY "allow_authenticated_updates" ON storage.objects
+FOR UPDATE TO authenticated USING (bucket_id = 'Property_assets');
+```
 
 ### Supabase Step B — PENDING (do before testing guest link generation)
 - Add `guest_chat_url` + `host_chat_url` columns to `guests` table (see plan §1 Step B)
 - Add RLS policy on `guests` table (optional but recommended)
 
-### What was built
+### What was built (commit `721dd3e`)
 | File | Change |
 |---|---|
 | `backend/services/supabase_client.py` | `insert_property()` gets `owner_id` param; added `update_master_json()`, `create_guest()`, `get_guests_for_property()` |
@@ -161,6 +179,14 @@ Full UI overhaul complete. All code committed. Awaiting Supabase Step B + browse
 | `frontend/lib/widgets/property_card.dart` | NEW — state-aware card (Processing/Conflict/Ready/Error states) |
 | `frontend/lib/widgets/property_detail_drawer.dart` | NEW — 4-tab side drawer (Overview/Files/Knowledge/Resolve) |
 | `frontend/lib/widgets/generate_guest_link_dialog.dart` | NEW — 2-step dialog: name input → copy-able URLs |
+
+### Bug fixes (uncommitted — commit after Supabase steps done)
+| File | Fix |
+|---|---|
+| `frontend/lib/main.dart` | Session restored on page reload: `onAuthStateChange` subscription in `initState` triggers rebuild after Supabase restores session from localStorage asynchronously |
+| `frontend/lib/screens/auth_screen.dart` | `emailRedirectTo: Uri.base.scheme + Uri.base.host` added to `signUp` call |
+| `frontend/lib/screens/add_property_screen.dart` | "Merge Now" only shown when `_ingestedMarkdown` is non-empty (not just when scraper ran with no uploaded files) |
+| `frontend/lib/screens/ingest_screen.dart` | Same "Merge Now" guard applied |
 
 ---
 
@@ -192,12 +218,20 @@ Full UI overhaul complete. All code committed. Awaiting Supabase Step B + browse
 ---
 
 ## Next Steps
-1. **Supabase Step B** — Add `guest_chat_url` + `host_chat_url` columns to `guests` table (SQL in plan §1 Step B). Required before generating guest links.
-2. **First login + UID capture** — sign up at deployed Vercel URL, copy UID from Supabase Auth dashboard, run `UPDATE properties SET owner_id = '<uid>';` to claim existing properties.
-3. **Deploy** — push to `main` → Render + Vercel auto-deploy. Verify login page loads and redirects to dashboard.
-4. **Browser verification checklist** — work through all items in `Context/UI_upgrade_plan_Claude.md §5`.
-5. **Messenger browser test** — guest view + host live panel realtime test (both chat URLs still valid).
-6. **Ingest backlog** (lower priority):
-   - Add `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env
-   - End-to-end REQ-08 test (CSV upload)
-   - Fix UUID persistence across page refreshes
+
+### Immediate (do in this order)
+1. **Supabase Auth config** — disable "Confirm email", set Site URL, add Redirect URL (see above)
+2. **Supabase Storage policies** — run the 3 `CREATE POLICY` statements above
+3. **SQL** — run `UPDATE properties SET owner_id = 'f86ebcae-683d-4914-837b-caaedca6a19d';` (no angle brackets)
+4. **Delete test user** in Supabase Auth → Users, sign up fresh
+5. **Commit + push** the 4 bug-fix files (`main.dart`, `auth_screen.dart`, `add_property_screen.dart`, `ingest_screen.dart`) → Render + Vercel auto-deploy
+
+### Then verify
+6. **Supabase Step B** — `ALTER TABLE guests ADD COLUMN guest_chat_url text; ALTER TABLE guests ADD COLUMN host_chat_url text;` — required before testing guest link generation
+7. **Browser verification checklist** — work through all items in `Context/UI_upgrade_plan_Claude.md §5`
+8. **Messenger browser test** — open both chat URLs below, verify realtime updates
+
+### Lower priority
+9. **Add** `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env
+10. **End-to-end REQ-08 test** (CSV upload)
+11. **Fix UUID persistence** across page refreshes (localStorage or URL param)

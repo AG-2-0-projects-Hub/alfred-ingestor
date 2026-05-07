@@ -8,6 +8,7 @@ import 'file_status_list.dart';
 import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
+import '../screens/edit_property_screen.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -336,23 +337,51 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final fingerprints =
         _property['file_fingerprints'] as Map<String, dynamic>? ?? {};
 
-    if (fingerprints.isEmpty) {
-      return const Center(
-        child: Text('No files ingested yet.',
-            style: TextStyle(color: Colors.grey)),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: fingerprints.entries.map((e) {
-        return ListTile(
-          dense: true,
-          leading: const Icon(Icons.insert_drive_file_outlined, size: 20),
-          title: Text(e.key, style: const TextStyle(fontSize: 13)),
-          contentPadding: EdgeInsets.zero,
-        );
-      }).toList(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Edit button at the top
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: OutlinedButton.icon(
+            onPressed: () {
+              final nav = Navigator.of(context);
+              final refresh = widget.onRefresh;
+              nav.pop();
+              nav.push(MaterialPageRoute(
+                builder: (_) => EditPropertyScreen(property: _property),
+              )).then((_) => refresh());
+            },
+            icon: const Icon(Icons.edit_outlined, size: 16),
+            label: const Text('Edit Property / Add Files'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Divider(height: 1),
+        ),
+        // File list
+        Expanded(
+          child: fingerprints.isEmpty
+              ? const Center(
+                  child: Text('No files ingested yet.',
+                      style: TextStyle(color: Colors.grey)))
+              : ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: fingerprints.entries.map((e) {
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.insert_drive_file_outlined,
+                          size: 20),
+                      title: Text(e.key,
+                          style: const TextStyle(fontSize: 13)),
+                      contentPadding: EdgeInsets.zero,
+                    );
+                  }).toList(),
+                ),
+        ),
+      ],
     );
   }
 
@@ -449,9 +478,90 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             const SizedBox(height: 12),
             FileStatusList(statuses: _voiceStatuses),
           ],
+
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 16),
+
+          // Danger zone: delete property
+          OutlinedButton.icon(
+            onPressed: _confirmDeleteProperty,
+            icon: const Icon(Icons.delete_forever_outlined, size: 16),
+            label: const Text('Delete Property'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+              side: BorderSide(color: Colors.red.shade300),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Deletes this property entry. Chat history is preserved.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmDeleteProperty() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Row(children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+          const SizedBox(width: 8),
+          const Text('Delete Property'),
+        ]),
+        content: RichText(
+          text: TextSpan(
+            style: const TextStyle(fontSize: 14, color: Colors.black87),
+            children: [
+              const TextSpan(text: 'Are you sure you want to delete '),
+              TextSpan(
+                text: _property['name'] as String? ?? 'this property',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const TextSpan(
+                text: '?\n\n⚠️ ALL PROPERTY DATA WILL BE LOST — '
+                    'including the master JSON, ingested files, and scraper data.\n\n'
+                    'Chat history with guests will be preserved.',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('Delete Forever'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await Supabase.instance.client
+          .from('properties')
+          .delete()
+          .eq('id', _property['id'] as String);
+      if (mounted) {
+        Navigator.of(context).pop();
+        widget.onRefresh();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Delete failed: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildResolveTab() {

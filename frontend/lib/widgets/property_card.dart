@@ -6,7 +6,10 @@ class PropertyCard extends StatelessWidget {
   final VoidCallback onExpand;
   final VoidCallback onGuestLink;
   final VoidCallback onHostChat;
-  final VoidCallback onAddProperty; // used for the "+" card
+  final VoidCallback onAddProperty;
+  final VoidCallback onArchivedChats;
+  final VoidCallback onCalendar;
+  final int activeChatCount;
 
   const PropertyCard({
     super.key,
@@ -15,16 +18,21 @@ class PropertyCard extends StatelessWidget {
     required this.onGuestLink,
     required this.onHostChat,
     required this.onAddProperty,
+    this.onArchivedChats = _noop,
+    this.onCalendar = _noop,
+    this.activeChatCount = 0,
   });
 
-  /// Convenience constructor for the "add new property" card.
   const PropertyCard.add({
     super.key,
     required this.onAddProperty,
   })  : property = const {},
         onExpand = _noop,
         onGuestLink = _noop,
-        onHostChat = _noop;
+        onHostChat = _noop,
+        onArchivedChats = _noop,
+        onCalendar = _noop,
+        activeChatCount = 0;
 
   static void _noop() {}
 
@@ -104,6 +112,36 @@ class PropertyCard extends StatelessWidget {
                         _StatusBadge(status: status),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    // Info row: active chats + utility icons
+                    Row(
+                      children: [
+                        if (activeChatCount > 0) ...[
+                          Icon(Icons.chat_bubble,
+                              size: 13, color: Colors.green.shade600),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$activeChatCount ${activeChatCount == 1 ? 'chat' : 'chats'}',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.green.shade700,
+                                fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                        const Spacer(),
+                        _TinyIconBtn(
+                          icon: Icons.calendar_month_outlined,
+                          tooltip: 'Reservations',
+                          onTap: onCalendar,
+                        ),
+                        const SizedBox(width: 6),
+                        _TinyIconBtn(
+                          icon: Icons.history,
+                          tooltip: 'Chat History',
+                          onTap: onArchivedChats,
+                        ),
+                      ],
+                    ),
                     const Spacer(),
                     _buildActions(context, status),
                   ],
@@ -126,7 +164,9 @@ class PropertyCard extends StatelessWidget {
     if (isProcessing) {
       return const Row(children: [
         SizedBox(
-            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2)),
         SizedBox(width: 8),
         Text('Processing…', style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]);
@@ -162,8 +202,7 @@ class PropertyCard extends StatelessWidget {
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _SmallButton(
-              icon: Icons.link, label: '+ Guest', onTap: onGuestLink),
+          _SmallButton(icon: Icons.link, label: '+ Guest', onTap: onGuestLink),
           _SmallButton(
               icon: Icons.chat_bubble_outline, label: 'Chats', onTap: onHostChat),
           _SmallButton(
@@ -177,6 +216,30 @@ class PropertyCard extends StatelessWidget {
       alignment: Alignment.centerRight,
       child: _SmallButton(
           icon: Icons.open_in_new, label: 'Details', onTap: onExpand),
+    );
+  }
+}
+
+class _TinyIconBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _TinyIconBtn(
+      {required this.icon, required this.tooltip, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Icon(icon, size: 16, color: Colors.grey.shade500),
+        ),
+      ),
     );
   }
 }
@@ -237,8 +300,8 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(label,
-          style:
-              TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color)),
+          style: TextStyle(
+              fontSize: 10, fontWeight: FontWeight.w600, color: color)),
     );
   }
 }
