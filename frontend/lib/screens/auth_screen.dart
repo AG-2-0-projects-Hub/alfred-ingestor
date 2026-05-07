@@ -35,9 +35,11 @@ class _AuthScreenState extends State<AuthScreen> {
           password: password,
         );
       } else {
+        final redirectTo = '${Uri.base.scheme}://${Uri.base.host}';
         await Supabase.instance.client.auth.signUp(
           email: email,
           password: password,
+          emailRedirectTo: redirectTo,
         );
       }
       if (mounted) {

@@ -601,8 +601,9 @@ class _IngestScreenState extends State<IngestScreen> {
                     ),
                   ],
 
-                  // Merge Now button
-                  if (_propertyStatus == 'Ingested') ...[
+                  // Merge Now button — only when files were actually ingested
+                  if (_propertyStatus == 'Ingested' &&
+                      (_ingestedMarkdown?.isNotEmpty ?? false)) ...[
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: _isMerging ? null : _runMerge,

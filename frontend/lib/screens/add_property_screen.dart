@@ -482,7 +482,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   const Divider(),
                   const SizedBox(height: 20),
                   _buildStatusBadge(_propertyStatus!),
-                  if (_propertyStatus == 'Ingested') ...[
+                  // Only offer merge when files were actually ingested (not just scraped)
+                  if (_propertyStatus == 'Ingested' &&
+                      (_ingestedMarkdown?.isNotEmpty ?? false)) ...[
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: _isMerging ? null : _runMerge,

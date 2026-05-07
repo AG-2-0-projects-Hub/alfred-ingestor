@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,6 +30,24 @@ class IngestorApp extends StatefulWidget {
 }
 
 class _IngestorAppState extends State<IngestorApp> {
+  StreamSubscription<AuthState>? _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Re-render when auth state changes — this catches the async session
+    // restoration on page reload (Supabase reads localStorage and fires
+    // initialSession event after the first build would otherwise have run).
+    _authSub = Supabase.instance.client.auth.onAuthStateChange
+        .listen((_) { if (mounted) setState(() {}); });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final uri = Uri.base;
