@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-07 (updated)
+**Last Session:** 2026-05-10 (updated)
 
 ---
 
@@ -248,6 +248,29 @@ FOR UPDATE TO authenticated USING (bucket_id = 'Property_assets');
 
 ---
 
+## Session 2026-05-10 — Vercel Build Fix (Flutter 3.27+ Compatibility)
+
+### Root cause
+After pushing the UI redesign, Vercel's `flutter build web` failed because the stable Flutter SDK (3.27+) **removed** several `ColorScheme` constructor fields and renamed `ThemeData` subclasses. The `// ignore: deprecated_member_use` comments only suppress analyzer warnings — they do not prevent compilation errors for removed APIs.
+
+### Fixes applied to `frontend/lib/theme/app_theme.dart`
+
+| What changed | Before | After |
+|---|---|---|
+| `ColorScheme.background` (removed) | `background: AppTheme.background` | field deleted — covered by `scaffoldBackgroundColor` on `ThemeData` |
+| `ColorScheme.onBackground` (removed) | `onBackground: textPrimary` | field deleted — `onSurface` covers this |
+| `ColorScheme.surfaceVariant` (renamed) | `surfaceVariant: surfaceAlt` | `surfaceContainerHighest: surfaceAlt` |
+| `ThemeData.tabBarTheme` type | `TabBarTheme(...)` | `TabBarThemeData(...)` |
+| `ThemeData.dialogTheme` type | `DialogTheme(...)` | `DialogThemeData(...)` |
+| `Color.withOpacity` (deprecated) | `.withOpacity(x)` in shadow/splash getters | `.withValues(alpha: x)` |
+
+### Verification
+- `flutter analyze lib/theme/app_theme.dart` → **No issues found**
+- Local `flutter build web --release` → **exit code 0**
+- Fix is **staged** (`git add frontend/lib/theme/app_theme.dart`) — pending user commit + push
+
+---
+
 ## Session 2026-05-10 — UI/UX Full Redesign (Alfred Design System)
 
 ### What was built
@@ -284,8 +307,9 @@ FOR UPDATE TO authenticated USING (bucket_id = 'Property_assets');
 ## Next Steps
 
 ### Immediate
-1. **Commit + push** all new/modified files → Vercel auto-deploys
-2. **Browser verify** full redesign on live URL
+1. **Commit + push** the staged `app_theme.dart` fix → Vercel redeploy should succeed
+2. **Browser verify** full redesign on live URL (`https://alfred-ingestor.vercel.app`) after deploy
+3. **Full audit** — systematic frontend + backend + Supabase verification (plan with Gemini using all MCPs)
 
 ### Pending Supabase (if not done yet)
 - Disable "Confirm email" in Auth → Email settings

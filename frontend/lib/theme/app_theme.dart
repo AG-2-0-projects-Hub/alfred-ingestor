@@ -42,7 +42,7 @@ class AppTheme {
   // ── Elevation ─────────────────────────────────────────────────────────────
   static List<BoxShadow> get cardShadow => [
     BoxShadow(
-      color: const Color(0xFF0F172A).withOpacity(0.06),
+      color: const Color(0xFF0F172A).withValues(alpha: 0.06),
       blurRadius: 8,
       offset: const Offset(0, 2),
     ),
@@ -50,12 +50,12 @@ class AppTheme {
 
   static List<BoxShadow> get cardShadowHover => [
     BoxShadow(
-      color: primary.withOpacity(0.12),
+      color: primary.withValues(alpha: 0.12),
       blurRadius: 20,
       offset: const Offset(0, 6),
     ),
     BoxShadow(
-      color: const Color(0xFF0F172A).withOpacity(0.04),
+      color: const Color(0xFF0F172A).withValues(alpha: 0.04),
       blurRadius: 4,
       offset: const Offset(0, 2),
     ),
@@ -63,7 +63,7 @@ class AppTheme {
 
   static List<BoxShadow> get drawerShadow => [
     BoxShadow(
-      color: const Color(0xFF0F172A).withOpacity(0.18),
+      color: const Color(0xFF0F172A).withValues(alpha: 0.18),
       blurRadius: 40,
       offset: const Offset(-4, 0),
     ),
@@ -89,12 +89,8 @@ class AppTheme {
         onTertiaryContainer: Color(0xFF134E4A),
         surface: surface,
         onSurface: textPrimary,
-        surfaceVariant: surfaceAlt,
+        surfaceContainerHighest: surfaceAlt,
         onSurfaceVariant: textSecondary,
-        // ignore: deprecated_member_use
-        background: background,
-        // ignore: deprecated_member_use
-        onBackground: textPrimary,
         error: danger,
         onError: Color(0xFFFFFFFF),
         errorContainer: dangerContainer,
@@ -200,7 +196,7 @@ class AppTheme {
         hintStyle: GoogleFonts.inter(color: textMuted, fontSize: 14),
         prefixIconColor: textMuted,
       ),
-      tabBarTheme: TabBarTheme(
+      tabBarTheme: TabBarThemeData(
         labelColor: primary,
         unselectedLabelColor: textMuted,
         indicatorColor: primary,
@@ -216,7 +212,7 @@ class AppTheme {
         space: 1,
         thickness: 1,
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         elevation: 8,
         shadowColor: const Color(0x20000000),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -246,8 +242,8 @@ class AppTheme {
         subtitleTextStyle:
             GoogleFonts.inter(fontSize: 12, color: textSecondary),
       ),
-      splashColor: primary.withOpacity(0.08),
-      highlightColor: primary.withOpacity(0.06),
+      splashColor: primary.withValues(alpha: 0.08),
+      highlightColor: primary.withValues(alpha: 0.06),
     );
   }
 
