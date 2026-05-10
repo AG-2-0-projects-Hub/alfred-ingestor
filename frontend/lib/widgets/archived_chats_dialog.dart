@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/app_theme.dart';
 import '../screens/host_panel_screen.dart';
 
 class ArchivedChatsDialog extends StatefulWidget {
@@ -33,7 +35,9 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
           .select('id, booking_id, name, created_at, preferred_language')
           .eq('property_id', widget.propertyId)
           .order('created_at', ascending: false);
-      if (mounted) setState(() => _guests = List<Map<String, dynamic>>.from(data));
+      if (mounted) {
+        setState(() => _guests = List<Map<String, dynamic>>.from(data));
+      }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
@@ -50,7 +54,8 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: AppTheme.surface,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520, maxHeight: 600),
         child: Column(
@@ -58,21 +63,45 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 8, 16),
+              padding: const EdgeInsets.fromLTRB(20, 18, 12, 18),
               child: Row(
                 children: [
-                  Icon(Icons.history, color: Colors.indigo.shade700),
-                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.history_rounded,
+                        color: AppTheme.primary, size: 18),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      '${widget.propertyName} — Chat History',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Chat History',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          widget.propertyName,
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(Icons.close_rounded,
+                        size: 20, color: AppTheme.textMuted),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -84,19 +113,43 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
               child: _loading
                   ? const Padding(
                       padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(),
+                      child: CircularProgressIndicator(
+                          color: AppTheme.primary),
                     )
                   : _guests.isEmpty
                       ? Padding(
-                          padding: const EdgeInsets.all(40),
+                          padding: const EdgeInsets.all(48),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.chat_bubble_outline,
-                                  size: 48, color: Colors.grey.shade300),
-                              const SizedBox(height: 12),
-                              Text('No past chats yet.',
-                                  style: TextStyle(color: Colors.grey.shade600)),
+                              Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surfaceAlt,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                    Icons.chat_bubble_outline_rounded,
+                                    size: 28,
+                                    color: AppTheme.textMuted),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No past chats yet.',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Guest conversations will appear here.',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary),
+                              ),
                             ],
                           ),
                         )
@@ -107,38 +160,46 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                               const Divider(height: 1),
                           itemBuilder: (context, i) {
                             final g = _guests[i];
-                            final name =
-                                g['name'] as String? ?? 'Guest';
+                            final name = g['name'] as String? ?? 'Guest';
                             final bookingId =
                                 g['booking_id'] as String? ?? '';
-                            final date =
-                                _formatDate(g['created_at'] as String? ?? '');
+                            final date = _formatDate(
+                                g['created_at'] as String? ?? '');
                             return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 6),
                               leading: CircleAvatar(
-                                radius: 18,
-                                backgroundColor: Colors.indigo.shade50,
+                                radius: 20,
+                                backgroundColor: AppTheme.primaryContainer,
                                 child: Text(
                                   name.isNotEmpty
                                       ? name[0].toUpperCase()
                                       : '?',
-                                  style: TextStyle(
-                                      color: Colors.indigo.shade700,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14),
+                                  style: GoogleFonts.poppins(
+                                    color: AppTheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ),
-                              title: Text(name,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13)),
-                              subtitle: Text('$bookingId · $date',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade600)),
+                              title: Text(
+                                name,
+                                style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: AppTheme.textPrimary),
+                              ),
+                              subtitle: Text(
+                                '$bookingId · $date',
+                                style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: AppTheme.textSecondary),
+                              ),
                               trailing: const Icon(
-                                  Icons.arrow_forward_ios,
-                                  size: 14,
-                                  color: Colors.grey),
+                                Icons.arrow_forward_ios_rounded,
+                                size: 13,
+                                color: AppTheme.textMuted,
+                              ),
                               onTap: () => _openChat(g),
                             );
                           },

@@ -8,6 +8,7 @@ import 'screens/add_property_screen.dart';
 import 'screens/host_panel_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/chat_live_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,10 +81,7 @@ class _IngestorAppState extends State<IngestorApp> {
   MaterialApp _app(Widget home) {
     return MaterialApp(
       title: 'Alfred',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light,
       home: _AuthWatcher(child: home),
       routes: {
         '/auth': (_) => const AuthScreen(),

@@ -304,3 +304,32 @@ async def process_with_prompt_d(table_text: str) -> str:
     """Prompt D: Sheets/CSV data read natively, sent as plain text."""
     parts = [types.Part(text=USER_PROMPT_D + "\n\n" + table_text)]
     return await _generate(SYSTEM_INSTRUCTION_D, USER_PROMPT_D, parts)
+
+
+# ─── Knowledge Base Query (host audit tool) ──────────────────────────────────
+SYSTEM_INSTRUCTION_KB = (
+    "You are Alfred, a warm and knowledgeable property concierge assistant. "
+    "You speak with elegance and precision — always helpful, never speculative."
+)
+
+
+async def query_knowledge_base(master_json: dict, question: str) -> str:
+    """Answer a host question using only the property master_json as context."""
+    import json as _json
+    master_json_str = _json.dumps(master_json, indent=2, ensure_ascii=False)
+    prompt = f"""You are Alfred, a property knowledge assistant with a warm, concierge flair. Your ONLY knowledge source is the Master JSON provided below — you must not infer, assume, or add any information beyond what is explicitly present in it.
+
+When the host asks a question:
+1. Search the Master JSON for the relevant field(s)
+2. Answer concisely and in plain language — no JSON syntax in the reply
+3. If the information is not in the JSON, say exactly: "That information is not in the knowledge base yet."
+4. If the data is partial, give what you have and note what's missing
+
+You are a verification tool for the host — accuracy matters more than completeness. Do not speculate.
+
+Master JSON:
+{master_json_str}
+
+Host question: {question}"""
+    parts = [types.Part(text=prompt)]
+    return await _generate(SYSTEM_INSTRUCTION_KB, prompt, parts)

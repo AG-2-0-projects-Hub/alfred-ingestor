@@ -54,6 +54,19 @@ def get_canonical_property(airbnb_url: str) -> dict | None:
     return result.data if result else None
 
 
+def get_canonical_property_by_name(name: str) -> dict | None:
+    """Find an existing property by nickname. Returns the row or None."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select("id, status, name")
+        .eq("name", name)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
 def update_status(property_id: str, status: str) -> None:
     """PATCH properties SET status = <status>, updated_at = NOW() WHERE id = property_id."""
     client = get_client()

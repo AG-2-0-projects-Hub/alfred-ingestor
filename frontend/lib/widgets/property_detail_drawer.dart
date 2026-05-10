@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,7 @@ import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
 import '../screens/edit_property_screen.dart';
+import '../theme/app_theme.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -34,7 +36,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // Knowledge tab state
   final _knowledgeController = TextEditingController();
   bool _addingKnowledge = false;
+  bool _knowledgeSuccess = false;
   String? _knowledgeError;
+
+  // Knowledge base chat state
+  final _kbChatController = TextEditingController();
+  final List<Map<String, String>> _kbHistory = [];
+  bool _kbQuerying = false;
 
   // Voice path state (reuses voice recorder + file status)
   final List<Map<String, String>> _voiceStatuses = [];
@@ -55,6 +63,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   void dispose() {
     _tabController.dispose();
     _knowledgeController.dispose();
+    _kbChatController.dispose();
     super.dispose();
   }
 
@@ -112,13 +121,15 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         if (mounted) {
           setState(() {
             _knowledgeController.clear();
+            _knowledgeSuccess = true;
+            _knowledgeError = null;
             if (updatedJson != null) {
               _property['master_json'] = updatedJson;
             }
           });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Knowledge added successfully')),
-          );
+          Future.delayed(const Duration(seconds: 4), () {
+            if (mounted) setState(() => _knowledgeSuccess = false);
+          });
         }
       } else {
         setState(() => _knowledgeError =
@@ -217,6 +228,51 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     }
   }
 
+  Future<void> _queryKnowledgeBase() async {
+    final q = _kbChatController.text.trim();
+    if (q.isEmpty || _kbQuerying) return;
+
+    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+
+    setState(() {
+      _kbQuerying = true;
+      _kbHistory.add({'q': q, 'a': ''});
+      _kbChatController.clear();
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/ingest/query-knowledge'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'property_id': _property['id'],
+          'question': q,
+        }),
+      );
+      if (mounted) {
+        final answer = response.statusCode == 200
+            ? (jsonDecode(response.body) as Map<String, dynamic>)['answer'] as String? ?? ''
+            : 'Error (${response.statusCode}): ${response.body}';
+        setState(() {
+          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': answer};
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': 'Error: $e'};
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _kbQuerying = false);
+    }
+  }
+
   void _onResolved(String status, Map<String, dynamic> masterJson) {
     setState(() {
       _property['status'] = status;
@@ -231,42 +287,53 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final hasConflict = _property['Conflict_status'] == 'pending';
 
     return Material(
-      elevation: 16,
-      child: SizedBox(
-        width: 420,
-        height: double.infinity,
-        child: Column(
-          children: [
-            // Header
-            _buildHeader(),
-            // Tabs
-            TabBar(
-              controller: _tabController,
-              labelColor: Colors.indigo.shade700,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: Colors.indigo.shade700,
-              tabs: [
-                const Tab(text: 'Overview'),
-                const Tab(text: 'Files'),
-                const Tab(text: 'Knowledge'),
-                if (hasConflict) const Tab(icon: Icon(Icons.warning_amber_rounded, size: 16), text: 'Resolve'),
-              ],
-            ),
-            // Tab content
-            Expanded(
-              child: TabBarView(
+      elevation: 0,
+      color: AppTheme.surface,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          boxShadow: AppTheme.drawerShadow,
+        ),
+        child: SizedBox(
+          width: 440,
+          height: double.infinity,
+          child: Column(
+            children: [
+              _buildHeader(),
+              TabBar(
                 controller: _tabController,
-                children: [
-                  _buildOverviewTab(),
-                  _buildFilesTab(),
-                  _buildKnowledgeTab(),
-                  if (hasConflict) _buildResolveTab(),
+                tabs: [
+                  const Tab(text: 'Overview'),
+                  const Tab(text: 'Files'),
+                  const Tab(text: 'Knowledge'),
+                  if (hasConflict)
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              size: 14, color: AppTheme.warning),
+                          const SizedBox(width: 4),
+                          const Text('Resolve'),
+                        ],
+                      ),
+                    ),
                 ],
               ),
-            ),
-            // Pinned bottom actions
-            _buildBottomActions(),
-          ],
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildOverviewTab(),
+                    _buildFilesTab(),
+                    _buildKnowledgeTab(),
+                    if (hasConflict) _buildResolveTab(),
+                  ],
+                ),
+              ),
+              _buildBottomActions(),
+            ],
+          ),
         ),
       ),
     );
@@ -274,23 +341,55 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   Widget _buildHeader() {
     final name = _property['name'] as String? ?? 'Property';
+    final status = _property['status'] as String? ?? '';
     return Container(
-      color: Colors.indigo.shade700,
-      padding: const EdgeInsets.fromLTRB(20, 16, 8, 16),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppTheme.primaryDark, AppTheme.primary],
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 20, 8, 20),
       child: Row(
         children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.home_work_rounded,
+                color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              name,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (status.isNotEmpty)
+                  Text(
+                    status,
+                    style: GoogleFonts.inter(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.white),
+            icon: const Icon(Icons.close_rounded,
+                color: Colors.white, size: 20),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
@@ -310,7 +409,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         children: [
           // Hero image
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
             child: SizedBox(
               height: 180,
               width: double.infinity,
@@ -319,7 +418,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                       errorBuilder: (_, __, ___) => _heroPlaceholder())
                   : _heroLoaded
                       ? _heroPlaceholder()
-                      : const ColoredBox(color: Color(0xFFE8EAF6)),
+                      : const ColoredBox(color: AppTheme.primaryContainer),
             ),
           ),
           const SizedBox(height: 16),
@@ -473,11 +572,198 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             ],
           ),
 
+          // Success confirmation
+          if (_knowledgeSuccess) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                border: Border.all(color: Colors.green.shade300),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle_outline,
+                      color: Colors.green.shade600, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Knowledge added — master JSON updated successfully.',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.green.shade800),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           // Voice progress
           if (_voiceStatuses.isNotEmpty) ...[
             const SizedBox(height: 12),
             FileStatusList(statuses: _voiceStatuses),
           ],
+
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 16),
+
+          // Knowledge base chat
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded,
+                  size: 15, color: AppTheme.accent),
+              const SizedBox(width: 6),
+              Text('Ask the Knowledge Base',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Ask Alfred anything about this property\'s knowledge base.',
+            style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+          ),
+          const SizedBox(height: 12),
+
+          // Chat history
+          if (_kbHistory.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _kbHistory.map((entry) {
+                    final q = entry['q'] ?? '';
+                    final a = entry['a'] ?? '';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Host question
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryContainer,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(12),
+                                  topRight: Radius.circular(12),
+                                  bottomLeft: Radius.circular(12),
+                                  bottomRight: Radius.circular(3),
+                                ),
+                              ),
+                              child: Text(q,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: AppTheme.onPrimaryContainer,
+                                  )),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // Alfred answer
+                          if (a.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Row(children: [
+                                const SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: AppTheme.accent)),
+                                const SizedBox(width: 6),
+                                Text('Alfred is thinking…',
+                                    style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: AppTheme.textMuted,
+                                        fontStyle: FontStyle.italic)),
+                              ]),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surfaceAlt,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(3),
+                                  topRight: Radius.circular(12),
+                                  bottomLeft: Radius.circular(12),
+                                  bottomRight: Radius.circular(12),
+                                ),
+                              ),
+                              child: Text(a,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: AppTheme.textPrimary)),
+                            ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+
+          // Input row
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _kbChatController,
+                  decoration: InputDecoration(
+                    hintText: 'e.g. How many guests can stay?',
+                    hintStyle: GoogleFonts.inter(
+                        fontSize: 12, color: AppTheme.textMuted),
+                    filled: true,
+                    fillColor: AppTheme.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(color: AppTheme.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(color: AppTheme.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(
+                          color: AppTheme.primary, width: 1.5),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    isDense: true,
+                  ),
+                  style: GoogleFonts.inter(
+                      fontSize: 13, color: AppTheme.textPrimary),
+                  onSubmitted: (_) => _queryKnowledgeBase(),
+                  textInputAction: TextInputAction.send,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _kbQuerying ? null : _queryKnowledgeBase,
+                icon: _kbQuerying
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppTheme.primary))
+                    : const Icon(Icons.send_rounded,
+                        size: 18, color: AppTheme.primary),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.primaryContainer,
+                  disabledBackgroundColor: AppTheme.surfaceAlt,
+                ),
+              ),
+            ],
+          ),
 
           const SizedBox(height: 32),
           const Divider(),
@@ -589,10 +875,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   Widget _buildBottomActions() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.border)),
       ),
       child: Row(
         children: [
@@ -633,13 +919,16 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   Widget _heroPlaceholder() {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.indigo.shade100, Colors.indigo.shade300],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [AppTheme.accent, AppTheme.primary],
         ),
       ),
-      child: const Center(
-        child: Icon(Icons.home_outlined, size: 48, color: Colors.white),
+      child: Center(
+        child: Icon(Icons.home_outlined,
+            size: 48, color: Colors.white.withOpacity(0.7)),
       ),
     );
   }
@@ -661,7 +950,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               value,
               style: TextStyle(
                   fontSize: 13,
-                  color: isLink ? Colors.indigo.shade700 : null),
+                  color: isLink ? AppTheme.accent : null),
               overflow: TextOverflow.ellipsis,
               maxLines: 2,
             ),

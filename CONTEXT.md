@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-07
+**Last Session:** 2026-05-07 (updated)
 
 ---
 
@@ -217,21 +217,87 @@ FOR UPDATE TO authenticated USING (bucket_id = 'Property_assets');
 
 ---
 
+## Session 2026-05-07 (Part 4) — Dashboard Property Card Enhancements
+
+### What was built (uncommitted — pending user push)
+
+#### New files
+| File | Purpose |
+|---|---|
+| `frontend/lib/widgets/archived_chats_dialog.dart` | Dialog listing all past guests for a property (booking ID + name + date), tapping opens HostPanelScreen |
+| `frontend/lib/screens/edit_property_screen.dart` | Edit mode: shows ingested files with per-file delete + drop zone for new files + RE-INGEST → merge flow |
+
+#### Modified files
+| File | Change |
+|---|---|
+| `frontend/lib/widgets/property_card.dart` | + `activeChatCount` (green badge if > 0), + calendar icon (placeholder), + chat history icon — both always visible in an info row between name and actions |
+| `frontend/lib/screens/dashboard_screen.dart` | Loads guest count per property after loading properties; wires `onCalendar` (placeholder dialog) and `onArchivedChats` to PropertyCard |
+| `frontend/lib/widgets/property_detail_drawer.dart` | **Files tab**: "Edit Property / Add Files" button at top → navigates to EditPropertyScreen, refreshes on return. **Knowledge tab**: "Delete Property" danger button at bottom — confirmation dialog with bold warning, deletes only `properties` row (chat history preserved) |
+
+### Edit Property — file delete behaviour
+- Deleting a file: removes from `Property_assets` storage + `file_fingerprints` DB field
+- Deleted file stays visible in the list with strikethrough + "Removed" chip
+- Amber warning banner appears: "The knowledge database still contains data extracted from removed files. Add new files below and re-ingest to keep the knowledge base up to date."
+- **Known limitation:** deleted file's content remains in `ingested_markdown` until a full re-ingest of remaining files is done (backend constraint — not a bug)
+
+### Active chat count
+- Defined as: number of guests rows for the property (all bookings, not filtered by recency)
+- Loaded via a second Supabase query after properties load; stored in `_chatCounts` map
+
+---
+
+---
+
+## Session 2026-05-10 — UI/UX Full Redesign (Alfred Design System)
+
+### What was built
+
+#### New files
+| File | Purpose |
+|---|---|
+| `frontend/lib/theme/app_theme.dart` | Alfred Design System — full ThemeData + design tokens |
+
+#### Modified files
+| File | Change |
+|---|---|
+| `frontend/pubspec.yaml` | + `google_fonts: ^6.2.1` (resolved to 6.3.3) |
+| `frontend/lib/main.dart` | `AppTheme.light` replaces `ColorScheme.fromSeed(Colors.indigo)` |
+| `frontend/lib/screens/auth_screen.dart` | Full rewrite: two-panel desktop layout (brand left, form right), dot-grid painter, Poppins headings, password show/hide toggle |
+| `frontend/lib/screens/dashboard_screen.dart` | Teal app bar with icon badge, Inter/Poppins typography, 4-column responsive grid (>1100px), slate-50 background |
+| `frontend/lib/widgets/property_card.dart` | Full rewrite: animated hover shadow, sky→teal gradient placeholder, status badge overlay on hero image, active chat badge, `_CardAction` pill buttons, `_ReadyActions` layout |
+| `frontend/lib/widgets/property_detail_drawer.dart` | Teal gradient header with property icon + status subtitle, sky/teal hero placeholder, teal→primary KB chat bubbles with tail corners, `AppTheme.drawerShadow`, Google Fonts throughout |
+| `frontend/lib/screens/chat_live_screen.dart` | Teal app bar with booking subtitle, pill-mode toggle, directional chat bubbles with tail corners, `AppTheme` colors throughout |
+| `frontend/lib/widgets/archived_chats_dialog.dart` | Full rewrite: teal icon badge header, proper empty state, `AppTheme` colors throughout |
+
+### Design System (AppTheme)
+- **Primary**: `#0F766E` teal-700 — trust, property management
+- **Accent**: `#0EA5E9` sky-500 — freedom, openness (brand promise)
+- **Background**: `#F8FAFC` slate-50, **Surface**: white, **Text**: slate-800/500/400 scale
+- **Typography**: Poppins (headings/labels) + Inter (body) via `google_fonts`
+- **Card radius**: 16px, **Button radius**: 10px, **Badge radius**: 20px
+- **Hover shadows**: tinted teal glow on cards, heavy teal shadow on drawer
+
+### Phase 2 (future) — knowledge base chat will also include "learned knowledge" from voice notes, not just master_json
+
+---
+
 ## Next Steps
 
-### Immediate (do in this order)
-1. **Supabase Auth config** — disable "Confirm email", set Site URL, add Redirect URL (see above)
-2. **Supabase Storage policies** — run the 3 `CREATE POLICY` statements above
-3. **SQL** — run `UPDATE properties SET owner_id = 'f86ebcae-683d-4914-837b-caaedca6a19d';` (no angle brackets)
-4. **Delete test user** in Supabase Auth → Users, sign up fresh
-5. **Commit + push** the 4 bug-fix files (`main.dart`, `auth_screen.dart`, `add_property_screen.dart`, `ingest_screen.dart`) → Render + Vercel auto-deploy
+### Immediate
+1. **Commit + push** all new/modified files → Vercel auto-deploys
+2. **Browser verify** full redesign on live URL
 
-### Then verify
-6. **Supabase Step B** — `ALTER TABLE guests ADD COLUMN guest_chat_url text; ALTER TABLE guests ADD COLUMN host_chat_url text;` — required before testing guest link generation
-7. **Browser verification checklist** — work through all items in `Context/UI_upgrade_plan_Claude.md §5`
-8. **Messenger browser test** — open both chat URLs below, verify realtime updates
+### Pending Supabase (if not done yet)
+- Disable "Confirm email" in Auth → Email settings
+- Set Site URL → `https://alfred-ingestor.vercel.app`
+- Add Redirect URL → `https://alfred-ingestor.vercel.app/**`
+- Run Storage policies (3 `CREATE POLICY` statements — see session 2026-05-07 Part 3 above)
+- Run `UPDATE properties SET owner_id = 'f86ebcae-683d-4914-837b-caaedca6a19d';`
+- `ALTER TABLE guests ADD COLUMN guest_chat_url text; ALTER TABLE guests ADD COLUMN host_chat_url text;` (required for guest link generation)
 
 ### Lower priority
-9. **Add** `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env
-10. **End-to-end REQ-08 test** (CSV upload)
-11. **Fix UUID persistence** across page refreshes (localStorage or URL param)
+- **Add** `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env
+- **End-to-end REQ-08 test** (CSV upload)
+- **Fix UUID persistence** across page refreshes (localStorage or URL param)
+- **Reservations calendar** — placeholder button exists on every property card; wire up real data
+- **Active chat definition** — currently counts all guests; refine to recent activity if needed

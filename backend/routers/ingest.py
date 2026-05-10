@@ -19,7 +19,7 @@ import asyncio
 import json
 import os
 import re
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import httpx
@@ -68,10 +68,14 @@ async def ingest(req: IngestRequest, request: Request):
     temp_id = req.property_id
     owner_id = await asyncio.to_thread(_get_owner_id, request)
 
-    # Resolve canonical property and enforce 409 lock BEFORE opening SSE stream (REQ-20)
+    # Resolve canonical property by nickname (not URL — same URL can now create multiple entries).
+    # 409 lock still applies if the named property is currently ingesting.
     property_id = temp_id
-    if airbnb_url:
-        canonical = await asyncio.to_thread(supabase_client.get_canonical_property, airbnb_url)
+    property_name_clean = req.property_name.strip()
+    if property_name_clean:
+        canonical = await asyncio.to_thread(
+            supabase_client.get_canonical_property_by_name, property_name_clean
+        )
         if canonical:
             property_id = canonical["id"]
             if canonical.get("status") == "Ingesting":
@@ -280,3 +284,25 @@ async def add_knowledge(req: AddKnowledgeRequest, request: Request):
     await asyncio.to_thread(supabase_client.update_master_json, req.property_id, updated_json)
 
     return {"status": "ok", "master_json": updated_json, "changes_log": result.get("changes_log", [])}
+
+
+# ── Knowledge Base Query ──────────────────────────────────────────────────────
+
+class QueryKnowledgeRequest(BaseModel):
+    property_id: str
+    question: str
+
+
+@router.post("/ingest/query-knowledge")
+async def query_knowledge(req: QueryKnowledgeRequest):
+    prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found.")
+    master_json = prop.get("master_json")
+    if not master_json:
+        raise HTTPException(
+            status_code=422,
+            detail="No knowledge base found for this property. Ingest and merge files first.",
+        )
+    answer = await gemini_client.query_knowledge_base(master_json, req.question)
+    return {"answer": answer}

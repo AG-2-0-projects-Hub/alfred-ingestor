@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/app_theme.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
 import '../widgets/archived_chats_dialog.dart';
@@ -137,23 +139,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: Row(children: [
-          Icon(Icons.calendar_month, color: Colors.indigo.shade700),
+          const Icon(Icons.calendar_month_rounded, color: AppTheme.primary),
           const SizedBox(width: 10),
           const Text('Reservations'),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.calendar_month, size: 64, color: Colors.indigo.shade100),
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.calendar_month_rounded,
+                  size: 36, color: AppTheme.primary),
+            ),
             const SizedBox(height: 16),
             Text(
               property['name'] as String? ?? 'Property',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600, fontSize: 15),
             ),
             const SizedBox(height: 8),
             Text(
               'Reservations calendar coming soon.',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              style: GoogleFonts.inter(
+                  color: AppTheme.textSecondary, fontSize: 13),
               textAlign: TextAlign.center,
             ),
           ],
@@ -172,41 +185,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final email = Supabase.instance.client.auth.currentUser?.email ?? '';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
+        backgroundColor: AppTheme.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        shadowColor: const Color(0x10000000),
         title: Row(
           children: [
-            Icon(Icons.home_work_outlined,
-                color: Colors.indigo.shade700, size: 28),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.home_work_rounded,
+                  color: AppTheme.primary, size: 20),
+            ),
             const SizedBox(width: 10),
-            Text('Alfred',
-                style: TextStyle(
-                    color: Colors.indigo.shade700,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20)),
+            Text(
+              'Alfred',
+              style: GoogleFonts.poppins(
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+              ),
+            ),
           ],
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: Center(
-              child: Text(email,
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              child: Text(
+                email,
+                style: GoogleFonts.inter(
+                    fontSize: 13, color: AppTheme.textSecondary),
+              ),
             ),
           ),
           TextButton.icon(
             onPressed: _logout,
-            icon: const Icon(Icons.logout, size: 18),
+            icon: const Icon(Icons.logout_rounded, size: 17),
             label: const Text('Logout'),
-            style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.textSecondary,
+              textStyle:
+                  GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
+            ),
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: AppTheme.primary))
           : RefreshIndicator(
+              color: AppTheme.primary,
               onRefresh: _loadProperties,
               child: _buildGrid(),
             ),
@@ -218,21 +254,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return LayoutBuilder(builder: (context, constraints) {
       int columns;
-      if (constraints.maxWidth > 900) {
+      if (constraints.maxWidth > 1100) {
+        columns = 4;
+      } else if (constraints.maxWidth > 800) {
         columns = 3;
-      } else if (constraints.maxWidth > 600) {
+      } else if (constraints.maxWidth > 520) {
         columns = 2;
       } else {
         columns = 1;
       }
 
       return GridView.builder(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
-          crossAxisSpacing: 20,
-          mainAxisSpacing: 20,
-          childAspectRatio: 280 / 320,
+          crossAxisSpacing: 18,
+          mainAxisSpacing: 18,
+          childAspectRatio: 280 / 310,
         ),
         itemCount: items.length,
         itemBuilder: (context, index) {

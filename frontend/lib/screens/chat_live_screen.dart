@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/app_theme.dart';
 
 class ChatLiveScreen extends StatefulWidget {
   final String bookingId;
@@ -21,6 +24,8 @@ class ChatLiveScreen extends StatefulWidget {
 
 class _ChatLiveScreenState extends State<ChatLiveScreen> {
   String? _conversationId;
+  String? _guestChatUrl;
+  bool _copiedLink = false;
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
   bool _isSending = false;
@@ -43,17 +48,42 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   }
 
   Future<void> _loadConversation() async {
-    final result = await Supabase.instance.client
-        .from('conversations')
-        .select('id, mode')
-        .eq('booking_id', widget.bookingId)
-        .maybeSingle();
-    if (result != null && mounted) {
+    final results = await Future.wait([
+      Supabase.instance.client
+          .from('conversations')
+          .select('id, mode')
+          .eq('booking_id', widget.bookingId)
+          .maybeSingle(),
+      Supabase.instance.client
+          .from('guests')
+          .select('guest_chat_url')
+          .eq('booking_id', widget.bookingId)
+          .maybeSingle(),
+    ]);
+
+    final conv = results[0] as Map<String, dynamic>?;
+    final guest = results[1] as Map<String, dynamic>?;
+
+    if (mounted) {
       setState(() {
-        _conversationId = result['id'] as String;
-        _mode = result['mode'] as String? ?? 'autopilot';
+        if (conv != null) {
+          _conversationId = conv['id'] as String;
+          _mode = conv['mode'] as String? ?? 'autopilot';
+        }
+        _guestChatUrl = guest?['guest_chat_url'] as String?;
       });
-      _subscribeToMessages(result['id'] as String);
+      if (_conversationId != null) _subscribeToMessages(_conversationId!);
+    }
+  }
+
+  Future<void> _copyGuestLink() async {
+    if (_guestChatUrl == null) return;
+    await Clipboard.setData(ClipboardData(text: _guestChatUrl!));
+    if (mounted) {
+      setState(() => _copiedLink = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _copiedLink = false);
+      });
     }
   }
 
@@ -128,35 +158,69 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text('Live Chat — ${widget.bookingId}'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Live Chat',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  color: AppTheme.primary),
+            ),
+            Text(
+              widget.bookingId,
+              style: GoogleFonts.inter(
+                  fontSize: 11, color: AppTheme.textMuted),
+            ),
+          ],
+        ),
       ),
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Left: conversation view ──────────────────────────────────────
+          // ── Left: conversation ───────────────────────────────────────────
           Expanded(
             flex: 3,
             child: Column(
               children: [
                 Container(
                   width: double.infinity,
-                  color: Colors.grey.shade100,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: const Text(
+                  color: AppTheme.surfaceAlt,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Text(
                     'Conversation',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        color: AppTheme.textSecondary),
                     textAlign: TextAlign.center,
                   ),
                 ),
                 const Divider(height: 1),
                 Expanded(
                   child: _messages.isEmpty
-                      ? const Center(child: Text('No messages yet.'))
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.chat_bubble_outline_rounded,
+                                  size: 40,
+                                  color: AppTheme.border),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No messages yet.',
+                                style: GoogleFonts.inter(
+                                    color: AppTheme.textMuted, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        )
                       : ListView.builder(
                           controller: _scrollController,
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(16),
                           itemCount: _messages.length,
                           itemBuilder: (_, i) => _buildBubble(_messages[i]),
                         ),
@@ -167,23 +231,25 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           const VerticalDivider(width: 1, thickness: 1),
           // ── Right: host control panel ────────────────────────────────────
           SizedBox(
-            width: 300,
+            width: 320,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _buildGuestLinkSection(),
                 _buildModeToggle(),
                 const Divider(height: 1),
                 Expanded(
                   child: Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       child: Text(
                         _mode == 'autopilot'
                             ? 'Alfred is handling this conversation.\n\nSwitch to Intervene to reply manually.'
                             : 'You are in control.\nType below to reply to the guest.',
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
+                        style: GoogleFonts.inter(
+                          color: AppTheme.textSecondary,
                           fontSize: 13,
+                          height: 1.6,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -199,38 +265,129 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     );
   }
 
+  Widget _buildGuestLinkSection() {
+    if (_guestChatUrl == null) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Guest Chat Link',
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: AppTheme.textPrimary),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceAlt,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Text(
+                  _guestChatUrl!,
+                  style: GoogleFonts.inter(
+                      fontSize: 11, color: AppTheme.textSecondary),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _copiedLink ? null : _copyGuestLink,
+                  icon: Icon(
+                    _copiedLink
+                        ? Icons.check_circle_outline_rounded
+                        : Icons.copy_rounded,
+                    size: 16,
+                  ),
+                  label: Text(_copiedLink ? 'Copied!' : 'Copy Guest Link'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _copiedLink
+                        ? AppTheme.success
+                        : AppTheme.primary,
+                    side: BorderSide(
+                        color: _copiedLink
+                            ? AppTheme.success
+                            : AppTheme.border),
+                  ),
+                ),
+              ),
+              if (_copiedLink) ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.check_circle_rounded,
+                        size: 12, color: AppTheme.success),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Link copied to clipboard.',
+                      style: GoogleFonts.inter(
+                          fontSize: 11, color: AppTheme.success),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        const Divider(height: 24),
+      ],
+    );
+  }
+
   Widget _buildModeToggle() {
     final isAutopilot = _mode == 'autopilot';
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Mode',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                color: AppTheme.textPrimary),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _modeButton(
-                  label: 'Autopilot',
-                  active: isAutopilot,
-                  activeColor: Colors.indigo,
-                  onTap: isAutopilot ? null : () => _setMode('autopilot'),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceAlt,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _modeButton(
+                    label: 'Autopilot',
+                    active: isAutopilot,
+                    activeColor: AppTheme.primary,
+                    onTap: isAutopilot ? null : () => _setMode('autopilot'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _modeButton(
-                  label: 'Intervene',
-                  active: !isAutopilot,
-                  activeColor: Colors.orange.shade800,
-                  onTap: !isAutopilot ? null : () => _setMode('intervene'),
+                Expanded(
+                  child: _modeButton(
+                    label: 'Intervene',
+                    active: !isAutopilot,
+                    activeColor: AppTheme.warning,
+                    onTap: !isAutopilot ? null : () => _setMode('intervene'),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -249,18 +406,24 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: active ? activeColor.withOpacity(0.1) : Colors.transparent,
-          border: Border.all(
-            color: active ? activeColor : Colors.grey.shade300,
-          ),
+          color: active ? AppTheme.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : [],
         ),
         child: Text(
           label,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            color: active ? activeColor : Colors.grey.shade500,
-            fontWeight: active ? FontWeight.bold : FontWeight.normal,
+          style: GoogleFonts.inter(
+            color: active ? activeColor : AppTheme.textMuted,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             fontSize: 13,
           ),
         ),
@@ -271,54 +434,89 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   Widget _buildBubble(Map<String, dynamic> msg) {
     final senderType = msg['sender_type'] as String;
     final isGuest = senderType == 'guest';
+    final isHost = senderType == 'host';
     final isEscalated = msg['is_escalated_interaction'] == true;
 
     Color bgColor;
-    Color textColor = Colors.black87;
+    Color textColor = AppTheme.textPrimary;
+    BorderRadius radius;
+
     if (isGuest) {
-      bgColor = Colors.indigo.shade50;
-    } else if (senderType == 'host') {
-      bgColor = Colors.teal.shade50;
+      bgColor = AppTheme.primaryContainer;
+      radius = const BorderRadius.only(
+        topLeft: Radius.circular(14),
+        topRight: Radius.circular(14),
+        bottomLeft: Radius.circular(14),
+        bottomRight: Radius.circular(3),
+      );
+    } else if (isHost) {
+      bgColor = AppTheme.surface;
+      radius = const BorderRadius.only(
+        topLeft: Radius.circular(3),
+        topRight: Radius.circular(14),
+        bottomLeft: Radius.circular(14),
+        bottomRight: Radius.circular(14),
+      );
     } else if (isEscalated) {
-      bgColor = Colors.orange.shade50;
+      bgColor = AppTheme.warningContainer;
+      radius = BorderRadius.circular(14);
     } else {
-      bgColor = Colors.grey.shade100;
+      bgColor = AppTheme.surfaceAlt;
+      radius = const BorderRadius.only(
+        topLeft: Radius.circular(3),
+        topRight: Radius.circular(14),
+        bottomLeft: Radius.circular(14),
+        bottomRight: Radius.circular(14),
+      );
     }
+
+    final senderLabel = isGuest
+        ? 'Guest'
+        : isHost
+            ? 'You'
+            : isEscalated
+                ? 'Alfred — needs attention'
+                : 'Alfred';
+
+    final senderColor = isGuest
+        ? AppTheme.primary
+        : isHost
+            ? AppTheme.textSecondary
+            : isEscalated
+                ? AppTheme.warning
+                : AppTheme.textMuted;
 
     return Align(
       alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        constraints: const BoxConstraints(maxWidth: 400),
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+        constraints: const BoxConstraints(maxWidth: 420),
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: BorderRadius.circular(12),
-          border: isEscalated
-              ? Border.all(color: Colors.orange.shade300, width: 1.5)
-              : null,
+          borderRadius: radius,
+          border: isHost
+              ? Border.all(color: AppTheme.border)
+              : isEscalated
+                  ? Border.all(color: AppTheme.warning, width: 1.5)
+                  : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              senderType == 'guest'
-                  ? 'Guest'
-                  : senderType == 'host'
-                      ? 'You'
-                      : isEscalated
-                          ? 'Alfred ⚠️'
-                          : 'Alfred',
-              style: TextStyle(
+              senderLabel,
+              style: GoogleFonts.inter(
                 fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade500,
+                fontWeight: FontWeight.w700,
+                color: senderColor,
+                letterSpacing: 0.2,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(
               msg['content'] as String,
-              style: TextStyle(fontSize: 14, color: textColor),
+              style: GoogleFonts.inter(fontSize: 13, color: textColor, height: 1.5),
             ),
           ],
         ),
@@ -327,26 +525,41 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   }
 
   Widget _buildHostInput() {
-    return Padding(
-      padding: const EdgeInsets.all(12),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _hostController,
               decoration: InputDecoration(
-                hintText: 'Reply to guest...',
+                hintText: 'Reply to guest…',
+                hintStyle: GoogleFonts.inter(
+                    fontSize: 13, color: AppTheme.textMuted),
                 filled: true,
-                fillColor: Colors.grey.shade100,
+                fillColor: AppTheme.surfaceAlt,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide.none,
+                  borderSide: const BorderSide(color: AppTheme.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: const BorderSide(color: AppTheme.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primary, width: 1.5),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
+                  horizontal: 16,
                   vertical: 10,
                 ),
               ),
+              style: GoogleFonts.inter(fontSize: 13),
               onSubmitted: (_) => _sendHostMessage(),
               textInputAction: TextInputAction.send,
             ),
@@ -354,11 +567,12 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           const SizedBox(width: 8),
           IconButton(
             onPressed: _isSending ? null : _sendHostMessage,
-            icon: const Icon(Icons.send, size: 20),
+            icon: const Icon(Icons.send_rounded, size: 18),
             style: IconButton.styleFrom(
-              backgroundColor: Colors.teal,
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: Colors.grey.shade300,
+              disabledBackgroundColor: AppTheme.border,
+              disabledForegroundColor: AppTheme.textMuted,
             ),
           ),
         ],

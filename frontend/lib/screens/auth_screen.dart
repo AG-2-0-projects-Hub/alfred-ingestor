@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -14,6 +16,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController();
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _showPassword = false;
 
   @override
   void dispose() {
@@ -50,13 +53,15 @@ class _AuthScreenState extends State<AuthScreen> {
     } on AuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+          SnackBar(content: Text(e.message), backgroundColor: AppTheme.danger),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: AppTheme.danger),
         );
       }
     } finally {
@@ -67,91 +72,321 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Alfred',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.indigo.shade700,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isLogin ? 'Sign in to your account' : 'Create an account',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey.shade600,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.next,
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.lock_outline),
-                    ),
-                    obscureText: true,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: _isLoading ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2.5, color: Colors.white),
-                          )
-                        : Text(_isLogin ? 'Sign In' : 'Sign Up'),
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => setState(() => _isLogin = !_isLogin),
-                    child: Text(
-                      _isLogin
-                          ? "Don't have an account? Sign up"
-                          : 'Already have an account? Sign in',
-                    ),
-                  ),
-                ],
+      backgroundColor: AppTheme.background,
+      body: LayoutBuilder(builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        if (isWide) return _buildWideLayout();
+        return _buildNarrowLayout();
+      }),
+    );
+  }
+
+  // ── Two-panel layout for desktop ─────────────────────────────────────────
+  Widget _buildWideLayout() {
+    return Row(
+      children: [
+        // Left: brand panel
+        Expanded(
+          flex: 5,
+          child: _buildBrandPanel(),
+        ),
+        // Right: form panel
+        Expanded(
+          flex: 4,
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 40),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: _buildForm(),
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Single-column layout for mobile ──────────────────────────────────────
+  Widget _buildNarrowLayout() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 24),
+              _buildLogo(large: false),
+              const SizedBox(height: 32),
+              _buildForm(),
+            ],
           ),
         ),
       ),
     );
   }
+
+  // ── Brand panel (left side on desktop) ───────────────────────────────────
+  Widget _buildBrandPanel() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF0D5E57),
+            Color(0xFF0F766E),
+            Color(0xFF0EA5E9),
+          ],
+          stops: [0.0, 0.55, 1.0],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // Subtle pattern overlay
+          Positioned.fill(
+            child: CustomPaint(painter: _DotPatternPainter()),
+          ),
+          // Content
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 56, vertical: 64),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLogo(large: true, light: true),
+                const Spacer(),
+                Text(
+                  'Give yourself\nthe gift of time.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 42,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    height: 1.2,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Alfred answers every guest message,\n'
+                  '24/7 — while you live your life.',
+                  style: GoogleFonts.inter(
+                    fontSize: 17,
+                    color: Colors.white.withOpacity(0.82),
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 40),
+                _buildFeaturePill(
+                    Icons.smart_toy_outlined, 'AI that knows your property'),
+                const SizedBox(height: 14),
+                _buildFeaturePill(
+                    Icons.schedule_outlined, 'Replies at 3am so you don\'t'),
+                const SizedBox(height: 14),
+                _buildFeaturePill(
+                    Icons.sentiment_satisfied_alt_outlined,
+                    'Guests love it, hosts love it more'),
+                const Spacer(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeaturePill(IconData icon, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            color: Colors.white.withOpacity(0.9),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLogo({required bool large, bool light = false}) {
+    final color = light ? Colors.white : AppTheme.primary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: large ? 44 : 36,
+          height: large ? 44 : 36,
+          decoration: BoxDecoration(
+            color: light
+                ? Colors.white.withOpacity(0.2)
+                : AppTheme.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            Icons.home_work_rounded,
+            color: color,
+            size: large ? 26 : 20,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          'Alfred',
+          style: GoogleFonts.poppins(
+            fontSize: large ? 28 : 22,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Login / Sign-up form ──────────────────────────────────────────────────
+  Widget _buildForm() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          _isLogin ? 'Welcome back' : 'Create your account',
+          style: GoogleFonts.poppins(
+            fontSize: 26,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _isLogin
+              ? 'Sign in to manage your properties'
+              : 'Start giving yourself time back',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            color: AppTheme.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 32),
+        // Email
+        TextField(
+          controller: _emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email address',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          autofocus: true,
+        ),
+        const SizedBox(height: 16),
+        // Password
+        TextField(
+          controller: _passwordController,
+          decoration: InputDecoration(
+            labelText: 'Password',
+            prefixIcon: const Icon(Icons.lock_outline),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                size: 20,
+                color: AppTheme.textMuted,
+              ),
+              onPressed: () => setState(() => _showPassword = !_showPassword),
+            ),
+          ),
+          obscureText: !_showPassword,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _isLoading ? null : _submit(),
+        ),
+        const SizedBox(height: 24),
+        // Primary action
+        SizedBox(
+          height: 50,
+          child: FilledButton(
+            onPressed: _isLoading ? null : _submit,
+            child: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(
+                    _isLogin ? 'Sign In' : 'Sign Up',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        // Toggle login/signup
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _isLogin
+                  ? "Don't have an account?"
+                  : 'Already have an account?',
+              style: GoogleFonts.inter(
+                  fontSize: 13, color: AppTheme.textSecondary),
+            ),
+            TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () => setState(() => _isLogin = !_isLogin),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                _isLogin ? 'Sign up' : 'Sign in',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ── Subtle dot-grid background for brand panel ────────────────────────────
+class _DotPatternPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.06)
+      ..style = PaintingStyle.fill;
+    const spacing = 28.0;
+    const radius = 1.5;
+    for (double x = 0; x < size.width; x += spacing) {
+      for (double y = 0; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), radius, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

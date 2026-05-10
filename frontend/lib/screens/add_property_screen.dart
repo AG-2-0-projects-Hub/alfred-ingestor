@@ -516,6 +516,17 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   if (_postMergeStatuses.contains(_propertyStatus)) ...[
                     const SizedBox(height: 24),
                     _buildMasterJsonViewer(),
+                    const SizedBox(height: 24),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.dashboard_outlined, size: 18),
+                      label: const Text('Back to Dashboard'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        foregroundColor: Colors.indigo.shade700,
+                        side: BorderSide(color: Colors.indigo.shade300),
+                      ),
+                    ),
                   ],
                   if (_propertyStatus == 'Conflict_Pending' &&
                       conflictReport != null &&
