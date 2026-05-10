@@ -152,8 +152,16 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           _masterJson = result['master_json'] as Map<String, dynamic>?;
           _filesToIngest.clear();
         });
+        if (ingested != null && ingested.isNotEmpty) {
+          await _showSuccessDialog(
+              name ?? _nicknameController.text.trim());
+        }
       }
     } catch (e) {
+      final errStr = e.toString();
+      if (errStr.contains('Failed to fetch') || errStr.contains('ClientException')) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
       _showError('Ingest failed: $e');
     } finally {
       setState(() => _isIngesting = false);
@@ -247,8 +255,70 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    final isFetchBlock =
+        msg.contains('Failed to fetch') || msg.contains('ClientException');
+    final displayMsg = isFetchBlock
+        ? 'Request blocked by your browser. Disable Brave Shields or ad-blockers for this site, then try again.'
+        : msg;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(displayMsg),
+      backgroundColor: Colors.red,
+      duration: Duration(seconds: isFetchBlock ? 10 : 6),
+    ));
+  }
+
+  Future<void> _showSuccessDialog(String propertyName) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 8),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle_outline,
+                color: Color(0xFF0F766E), size: 56),
+            const SizedBox(height: 16),
+            Text(
+              propertyName.isNotEmpty ? propertyName : 'Property Registered',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'The property is now registered and Alfred is ready to take over.',
+              style: TextStyle(fontSize: 15, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
+              style: TextStyle(
+                  fontSize: 13, color: Colors.grey.shade600, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Review Details'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('Back to Dashboard'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildStatusBadge(String status) {

@@ -304,16 +304,36 @@ After pushing the UI redesign, Vercel's `flutter build web` failed because the s
 
 ---
 
+## Session 2026-05-10 — Network Error UX & Post-Ingest Success Dialog
+
+### What was built
+
+#### Modified files
+| File | Change |
+|---|---|
+| `frontend/lib/screens/add_property_screen.dart` | `_showError` detects `ClientException: Failed to fetch` → plain-language browser-block message (10s), generic errors 6s; 500ms safety delay before error on fetch-block so spinner doesn't flicker; new `_showSuccessDialog` (teal check icon, property name, "Alfred is ready" message, "Review Details" / "Back to Dashboard" actions) called after successful ingest |
+| `frontend/lib/screens/chat_screen.dart` | `_sendMessage` catch intercepts `Failed to fetch` / `ClientException` → user-friendly browser-blocking explanation (10s) instead of raw error |
+
+### Supabase Auth — DONE (2026-05-10)
+- Email confirmations disabled: Auth → Sign In / Providers → Email → "Enable email confirmations" toggled off ✅
+
+### Backend/CORS verified (2026-05-10)
+- `/health` → `{"status": "ok"}` ✅
+- CORS preflight `/api/ingest` from `alfred-ingestor.vercel.app` → `HTTP 200`, correct `Access-Control-Allow-Origin` ✅
+
+---
+
 ## Next Steps
 
 ### Immediate
-1. **Commit + push** the staged `app_theme.dart` fix → Vercel redeploy should succeed
-2. **Browser verify** full redesign on live URL (`https://alfred-ingestor.vercel.app`) after deploy
-3. **Full audit** — systematic frontend + backend + Supabase verification (plan with Gemini using all MCPs)
+1. **Push commit** `feat: improve network error UX and add post-ingest success dialog` → Vercel auto-deploys
+2. **Browser verify** in vanilla Chrome (or Brave with Shields off for `alfred-ingestor.vercel.app`):
+   - Sign up with a fresh account (email confirmations now off — should log in immediately)
+   - Ingest one property → verify concierge success dialog appears
+   - Open guest chat link → verify chat works end-to-end
 
 ### Pending Supabase (if not done yet)
-- Disable "Confirm email" in Auth → Email settings
-- Set Site URL → `https://alfred-ingestor.vercel.app`
+- Set Site URL → `https://alfred-ingestor.vercel.app` (Auth → URL Configuration)
 - Add Redirect URL → `https://alfred-ingestor.vercel.app/**`
 - Run Storage policies (3 `CREATE POLICY` statements — see session 2026-05-07 Part 3 above)
 - Run `UPDATE properties SET owner_id = 'f86ebcae-683d-4914-837b-caaedca6a19d';`

@@ -93,9 +93,16 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send message: $e')),
-        );
+        final errStr = e.toString();
+        final isFetchBlock =
+            errStr.contains('Failed to fetch') || errStr.contains('ClientException');
+        final displayMsg = isFetchBlock
+            ? 'Unable to reach Alfred. Your browser may be blocking this request — disable Brave Shields or ad-blockers for this site and try again.'
+            : 'Could not send message: $e';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(displayMsg),
+          duration: Duration(seconds: isFetchBlock ? 10 : 5),
+        ));
       }
     } finally {
       if (mounted) setState(() => _isWaiting = false);
