@@ -267,7 +267,7 @@ def find_or_create_conversation(booking_id: str, property_id: str) -> dict:
         .maybe_single()
         .execute()
     )
-    if result.data:
+    if result and result.data:
         return result.data
     insert_result = client.table("conversations").insert({
         "booking_id": booking_id,
