@@ -47,6 +47,14 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // Voice path state (reuses voice recorder + file status)
   final List<Map<String, String>> _voiceStatuses = [];
 
+  // Automated Learning state
+  List<Map<String, dynamic>> _learnedKnowledge = [];
+  bool _loadingLearned = false;
+  bool _learnedLoaded = false;
+  int? _editingLearnedIndex;
+  final _editProblemCtrl = TextEditingController();
+  final _editSolutionCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +72,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     _tabController.dispose();
     _knowledgeController.dispose();
     _kbChatController.dispose();
+    _editProblemCtrl.dispose();
+    _editSolutionCtrl.dispose();
     super.dispose();
   }
 
@@ -280,6 +290,64 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _property['Conflict_status'] = null;
     });
     widget.onRefresh();
+  }
+
+  Future<void> _loadLearnedKnowledge() async {
+    if (_loadingLearned) return;
+    setState(() => _loadingLearned = true);
+    try {
+      final result = await Supabase.instance.client
+          .from('properties')
+          .select('learned_knowledge')
+          .eq('id', _property['id'] as String)
+          .single();
+      if (mounted) {
+        setState(() {
+          _learnedKnowledge = List<Map<String, dynamic>>.from(
+              result['learned_knowledge'] as List? ?? []);
+          _learnedLoaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _learnedLoaded = true);
+    } finally {
+      if (mounted) setState(() => _loadingLearned = false);
+    }
+  }
+
+  Future<void> _writeLearned(List<Map<String, dynamic>> updated) async {
+    await Supabase.instance.client
+        .from('properties')
+        .update({
+          'learned_knowledge': updated,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', _property['id'] as String);
+    if (mounted) setState(() => _learnedKnowledge = updated);
+  }
+
+  Future<void> _acceptLearned(int index) async {
+    final updated = List<Map<String, dynamic>>.from(_learnedKnowledge);
+    updated[index] = {...updated[index], 'reviewed': true};
+    await _writeLearned(updated);
+  }
+
+  Future<void> _saveLearned(int index) async {
+    final updated = List<Map<String, dynamic>>.from(_learnedKnowledge);
+    updated[index] = {
+      ...updated[index],
+      'problem_summary': _editProblemCtrl.text.trim(),
+      'solution_summary': _editSolutionCtrl.text.trim(),
+      'reviewed': true,
+    };
+    await _writeLearned(updated);
+    if (mounted) setState(() => _editingLearnedIndex = null);
+  }
+
+  Future<void> _discardLearned(int index) async {
+    final updated = List<Map<String, dynamic>>.from(_learnedKnowledge)
+      ..removeAt(index);
+    await _writeLearned(updated);
   }
 
   @override
@@ -614,6 +682,193 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             const SizedBox(height: 12),
             FileStatusList(statuses: _voiceStatuses),
           ],
+
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 16),
+
+          // Automated Learning section
+          Builder(builder: (context) {
+            if (!_learnedLoaded && !_loadingLearned) {
+              _loadLearnedKnowledge();
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.bolt_rounded, size: 15, color: AppTheme.accent),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Automated Learning',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Q&A entries captured automatically when issues are resolved.',
+                  style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+                ),
+                const SizedBox(height: 12),
+                if (_loadingLearned)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: CircularProgressIndicator(color: AppTheme.primary),
+                    ),
+                  )
+                else if (_learnedKnowledge.isEmpty)
+                  Text(
+                    'No automated learning entries yet. Resolve an escalation to generate one.',
+                    style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                  )
+                else
+                  ..._learnedKnowledge.asMap().entries.map((e) {
+                    final index = e.key;
+                    final entry = e.value;
+                    final reviewed = entry['reviewed'] == true;
+                    final isEditing = _editingLearnedIndex == index;
+                    final bg = reviewed ? Colors.green.shade50 : Colors.orange.shade50;
+                    final borderColor = reviewed ? Colors.green.shade300 : Colors.orange.shade300;
+                    final category = entry['category'] as String? ?? 'other';
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: bg,
+                        border: Border.all(color: borderColor),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: reviewed ? Colors.green.shade100 : Colors.orange.shade100,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  category,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: reviewed ? Colors.green.shade700 : Colors.orange.shade700,
+                                  ),
+                                ),
+                              ),
+                              const Spacer(),
+                              if (reviewed)
+                                Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade600),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (isEditing) ...[
+                            TextField(
+                              controller: _editProblemCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Problem',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              style: GoogleFonts.inter(fontSize: 12),
+                              maxLines: 2,
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _editSolutionCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Solution',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              style: GoogleFonts.inter(fontSize: 12),
+                              maxLines: 2,
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                FilledButton.tonal(
+                                  onPressed: () => _saveLearned(index),
+                                  child: const Text('Save'),
+                                ),
+                                const SizedBox(width: 8),
+                                TextButton(
+                                  onPressed: () => setState(() => _editingLearnedIndex = null),
+                                  child: const Text('Cancel'),
+                                ),
+                              ],
+                            ),
+                          ] else ...[
+                            Text(
+                              'Q: ${entry['problem_summary'] ?? ''}',
+                              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textPrimary, height: 1.4),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'A: ${entry['solution_summary'] ?? ''}',
+                              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                if (!reviewed)
+                                  OutlinedButton.icon(
+                                    onPressed: () => _acceptLearned(index),
+                                    icon: const Icon(Icons.check_rounded, size: 14),
+                                    label: const Text('Accept'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.green.shade700,
+                                      side: BorderSide(color: Colors.green.shade400),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      textStyle: GoogleFonts.inter(fontSize: 12),
+                                    ),
+                                  ),
+                                if (!reviewed) const SizedBox(width: 6),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    _editProblemCtrl.text = entry['problem_summary'] as String? ?? '';
+                                    _editSolutionCtrl.text = entry['solution_summary'] as String? ?? '';
+                                    setState(() => _editingLearnedIndex = index);
+                                  },
+                                  icon: const Icon(Icons.edit_outlined, size: 14),
+                                  label: const Text('Edit'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.textSecondary,
+                                    side: const BorderSide(color: AppTheme.border),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    textStyle: GoogleFonts.inter(fontSize: 12),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                OutlinedButton.icon(
+                                  onPressed: () => _discardLearned(index),
+                                  icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                                  label: const Text('Discard'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.red.shade700,
+                                    side: BorderSide(color: Colors.red.shade300),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    textStyle: GoogleFonts.inter(fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            );
+          }),
 
           const SizedBox(height: 32),
           const Divider(),

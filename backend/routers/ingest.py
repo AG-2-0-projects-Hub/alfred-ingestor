@@ -304,5 +304,8 @@ async def query_knowledge(req: QueryKnowledgeRequest):
             status_code=422,
             detail="No knowledge base found for this property. Ingest and merge files first.",
         )
-    answer = await gemini_client.query_knowledge_base(master_json, req.question)
+    learned_knowledge = prop.get("learned_knowledge") or []
+    answer = await gemini_client.query_knowledge_base(
+        master_json, req.question, learned_knowledge=learned_knowledge
+    )
     return {"answer": answer}

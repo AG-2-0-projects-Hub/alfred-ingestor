@@ -194,6 +194,7 @@ async def resolve_conversation(req: ResolveRequest):
                 "language": summary.get("language", "en"),
                 "resolved_at": _now_iso(),
                 "booking_id": req.booking_id,
+                "reviewed": False,
             }
         except asyncio.TimeoutError:
             log.warning(

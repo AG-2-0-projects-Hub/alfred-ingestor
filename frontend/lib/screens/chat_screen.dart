@@ -3,6 +3,10 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:record/record.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
@@ -18,21 +22,29 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   String? _conversationId;
+  String? _propertyName;
   List<Map<String, dynamic>> _messages = [];
   bool _isWaiting = false;
+  bool _isRecording = false;
+  AudioRecorder? _recorder;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
 
   @override
   void initState() {
     super.initState();
+    _recorder = AudioRecorder();
     _loadConversation();
+    _watchConversation();
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _convSubscription?.cancel();
+    _recorder?.dispose();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -41,13 +53,35 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadConversation() async {
     final result = await Supabase.instance.client
         .from('conversations')
-        .select('id')
+        .select('id, property_id')
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
-      setState(() => _conversationId = result['id'] as String);
-      _subscribeToMessages(result['id'] as String);
+      final propResult = await Supabase.instance.client
+          .from('properties')
+          .select('name')
+          .eq('id', result['property_id'] as String)
+          .maybeSingle();
+      if (mounted) {
+        setState(() {
+          _conversationId = result['id'] as String;
+          _propertyName = propResult?['name'] as String?;
+        });
+        _subscribeToMessages(result['id'] as String);
+      }
     }
+  }
+
+  void _watchConversation() {
+    _convSubscription?.cancel();
+    _convSubscription = Supabase.instance.client
+        .from('conversations')
+        .stream(primaryKey: ['id'])
+        .eq('booking_id', widget.bookingId)
+        .listen((rows) {
+          if (!mounted || rows.isEmpty || _conversationId != null) return;
+          _loadConversation();
+        });
   }
 
   void _subscribeToMessages(String conversationId) {
@@ -120,6 +154,90 @@ class _ChatScreenState extends State<ChatScreen> {
     ));
   }
 
+  Future<void> _pickAndSendImage() async {
+    if (_conversationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Send a text message first to start the conversation.')),
+      );
+      return;
+    }
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    final ext = file.extension?.toLowerCase() ?? 'jpg';
+    final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
+    final filename = 'img_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final storagePath = '$_conversationId/chat_media/$filename';
+    try {
+      await Supabase.instance.client.storage
+          .from('chat_media')
+          .uploadBinary(
+            storagePath,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
+      await Supabase.instance.client.from('messages').insert({
+        'conversation_id': _conversationId,
+        'sender_type': 'guest',
+        'content': '[image]',
+        'message_type': 'image',
+        'media_url': storagePath,
+        'status': 'delivered',
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (_recorder == null || !await _recorder!.hasPermission()) return;
+    await _recorder!.start(const RecordConfig(encoder: AudioEncoder.wav));
+    if (mounted) setState(() => _isRecording = true);
+  }
+
+  Future<void> _stopAndSendVoice() async {
+    if (_recorder == null) return;
+    final path = await _recorder!.stop();
+    if (mounted) setState(() => _isRecording = false);
+    if (path == null || _conversationId == null) return;
+    try {
+      final response = await http.get(Uri.parse(path));
+      final bytes = response.bodyBytes;
+      final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
+      final storagePath = '$_conversationId/chat_media/$filename';
+      await Supabase.instance.client.storage
+          .from('chat_media')
+          .uploadBinary(
+            storagePath,
+            bytes,
+            fileOptions: const FileOptions(contentType: 'audio/wav', upsert: false),
+          );
+      await Supabase.instance.client.from('messages').insert({
+        'conversation_id': _conversationId,
+        'sender_type': 'guest',
+        'content': '[voice message]',
+        'message_type': 'audio',
+        'media_url': storagePath,
+        'status': 'delivered',
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -183,11 +301,23 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: Colors.white, size: 18),
                 ),
                 const SizedBox(width: 10),
-                Text('Alfred',
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                        color: AppTheme.primary)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Alfred',
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 18,
+                            color: AppTheme.primary)),
+                    if (_propertyName != null)
+                      Text(
+                        _propertyName!,
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: AppTheme.textMuted),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -210,8 +340,72 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _buildImageBubble(String storagePath, bool isGuest) {
+    final publicUrl = Supabase.instance.client.storage
+        .from('chat_media')
+        .getPublicUrl(storagePath);
+    return Align(
+      alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        constraints: const BoxConstraints(maxWidth: 280),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            publicUrl,
+            fit: BoxFit.cover,
+            loadingBuilder: (_, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                width: 200,
+                height: 150,
+                color: AppTheme.surfaceAlt,
+                child: const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primary),
+                ),
+              );
+            },
+            errorBuilder: (_, __, ___) => Container(
+              width: 200,
+              height: 80,
+              color: AppTheme.surfaceAlt,
+              child: const Center(
+                child: Icon(Icons.broken_image_outlined, color: AppTheme.textMuted),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBubble(Map<String, dynamic> msg) {
+    if (msg['sender_type'] == 'system') {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Text(
+            msg['content'] as String,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: AppTheme.textMuted,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+      );
+    }
     final isGuest = msg['sender_type'] == 'guest';
+    final messageType = msg['message_type'] as String? ?? 'text';
+    if (messageType == 'image') {
+      return _buildImageBubble(msg['media_url'] as String, isGuest);
+    }
+    if (messageType == 'audio') {
+      return _AudioBubble(
+        storagePath: msg['media_url'] as String,
+        isGuest: isGuest,
+      );
+    }
     final bg = isGuest ? AppTheme.primary : AppTheme.surface;
     final fg = isGuest ? Colors.white : AppTheme.textPrimary;
     return Align(
@@ -289,6 +483,27 @@ class _ChatScreenState extends State<ChatScreen> {
                   textInputAction: TextInputAction.send,
                 ),
               ),
+              IconButton(
+                onPressed: _isWaiting ? null : _pickAndSendImage,
+                icon: const Icon(Icons.image_outlined, size: 20),
+                color: AppTheme.textSecondary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
+              IconButton(
+                onPressed: _isWaiting
+                    ? null
+                    : (_isRecording ? _stopAndSendVoice : _startRecording),
+                icon: Icon(
+                  _isRecording
+                      ? Icons.stop_circle_rounded
+                      : Icons.mic_none_rounded,
+                  size: 20,
+                ),
+                color: _isRecording ? AppTheme.danger : AppTheme.textSecondary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
               const SizedBox(width: 4),
               IconButton(
                 onPressed: _isWaiting ? null : _sendMessage,
@@ -302,6 +517,86 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AudioBubble extends StatefulWidget {
+  final String storagePath;
+  final bool isGuest;
+  const _AudioBubble({required this.storagePath, required this.isGuest});
+
+  @override
+  State<_AudioBubble> createState() => _AudioBubbleState();
+}
+
+class _AudioBubbleState extends State<_AudioBubble> {
+  late final AudioPlayer _player;
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _player.onPlayerStateChanged.listen((state) {
+      if (mounted) setState(() => _playing = state == PlayerState.playing);
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_playing) {
+      await _player.pause();
+    } else {
+      final url = Supabase.instance.client.storage
+          .from('chat_media')
+          .getPublicUrl(widget.storagePath);
+      await _player.play(UrlSource(url));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: widget.isGuest ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: widget.isGuest ? AppTheme.primary : AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: widget.isGuest ? null : Border.all(color: AppTheme.border),
+          boxShadow: AppTheme.cardShadow,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: _togglePlay,
+              icon: Icon(
+                _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                size: 22,
+              ),
+              color: widget.isGuest ? Colors.white : AppTheme.primary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Voice message',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: widget.isGuest ? Colors.white : AppTheme.textPrimary,
+              ),
+            ),
+          ],
         ),
       ),
     );

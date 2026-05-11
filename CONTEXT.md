@@ -145,6 +145,22 @@ Note: `'auto'` is NOT a valid value — constraint will reject it.
 - New service function: `gemini_messenger.summarize_escalation` (gemini-2.5-flash)
 - UI: resolve button in intervene mode, escalation window coloring, emergency styling, automated-learning badge, property card alert pills
 
+### ✅ Done (Phase 2 — this session)
+- **Step 1**: `query_knowledge_base()` now includes `learned_knowledge` in Gemini prompt
+- **Step 2**: `learned_entry` dict now includes `"reviewed": False` on creation
+- **Step 3**: `insert_message()` accepts `message_type` and `media_url` params
+- **Step 4**: `chat_live_screen.dart` — replaced `_subscribeToConversation` with `_watchConversation()` filtering by `booking_id`; real-time sync now works even when conversation doesn't exist yet
+- **Step 5**: System messages (sender_type='system') — `_insertSystemMessage()` helper; `_setMode()` and `_resolveIssue()` insert "You are now speaking with [host name]" / "Alfred has resumed" messages; both `chat_live_screen` and `chat_screen` render system messages as centered italic text
+- **Step 6**: `_computeEscalationWindow()` now includes the guest message that immediately precedes an escalated AI response
+- **Step 7**: Guest chat `AppBar` shows property name subtitle; `_watchConversation()` added for real-time new-conversation detection
+- **Step 8**: Media attachments (image + voice) in guest chat — `file_picker` for images, `record` for audio; uploads to `chat_media` Supabase Storage bucket; `audioplayers` for playback in both guest and host views; `_AudioBubble` widget in both files
+- **Step 9**: Automated Learning review UI in Knowledge tab — orange cards (unreviewed), green cards (reviewed); Accept / Edit / Discard actions with Supabase read-modify-write
+
+### Supabase (pending — user must do manually)
+- SQL migration for system sender_type: `ALTER TABLE public.messages DROP CONSTRAINT messages_sender_type_check; ALTER TABLE public.messages ADD CONSTRAINT messages_sender_type_check CHECK (sender_type IN ('guest', 'ai', 'host', 'system'));`
+- SQL migration for media columns: `ALTER TABLE public.messages ADD COLUMN message_type text NOT NULL DEFAULT 'text', ADD COLUMN media_url text;`
+- Create PUBLIC Supabase Storage bucket named `chat_media` (Storage → New bucket → toggle Public ON)
+
 ### Supabase (if not done yet)
 - Set Site URL → `https://alfred-ingestor.vercel.app` (Auth → URL Configuration)
 - Add Redirect URL → `https://alfred-ingestor.vercel.app/**`
@@ -165,3 +181,6 @@ Note: `'auto'` is NOT a valid value — constraint will reject it.
 - `asyncio.wait_for(timeout=45)` guards both Gemini calls — if Gemini hangs, client gets a structured 504 (not a raw connection kill)
 - Supabase singleton client (`_client`) is shared across `asyncio.to_thread` calls — thread-safe in practice because supabase-py uses httpx which is connection-pool safe, but worth watching
 - `conversations_mode_check` constraint only allows `'autopilot'` and `'intervene'` — not `'auto'`
+- `messages.sender_type` check must include `'system'` (migration adds it); system messages render as centered italic text
+- `messages.message_type` defaults to `'text'`; `'image'` and `'audio'` use `media_url` pointing to `chat_media` public bucket path
+- Media upload requires `_conversationId` to be set (guest must send one text message first)

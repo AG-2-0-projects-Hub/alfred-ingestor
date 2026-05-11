@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
@@ -25,6 +26,7 @@ class ChatLiveScreen extends StatefulWidget {
 class _ChatLiveScreenState extends State<ChatLiveScreen> {
   String? _conversationId;
   String? _guestChatUrl;
+  String _hostName = 'Your host';
   bool _copiedLink = false;
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
@@ -54,49 +56,46 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   Future<void> _loadConversation() async {
     final results = await Future.wait([
       Supabase.instance.client
-          .from('conversations')
-          .select('id, mode, escalation_reason')
-          .eq('booking_id', widget.bookingId)
-          .maybeSingle(),
-      Supabase.instance.client
           .from('guests')
           .select('guest_chat_url')
           .eq('booking_id', widget.bookingId)
           .maybeSingle(),
+      Supabase.instance.client
+          .from('properties')
+          .select("master_json->host_profile->>name")
+          .eq('id', widget.propertyId)
+          .maybeSingle(),
     ]);
 
-    final conv = results[0] as Map<String, dynamic>?;
-    final guest = results[1] as Map<String, dynamic>?;
+    final guest = results[0] as Map<String, dynamic>?;
+    final prop = results[1] as Map<String, dynamic>?;
 
     if (mounted) {
       setState(() {
-        if (conv != null) {
-          _conversationId = conv['id'] as String;
-          _mode = conv['mode'] as String? ?? 'autopilot';
-          _escalationReason = conv['escalation_reason'] as String?;
-        }
         _guestChatUrl = guest?['guest_chat_url'] as String?;
+        _hostName = (prop?['name'] as String?) ?? 'Your host';
       });
-      if (_conversationId != null) {
-        _subscribeToMessages(_conversationId!);
-        _subscribeToConversation(_conversationId!);
-      }
+      _watchConversation();
     }
   }
 
-  void _subscribeToConversation(String conversationId) {
+  void _watchConversation() {
     _convSubscription?.cancel();
     _convSubscription = Supabase.instance.client
         .from('conversations')
         .stream(primaryKey: ['id'])
-        .eq('id', conversationId)
+        .eq('booking_id', widget.bookingId)
         .listen((rows) {
-          if (mounted && rows.isNotEmpty) {
-            final row = rows.first;
-            setState(() {
-              _mode = row['mode'] as String? ?? 'autopilot';
-              _escalationReason = row['escalation_reason'] as String?;
-            });
+          if (!mounted || rows.isEmpty) return;
+          final row = rows.first;
+          final rowId = row['id'] as String;
+          setState(() {
+            _mode = row['mode'] as String? ?? 'autopilot';
+            _escalationReason = row['escalation_reason'] as String?;
+          });
+          if (_conversationId == null) {
+            setState(() => _conversationId = rowId);
+            _subscribeToMessages(rowId);
           }
         });
   }
@@ -110,6 +109,16 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         if (mounted) setState(() => _copiedLink = false);
       });
     }
+  }
+
+  Future<void> _insertSystemMessage(String content) async {
+    if (_conversationId == null) return;
+    await Supabase.instance.client.from('messages').insert({
+      'conversation_id': _conversationId,
+      'sender_type': 'system',
+      'content': content,
+      'status': 'delivered',
+    });
   }
 
   void _subscribeToMessages(String conversationId) {
@@ -151,6 +160,11 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         .from('conversations')
         .update({'mode': mode}).eq('id', _conversationId!);
     if (mounted) setState(() => _mode = mode);
+    if (mode == 'intervene') {
+      await _insertSystemMessage('You are now speaking with $_hostName.');
+    } else {
+      await _insertSystemMessage('Alfred has resumed your conversation.');
+    }
   }
 
   Future<void> _resolveIssue() async {
@@ -166,12 +180,15 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           _mode = 'autopilot';
           _escalationReason = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Issue resolved. Alfred is back on autopilot.'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
+        await _insertSystemMessage('Alfred has resumed your conversation.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Issue resolved. Alfred is back on autopilot.'),
+              backgroundColor: AppTheme.success,
+            ),
+          );
+        }
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -524,20 +541,20 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   }
 
   List<bool> _computeEscalationWindow() {
-    // For each message index, true if it falls within an unresolved escalation
-    // window (i.e., after an is_escalated_interaction=true message that has not
-    // yet been resolved).
     final out = List<bool>.filled(_messages.length, false);
     bool inWindow = false;
     for (int i = 0; i < _messages.length; i++) {
       final m = _messages[i];
-      if (m['is_escalated_interaction'] == true) {
+      // Include the guest message that immediately precedes an escalated AI response
+      if (!inWindow &&
+          m['sender_type'] == 'guest' &&
+          i + 1 < _messages.length &&
+          _messages[i + 1]['is_escalated_interaction'] == true) {
         inWindow = true;
       }
+      if (m['is_escalated_interaction'] == true) inWindow = true;
       out[i] = inWindow;
-      if (m['resolution_status'] == 'resolved') {
-        inWindow = false;
-      }
+      if (m['resolution_status'] == 'resolved') inWindow = false;
     }
     return out;
   }
@@ -579,7 +596,58 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     required bool isEmergency,
   }) {
     final senderType = msg['sender_type'] as String;
+
+    if (senderType == 'system') {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Text(
+            msg['content'] as String,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: AppTheme.textMuted,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+      );
+    }
+
     final isGuest = senderType == 'guest';
+    final messageType = msg['message_type'] as String? ?? 'text';
+    if (messageType == 'image') {
+      final publicUrl = Supabase.instance.client.storage
+          .from('chat_media')
+          .getPublicUrl(msg['media_url'] as String);
+      return Align(
+        alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          constraints: const BoxConstraints(maxWidth: 280),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(
+              publicUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 200,
+                height: 80,
+                color: AppTheme.surfaceAlt,
+                child: const Center(
+                  child: Icon(Icons.broken_image_outlined, color: AppTheme.textMuted),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (messageType == 'audio') {
+      return _AudioBubble(
+        storagePath: msg['media_url'] as String,
+        isGuest: isGuest,
+      );
+    }
     final isHost = senderType == 'host';
     final isEscalated = msg['is_escalated_interaction'] == true;
     final usedLearned = msg['used_learned_knowledge'] == true;
@@ -771,6 +839,82 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AudioBubble extends StatefulWidget {
+  final String storagePath;
+  final bool isGuest;
+  const _AudioBubble({required this.storagePath, required this.isGuest});
+
+  @override
+  State<_AudioBubble> createState() => _AudioBubbleState();
+}
+
+class _AudioBubbleState extends State<_AudioBubble> {
+  late final AudioPlayer _player;
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _player.onPlayerStateChanged.listen((state) {
+      if (mounted) setState(() => _playing = state == PlayerState.playing);
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_playing) {
+      await _player.pause();
+    } else {
+      final url = Supabase.instance.client.storage
+          .from('chat_media')
+          .getPublicUrl(widget.storagePath);
+      await _player.play(UrlSource(url));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: widget.isGuest ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: widget.isGuest ? AppTheme.primaryContainer : AppTheme.surfaceAlt,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: _togglePlay,
+              icon: Icon(
+                _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                size: 22,
+              ),
+              color: AppTheme.primary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Voice message',
+              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textPrimary),
+            ),
+          ],
+        ),
       ),
     );
   }

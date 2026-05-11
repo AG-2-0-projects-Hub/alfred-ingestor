@@ -313,22 +313,38 @@ SYSTEM_INSTRUCTION_KB = (
 )
 
 
-async def query_knowledge_base(master_json: dict, question: str) -> str:
-    """Answer a host question using only the property master_json as context."""
+async def query_knowledge_base(
+    master_json: dict,
+    question: str,
+    learned_knowledge: list[dict] | None = None,
+) -> str:
+    """Answer a host question using property master_json and any learned knowledge."""
     import json as _json
     master_json_str = _json.dumps(master_json, indent=2, ensure_ascii=False)
-    prompt = f"""You are Alfred, a property knowledge assistant with a warm, concierge flair. Your ONLY knowledge source is the Master JSON provided below — you must not infer, assume, or add any information beyond what is explicitly present in it.
+
+    learned_block = ""
+    if learned_knowledge:
+        lines = []
+        for e in learned_knowledge:
+            lines.append(
+                f"- [{e.get('category', 'other')}] Q: {e.get('problem_summary', '')}\n"
+                f"  A: {e.get('solution_summary', '')}"
+            )
+        learned_block = "\n\nPast Resolutions (from automated learning):\n" + "\n".join(lines)
+
+    prompt = f"""You are Alfred, a property knowledge assistant with a warm, concierge flair. Your ONLY knowledge sources are the Master JSON and Past Resolutions provided below — you must not infer, assume, or add any information beyond what is explicitly present in them.
 
 When the host asks a question:
 1. Search the Master JSON for the relevant field(s)
-2. Answer concisely and in plain language — no JSON syntax in the reply
-3. If the information is not in the JSON, say exactly: "That information is not in the knowledge base yet."
-4. If the data is partial, give what you have and note what's missing
+2. Also check the Past Resolutions for any relevant Q&A
+3. Answer concisely and in plain language — no JSON syntax in the reply
+4. If the information is not in either source, say exactly: "That information is not in the knowledge base yet."
+5. If the data is partial, give what you have and note what's missing
 
 You are a verification tool for the host — accuracy matters more than completeness. Do not speculate.
 
 Master JSON:
-{master_json_str}
+{master_json_str}{learned_block}
 
 Host question: {question}"""
     parts = [types.Part(text=prompt)]

@@ -299,9 +299,11 @@ def insert_message(
     sentiment: str | None = None,
     is_escalated_interaction: bool = False,
     used_learned_knowledge: bool = False,
+    message_type: str = "text",
+    media_url: str | None = None,
 ) -> dict:
     client = get_client()
-    result = client.table("messages").insert({
+    row: dict = {
         "conversation_id": conversation_id,
         "sender_type": sender_type,
         "content": content,
@@ -309,7 +311,11 @@ def insert_message(
         "status": "delivered",
         "is_escalated_interaction": is_escalated_interaction,
         "used_learned_knowledge": used_learned_knowledge,
-    }).execute()
+        "message_type": message_type,
+    }
+    if media_url:
+        row["media_url"] = media_url
+    result = client.table("messages").insert(row).execute()
     return result.data[0]
 
 
