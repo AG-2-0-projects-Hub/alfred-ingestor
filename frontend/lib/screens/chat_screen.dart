@@ -200,7 +200,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _startRecording() async {
     if (_recorder == null || !await _recorder!.hasPermission()) return;
-    await _recorder!.start(const RecordConfig(encoder: AudioEncoder.wav));
+    await _recorder!.start(const RecordConfig(encoder: AudioEncoder.wav), path: 'recording.wav');
     if (mounted) setState(() => _isRecording = true);
   }
 
