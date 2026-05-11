@@ -98,7 +98,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
                 height: 64,
                 decoration: BoxDecoration(
                   color: _hovered
-                      ? AppTheme.primary.withOpacity(0.12)
+                      ? AppTheme.primary.withValues(alpha: 0.12)
                       : AppTheme.primaryContainer,
                   shape: BoxShape.circle,
                 ),
@@ -159,6 +159,7 @@ class _PropertyCard extends StatefulWidget {
 
 class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -172,20 +173,30 @@ class _PropertyCardState extends State<_PropertyCard> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onExpand,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _hovered ? AppTheme.primaryHover : AppTheme.border,
-              width: 1,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          scale: _pressed ? 0.98 : (_hovered ? 1.012 : 1.0),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              color: _hovered ? AppTheme.glassTintStrong : AppTheme.glassTint,
+              gradient: AppTheme.glassInnerHighlight,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _hovered
+                    ? AppTheme.primaryHover.withValues(alpha: 0.5)
+                    : AppTheme.glassBorderStrong,
+                width: 1,
+              ),
+              boxShadow:
+                  _hovered ? AppTheme.cardShadowHover : AppTheme.cardShadow,
             ),
-            boxShadow:
-                _hovered ? AppTheme.cardShadowHover : AppTheme.cardShadow,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Hero image with status badge overlay
@@ -205,7 +216,7 @@ class _PropertyCardState extends State<_PropertyCard> {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              Colors.black.withOpacity(0.28),
+                              Colors.black.withValues(alpha: 0.28),
                               Colors.transparent,
                             ],
                           ),
@@ -254,6 +265,7 @@ class _PropertyCardState extends State<_PropertyCard> {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
@@ -421,7 +433,7 @@ class _CardAction extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
@@ -629,7 +641,7 @@ class _HeroImageState extends State<_HeroImage> {
         child: Icon(
           Icons.home_outlined,
           size: 48,
-          color: Colors.white.withOpacity(0.7),
+          color: Colors.white.withValues(alpha: 0.7),
         ),
       ),
     );

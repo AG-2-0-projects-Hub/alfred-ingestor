@@ -1,11 +1,16 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
+import '../services/api_client.dart';
+import '../theme/app_theme.dart';
+import '../widgets/aurora_background.dart';
 import '../widgets/drop_zone.dart';
+import '../widgets/glass_panel.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
@@ -97,7 +102,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _masterJson = null;
     });
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+    final String backendUrl;
+    try {
+      backendUrl = ApiClient.backendUrl;
+    } on ConfigurationException catch (e) {
+      _showError(e.userMessage);
+      setState(() => _isIngesting = false);
+      return;
+    }
     // Attach the auth token so backend stamps owner_id on the property row.
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
@@ -157,12 +169,16 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               name ?? _nicknameController.text.trim());
         }
       }
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       final errStr = e.toString();
       if (errStr.contains('Failed to fetch') || errStr.contains('ClientException')) {
-        await Future.delayed(const Duration(milliseconds: 500));
+        await Future.delayed(const Duration(milliseconds: 400));
+        _showError("Couldn't reach Alfred. Check your connection and try again.");
+      } else {
+        _showError('Ingest failed: $e');
       }
-      _showError('Ingest failed: $e');
     } finally {
       setState(() => _isIngesting = false);
     }
@@ -223,22 +239,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   Future<void> _runMerge() async {
     final id = _resolvedPropertyId ?? _propertyId;
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     setState(() => _isMerging = true);
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/merge/$id'),
-        headers: {'Content-Type': 'application/json'},
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _propertyStatus = data['status'] as String?;
-          _masterJson = data['master_json'] as Map<String, dynamic>?;
-        });
-      } else {
-        _showError('Merge failed (${response.statusCode})');
-      }
+      final data = await ApiClient.postJson('/api/merge/$id', const {});
+      setState(() {
+        _propertyStatus = data['status'] as String?;
+        _masterJson = data['master_json'] as Map<String, dynamic>?;
+      });
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       _showError('Merge failed: $e');
     } finally {
@@ -255,15 +264,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   void _showError(String msg) {
     if (!mounted) return;
-    final isFetchBlock =
-        msg.contains('Failed to fetch') || msg.contains('ClientException');
-    final displayMsg = isFetchBlock
-        ? 'Request blocked by your browser. Disable Brave Shields or ad-blockers for this site, then try again.'
-        : msg;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(displayMsg),
-      backgroundColor: Colors.red,
-      duration: Duration(seconds: isFetchBlock ? 10 : 6),
+      content: Text(msg),
+      backgroundColor: AppTheme.danger,
+      duration: const Duration(seconds: 8),
     ));
   }
 
@@ -272,51 +277,91 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 8),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle_outline,
-                color: Color(0xFF0F766E), size: 56),
-            const SizedBox(height: 16),
-            Text(
-              propertyName.isNotEmpty ? propertyName : 'Property Registered',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: GlassPanel(
+            radius: 20,
+            blurSigma: AppTheme.glassBlurSigmaHeavy,
+            tint: AppTheme.glassTintHeavy,
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [AppTheme.primary, AppTheme.accent],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primary.withValues(alpha: 0.35),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 34),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  propertyName.isNotEmpty
+                      ? propertyName
+                      : 'Property Registered',
+                  style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'The property is now registered and Alfred is ready to take over.',
+                  style: GoogleFonts.inter(
+                      fontSize: 15,
+                      height: 1.5,
+                      color: AppTheme.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Review Details'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        Navigator.of(context).pop();
+                      },
+                      child: const Text('Back to Dashboard'),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            const Text(
-              'The property is now registered and Alfred is ready to take over.',
-              style: TextStyle(fontSize: 15, height: 1.5),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
-              style: TextStyle(
-                  fontSize: 13, color: Colors.grey.shade600, height: 1.5),
-              textAlign: TextAlign.center,
-            ),
-          ],
+          ),
         ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Review Details'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF0F766E)),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              Navigator.of(context).pop();
-            },
-            child: const Text('Back to Dashboard'),
-          ),
-        ],
       ),
     );
   }
@@ -330,30 +375,33 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       'Fully_Trained' => 'Fully Trained',
       _ => status,
     };
-    final color = switch (status) {
-      'Ingested' => Colors.amber.shade700,
-      'Merged' || 'Trained' => Colors.green.shade700,
-      'Conflict_Pending' => Colors.orange.shade800,
-      'Fully_Trained' => Colors.indigo.shade700,
-      _ => Colors.grey.shade700,
+    // Soft-fill using semantic container tokens (ui-ux-pro-max §6 color-semantic).
+    final (bg, fg) = switch (status) {
+      'Ingested' => (AppTheme.warningContainer, AppTheme.warning),
+      'Merged' || 'Trained' => (AppTheme.successContainer, AppTheme.success),
+      'Conflict_Pending' => (AppTheme.warningContainer, AppTheme.warning),
+      'Fully_Trained' => (AppTheme.primaryContainer, AppTheme.onPrimaryContainer),
+      _ => (AppTheme.surfaceAlt, AppTheme.textSecondary),
     };
     return Row(
       children: [
-        const Text('Status:',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text('Status:',
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: AppTheme.textPrimary)),
         const SizedBox(width: 10),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: color.withAlpha(30),
-            border: Border.all(color: color.withAlpha(100)),
+            color: bg,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(label,
-              style: TextStyle(
+              style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: color)),
+                  color: fg)),
         ),
       ],
     );
@@ -399,19 +447,46 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final conflictReport = _masterJson?['conflict_report'] as List<dynamic>?;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add Property'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        leading: BackButton(onPressed: () => Navigator.of(context).pop()),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: AppBar(
+              backgroundColor: AppTheme.glassTint,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              title: Text('Add Property',
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                      color: AppTheme.primary)),
+              leading: BackButton(
+                color: AppTheme.primary,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+      body: AuroraBackground(
+        intensity: 0.45,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+              24, kToolbarHeight + 24, 24, 48),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: GlassPanel(
+                radius: 20,
+                blurSigma: AppTheme.glassBlurSigmaHeavy,
+                tint: AppTheme.glassTintStrong,
+                padding: const EdgeInsets.fromLTRB(28, 28, 28, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                 TextField(
                   controller: _nicknameController,
                   decoration: const InputDecoration(
@@ -560,11 +635,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       onPressed: _isMerging ? null : _runMerge,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        backgroundColor: Colors.indigo.shade600,
-                        textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.4),
+                        backgroundColor: AppTheme.primary,
+                        textStyle: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2),
                       ),
                       child: _isMerging
                           ? const Row(
@@ -593,8 +668,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       label: const Text('Back to Dashboard'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        foregroundColor: Colors.indigo.shade700,
-                        side: BorderSide(color: Colors.indigo.shade300),
+                        foregroundColor: AppTheme.primary,
+                        side: const BorderSide(
+                            color: AppTheme.primaryContainer, width: 1.5),
                       ),
                     ),
                   ],
@@ -612,14 +688,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       key: ValueKey(conflictReport.length),
                       propertyId: effectiveId,
                       conflictReport: conflictReport,
-                      backendUrl:
-                          dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
+                      backendUrl: ApiClient.backendUrl,
                       onResolved: _onResolved,
                     ),
                   ],
                 ],
-                const SizedBox(height: 48),
+                const SizedBox(height: 16),
               ],
+                ),
+              ),
             ),
           ),
         ),

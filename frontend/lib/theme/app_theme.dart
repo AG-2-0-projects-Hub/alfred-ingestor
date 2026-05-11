@@ -39,6 +39,26 @@ class AppTheme {
   static const Color danger            = Color(0xFFDC2626);
   static const Color dangerContainer   = Color(0xFFFEE2E2);
 
+  // ── Glass primitives ──────────────────────────────────────────────────────
+  static const Color glassTint         = Color(0x99FFFFFF); // white @ 60%
+  static const Color glassTintStrong   = Color(0xCCFFFFFF); // white @ 80% (forms)
+  static const Color glassTintHeavy    = Color(0xE6FFFFFF); // white @ 90% (modals)
+  static const Color glassBorder       = Color(0x33FFFFFF); // white @ 20%
+  static const Color glassBorderStrong = Color(0x4DFFFFFF); // white @ 30% (hover)
+  static const LinearGradient glassInnerHighlight = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0x40FFFFFF), Color(0x00FFFFFF)],
+  );
+  static const double glassBlurSigma      = 18.0;
+  static const double glassBlurSigmaHeavy = 28.0;
+
+  // ── Aurora — bold background blobs ────────────────────────────────────────
+  static const Color auroraTeal     = Color(0xFF14B8A6);
+  static const Color auroraSky      = Color(0xFF38BDF8);
+  static const Color auroraLavender = Color(0xFFA78BFA);
+  static const Color auroraPeach    = Color(0xFFFDA4AF);
+
   // ── Elevation ─────────────────────────────────────────────────────────────
   static List<BoxShadow> get cardShadow => [
     BoxShadow(

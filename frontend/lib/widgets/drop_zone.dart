@@ -2,8 +2,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mime/mime.dart';
+import '../theme/app_theme.dart';
 
 const _supportedExtensions = [
   'pdf', 'doc', 'docx',
@@ -75,6 +77,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final dragColor = AppTheme.primary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -100,45 +103,74 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
           },
           child: GestureDetector(
             onTap: _pickFiles,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              height: 120,
-              decoration: BoxDecoration(
-                color: _isDragging
-                    ? Colors.indigo.shade50
-                    : Colors.grey.shade100,
-                border: Border.all(
-                  color: _isDragging ? Colors.indigo : Colors.grey.shade400,
-                  width: _isDragging ? 2 : 1,
-                  style: BorderStyle.solid,
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              scale: _isDragging ? 1.015 : 1.0,
+              child: CustomPaint(
+                painter: _DashedBorderPainter(
+                  color: _isDragging ? dragColor : AppTheme.borderStrong,
+                  strokeWidth: _isDragging ? 2.0 : 1.5,
+                  radius: 14,
+                  dashLength: 8,
+                  gap: 5,
                 ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.cloud_upload_outlined,
-                    size: 36,
-                    color: _isDragging ? Colors.indigo : Colors.grey,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  height: 132,
+                  decoration: BoxDecoration(
+                    color: _isDragging
+                        ? AppTheme.primaryContainer.withValues(alpha: 0.55)
+                        : AppTheme.glassTint,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: _isDragging
+                        ? [
+                            BoxShadow(
+                              color: dragColor.withValues(alpha: 0.18),
+                              blurRadius: 24,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _isDragging
-                        ? 'Drop files here'
-                        : 'Drag & drop or tap to browse',
-                    style: TextStyle(
-                        color: _isDragging
-                            ? Colors.indigo
-                            : Colors.grey.shade600),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedScale(
+                        duration: const Duration(milliseconds: 200),
+                        scale: _isDragging ? 1.12 : 1.0,
+                        child: Icon(
+                          Icons.cloud_upload_outlined,
+                          size: 36,
+                          color: _isDragging ? dragColor : AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isDragging
+                            ? 'Drop files here'
+                            : 'Drag & drop or tap to browse',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: _isDragging
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: _isDragging
+                              ? dragColor
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'PDF · DOCX · Images · Sheets · Audio',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'PDF · DOCX · Images · Sheets · Audio',
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -148,10 +180,62 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
             padding: const EdgeInsets.only(top: 6),
             child: Text(
               _unsupportedError!,
-              style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppTheme.danger,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
       ],
     );
   }
+}
+
+/// Paints a dashed rounded rectangle. Flutter has no native dashed border.
+class _DashedBorderPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+  final double radius;
+  final double dashLength;
+  final double gap;
+
+  _DashedBorderPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.radius,
+    required this.dashLength,
+    required this.gap,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    final rect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+    final path = Path()..addRRect(rect);
+    final metrics = path.computeMetrics();
+    for (final metric in metrics) {
+      double distance = 0;
+      while (distance < metric.length) {
+        final next = (distance + dashLength).clamp(0, metric.length).toDouble();
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+        distance = next + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter old) =>
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.radius != radius ||
+      old.dashLength != dashLength ||
+      old.gap != gap;
 }

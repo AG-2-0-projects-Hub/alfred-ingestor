@@ -1,7 +1,9 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
+import '../widgets/aurora_background.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
 import '../widgets/archived_chats_dialog.dart';
@@ -185,67 +187,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final email = Supabase.instance.client.auth.currentUser?.email ?? '';
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        shadowColor: const Color(0x10000000),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: AppBar(
+              backgroundColor: AppTheme.glassTint,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [AppTheme.primary, AppTheme.accent],
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.home_work_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Alfred',
+                    style: GoogleFonts.poppins(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                    ),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.home_work_rounded,
-                  color: AppTheme.primary, size: 20),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Center(
+                    child: Text(
+                      email,
+                      style: GoogleFonts.inter(
+                          fontSize: 13, color: AppTheme.textSecondary),
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _logout,
+                  icon: const Icon(Icons.logout_rounded, size: 17),
+                  label: const Text('Logout'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.textSecondary,
+                    textStyle: GoogleFonts.inter(
+                        fontWeight: FontWeight.w500, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
             ),
-            const SizedBox(width: 10),
-            Text(
-              'Alfred',
-              style: GoogleFonts.poppins(
-                color: AppTheme.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: 20,
-              ),
-            ),
-          ],
+          ),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Center(
-              child: Text(
-                email,
-                style: GoogleFonts.inter(
-                    fontSize: 13, color: AppTheme.textSecondary),
-              ),
-            ),
-          ),
-          TextButton.icon(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout_rounded, size: 17),
-            label: const Text('Logout'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.textSecondary,
-              textStyle:
-                  GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
-      body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.primary))
-          : RefreshIndicator(
-              color: AppTheme.primary,
-              onRefresh: _loadProperties,
-              child: _buildGrid(),
-            ),
+      body: AuroraBackground(
+        intensity: 0.55,
+        child: _loading
+            ? const Center(
+                child: CircularProgressIndicator(color: AppTheme.primary))
+            : RefreshIndicator(
+                color: AppTheme.primary,
+                onRefresh: _loadProperties,
+                child: _buildGrid(),
+              ),
+      ),
     );
   }
 
@@ -265,7 +279,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       return GridView.builder(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 48),
+        padding: EdgeInsets.fromLTRB(28, kToolbarHeight + 28, 28, 48),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
           crossAxisSpacing: 18,
@@ -275,21 +289,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
-          if (item.isEmpty) {
-            return PropertyCard.add(onAddProperty: _openAddProperty);
-          }
-          return PropertyCard(
-            property: item,
-            activeChatCount: _chatCounts[item['id'] as String] ?? 0,
-            onExpand: () => _openDrawer(item),
-            onGuestLink: () => _openGuestLink(item),
-            onHostChat: () => _openHostChat(item),
-            onAddProperty: _openAddProperty,
-            onArchivedChats: () => _openArchivedChats(item),
-            onCalendar: () => _openCalendar(item),
+          final card = item.isEmpty
+              ? PropertyCard.add(onAddProperty: _openAddProperty)
+              : PropertyCard(
+                  property: item,
+                  activeChatCount: _chatCounts[item['id'] as String] ?? 0,
+                  onExpand: () => _openDrawer(item),
+                  onGuestLink: () => _openGuestLink(item),
+                  onHostChat: () => _openHostChat(item),
+                  onAddProperty: _openAddProperty,
+                  onArchivedChats: () => _openArchivedChats(item),
+                  onCalendar: () => _openCalendar(item),
+                );
+          return _StaggeredEntry(
+            delayMs: (index * 50).clamp(0, 400),
+            child: card,
           );
         },
       );
     });
+  }
+}
+
+/// Subtle fade + 12px upward slide for each grid item, staggered by index.
+class _StaggeredEntry extends StatefulWidget {
+  final Widget child;
+  final int delayMs;
+  const _StaggeredEntry({required this.child, required this.delayMs});
+
+  @override
+  State<_StaggeredEntry> createState() => _StaggeredEntryState();
+}
+
+class _StaggeredEntryState extends State<_StaggeredEntry> {
+  bool _shown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: widget.delayMs), () {
+      if (mounted) setState(() => _shown = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      offset: _shown ? Offset.zero : const Offset(0, 0.06),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 280),
+        opacity: _shown ? 1 : 0,
+        child: widget.child,
+      ),
+    );
   }
 }

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import random
 import re
@@ -8,6 +9,9 @@ from pydantic import BaseModel
 from services import supabase_client, gemini_messenger
 
 router = APIRouter()
+log = logging.getLogger(__name__)
+
+GEMINI_TIMEOUT_S = 45
 
 
 class WebIncomingRequest(BaseModel):
@@ -64,23 +68,45 @@ async def web_incoming(req: WebIncomingRequest):
     # Exclude the message we just inserted (last item)
     history = history[:-1] if history else []
 
-    first_result = await gemini_messenger.first_pass(
-        master_json=property_data["master_json"],
-        conversation_history=history,
-        preferred_language=guest.get("preferred_language") or "not_set",
-        guest_message=req.message,
-    )
-
-    if first_result.get("requires_web_search") and first_result.get("search_query"):
-        reply = await gemini_messenger.second_pass_with_search(
-            master_json=property_data["master_json"],
-            conversation_history=history,
-            preferred_language=guest.get("preferred_language") or "not_set",
-            guest_message=req.message,
-            search_query=first_result["search_query"],
+    try:
+        first_result = await asyncio.wait_for(
+            gemini_messenger.first_pass(
+                master_json=property_data["master_json"],
+                conversation_history=history,
+                preferred_language=guest.get("preferred_language") or "not_set",
+                guest_message=req.message,
+            ),
+            timeout=GEMINI_TIMEOUT_S,
         )
-    else:
-        reply = first_result["reply_to_guest"]
+
+        if first_result.get("requires_web_search") and first_result.get("search_query"):
+            reply = await asyncio.wait_for(
+                gemini_messenger.second_pass_with_search(
+                    master_json=property_data["master_json"],
+                    conversation_history=history,
+                    preferred_language=guest.get("preferred_language") or "not_set",
+                    guest_message=req.message,
+                    search_query=first_result["search_query"],
+                ),
+                timeout=GEMINI_TIMEOUT_S,
+            )
+        else:
+            reply = first_result["reply_to_guest"]
+    except asyncio.TimeoutError:
+        log.warning(
+            "Gemini call exceeded %ss for booking=%s; returning 504 so the client gets a CORS-friendly error",
+            GEMINI_TIMEOUT_S, req.booking_id,
+        )
+        await asyncio.to_thread(
+            supabase_client.update_conversation,
+            conversation["id"],
+            ai_status="error",
+        )
+        raise HTTPException(
+            status_code=504,
+            detail={"code": "gemini_timeout", "retry": True,
+                    "message": f"Alfred took longer than {GEMINI_TIMEOUT_S}s to respond."},
+        )
 
     requires_escalation = bool(first_result.get("requires_escalation"))
 

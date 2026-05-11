@@ -1,12 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../widgets/aurora_background.dart';
 
 class ChatLiveScreen extends StatefulWidget {
   final String bookingId;
@@ -135,15 +135,16 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     setState(() => _isSending = true);
 
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
-      await http.post(
-        Uri.parse('$backendUrl/api/messages/host-send'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'conversation_id': _conversationId,
-          'message': text,
-        }),
+      await ApiClient.postJson(
+        '/api/messages/host-send',
+        {'conversation_id': _conversationId, 'message': text},
       );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage)),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -158,27 +159,43 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Live Chat',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 18,
-                  color: AppTheme.primary),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: AppBar(
+              backgroundColor: AppTheme.glassTint,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Live Chat',
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                        color: AppTheme.primary),
+                  ),
+                  Text(
+                    widget.bookingId,
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: AppTheme.textMuted),
+                  ),
+                ],
+              ),
             ),
-            Text(
-              widget.bookingId,
-              style: GoogleFonts.inter(
-                  fontSize: 11, color: AppTheme.textMuted),
-            ),
-          ],
+          ),
         ),
       ),
-      body: Row(
+      body: AuroraBackground(
+        intensity: 0.4,
+        child: Padding(
+          padding: const EdgeInsets.only(top: kToolbarHeight),
+          child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Left: conversation ───────────────────────────────────────────
@@ -261,6 +278,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             ),
           ),
         ],
+      ),
+        ),
       ),
     );
   }
@@ -411,7 +430,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           boxShadow: active
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
+                    color: Colors.black.withValues(alpha: 0.06),
                     blurRadius: 4,
                     offset: const Offset(0, 1),
                   ),

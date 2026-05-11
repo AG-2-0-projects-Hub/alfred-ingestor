@@ -343,12 +343,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final name = _property['name'] as String? ?? 'Property';
     final status = _property['status'] as String? ?? '';
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [AppTheme.primaryDark, AppTheme.primary],
+          colors: [AppTheme.primaryDark, AppTheme.primary, AppTheme.accent],
+          stops: const [0.0, 0.55, 1.0],
         ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       padding: const EdgeInsets.fromLTRB(20, 20, 8, 20),
       child: Row(
@@ -356,8 +364,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.25), width: 1),
             ),
             child: const Icon(Icons.home_work_rounded,
                 color: Colors.white, size: 18),
@@ -380,7 +390,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   Text(
                     status,
                     style: GoogleFonts.inter(
-                      color: Colors.white.withOpacity(0.7),
+                      color: Colors.white.withValues(alpha: 0.85),
                       fontSize: 11,
                     ),
                   ),
@@ -928,7 +938,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       ),
       child: Center(
         child: Icon(Icons.home_outlined,
-            size: 48, color: Colors.white.withOpacity(0.7)),
+            size: 48, color: Colors.white.withValues(alpha: 0.7)),
       ),
     );
   }

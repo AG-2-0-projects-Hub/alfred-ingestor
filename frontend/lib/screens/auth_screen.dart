@@ -173,7 +173,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   '24/7 — while you live your life.',
                   style: GoogleFonts.inter(
                     fontSize: 17,
-                    color: Colors.white.withOpacity(0.82),
+                    color: Colors.white.withValues(alpha: 0.82),
                     height: 1.6,
                   ),
                 ),
@@ -203,7 +203,7 @@ class _AuthScreenState extends State<AuthScreen> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
+            color: Colors.white.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: Colors.white, size: 18),
@@ -213,7 +213,7 @@ class _AuthScreenState extends State<AuthScreen> {
           label,
           style: GoogleFonts.inter(
             fontSize: 14,
-            color: Colors.white.withOpacity(0.9),
+            color: Colors.white.withValues(alpha: 0.9),
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -231,7 +231,7 @@ class _AuthScreenState extends State<AuthScreen> {
           height: large ? 44 : 36,
           decoration: BoxDecoration(
             color: light
-                ? Colors.white.withOpacity(0.2)
+                ? Colors.white.withValues(alpha: 0.2)
                 : AppTheme.primaryContainer,
             borderRadius: BorderRadius.circular(10),
           ),
@@ -297,13 +297,23 @@ class _AuthScreenState extends State<AuthScreen> {
           decoration: InputDecoration(
             labelText: 'Password',
             prefixIcon: const Icon(Icons.lock_outline),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                size: 20,
-                color: AppTheme.textMuted,
+            suffixIcon: Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: IconButton(
+                icon: Icon(
+                  _showPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 20,
+                  color: AppTheme.textMuted,
+                ),
+                splashRadius: 22,
+                tooltip: _showPassword ? 'Hide password' : 'Show password',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    setState(() => _showPassword = !_showPassword),
               ),
-              onPressed: () => setState(() => _showPassword = !_showPassword),
             ),
           ),
           obscureText: !_showPassword,
@@ -376,7 +386,7 @@ class _DotPatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.06)
+      ..color = Colors.white.withValues(alpha: 0.06)
       ..style = PaintingStyle.fill;
     const spacing = 28.0;
     const radius = 1.5;

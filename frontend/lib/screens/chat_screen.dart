@@ -1,9 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/api_client.dart';
+import '../theme/app_theme.dart';
+import '../widgets/aurora_background.dart';
+import '../widgets/glass_panel.dart';
 
 class ChatScreen extends StatefulWidget {
   final String bookingId;
@@ -74,78 +77,143 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
+  Future<void> _sendMessage({String? overrideText}) async {
+    final text = overrideText ?? _controller.text.trim();
     if (text.isEmpty || _isWaiting) return;
-    _controller.clear();
+    if (overrideText == null) _controller.clear();
     setState(() => _isWaiting = true);
 
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/messages/web-incoming'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'booking_id': widget.bookingId, 'message': text}),
+      await ApiClient.postJson(
+        '/api/messages/web-incoming',
+        {'booking_id': widget.bookingId, 'message': text},
       );
-
-      if (response.statusCode == 200 && _conversationId == null) {
+      if (_conversationId == null) {
         await _loadConversation();
       }
+    } on ApiException catch (e) {
+      _showApiError(e, retryWith: text);
     } catch (e) {
-      if (mounted) {
-        final errStr = e.toString();
-        final isFetchBlock =
-            errStr.contains('Failed to fetch') || errStr.contains('ClientException');
-        final displayMsg = isFetchBlock
-            ? 'Unable to reach Alfred. Your browser may be blocking this request — disable Brave Shields or ad-blockers for this site and try again.'
-            : 'Could not send message: $e';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(displayMsg),
-          duration: Duration(seconds: isFetchBlock ? 10 : 5),
-        ));
-      }
+      _showApiError(
+        NetworkException(),
+        retryWith: text,
+      );
     } finally {
       if (mounted) setState(() => _isWaiting = false);
     }
   }
 
+  void _showApiError(ApiException e, {required String retryWith}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(e.userMessage),
+      duration: const Duration(seconds: 8),
+      backgroundColor: AppTheme.textPrimary,
+      action: e.retry
+          ? SnackBarAction(
+              label: 'Retry',
+              textColor: AppTheme.accent,
+              onPressed: () => _sendMessage(overrideText: retryWith),
+            )
+          : null,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Alfred'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _messages.isEmpty && !_isWaiting
-                ? const Center(
-                    child: Text(
-                      'Send a message to start the conversation.',
-                      style: TextStyle(color: Colors.black54),
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length + (_isWaiting ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index == _messages.length) {
-                        return _buildTypingIndicator();
-                      }
-                      return _buildBubble(_messages[index]);
-                    },
-                  ),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: _buildAppBar(),
+      body: AuroraBackground(
+        intensity: 0.45,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              const SizedBox(height: kToolbarHeight + 24),
+              Expanded(
+                child: _messages.isEmpty && !_isWaiting
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        itemCount: _messages.length + (_isWaiting ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == _messages.length) {
+                            return _buildTypingIndicator();
+                          }
+                          return _buildBubble(_messages[index]);
+                        },
+                      ),
+              ),
+              _buildInputBar(),
+            ],
           ),
-          _buildInputBar(),
-        ],
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight),
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: AppBar(
+            backgroundColor: AppTheme.glassTint,
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [AppTheme.primary, AppTheme.accent],
+                    ),
+                  ),
+                  child: const Icon(Icons.support_agent,
+                      color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Text('Alfred',
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                        color: AppTheme.primary)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Text(
+          'Send a message to start the conversation.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+              color: AppTheme.textSecondary, fontSize: 14, height: 1.5),
+        ),
       ),
     );
   }
 
   Widget _buildBubble(Map<String, dynamic> msg) {
     final isGuest = msg['sender_type'] == 'guest';
+    final bg = isGuest ? AppTheme.primary : AppTheme.surface;
+    final fg = isGuest ? Colors.white : AppTheme.textPrimary;
     return Align(
       alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -153,22 +221,19 @@ class _ChatScreenState extends State<ChatScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 520),
         decoration: BoxDecoration(
-          color: isGuest
-              ? Theme.of(context).colorScheme.primary
-              : Colors.grey.shade200,
+          color: bg,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
             bottomLeft: Radius.circular(isGuest ? 16 : 4),
             bottomRight: Radius.circular(isGuest ? 4 : 16),
           ),
+          border: isGuest ? null : Border.all(color: AppTheme.border),
+          boxShadow: AppTheme.cardShadow,
         ),
         child: Text(
           msg['content'] as String,
-          style: TextStyle(
-            color: isGuest ? Colors.white : Colors.black87,
-            fontSize: 15,
-          ),
+          style: GoogleFonts.inter(color: fg, fontSize: 14, height: 1.45),
         ),
       ),
     );
@@ -178,72 +243,126 @@ class _ChatScreenState extends State<ChatScreen> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.grey.shade200,
+          color: AppTheme.surface,
+          border: Border.all(color: AppTheme.border),
           borderRadius: BorderRadius.circular(16),
+          boxShadow: AppTheme.cardShadow,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.grey.shade500,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Alfred is typing...',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-            ),
-          ],
-        ),
+        child: const _TypingDots(),
       ),
     );
   }
 
   Widget _buildInputBar() {
     return SafeArea(
+      top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                decoration: InputDecoration(
-                  hintText: 'Type a message...',
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+        child: GlassPanel(
+          radius: 28,
+          blurSigma: 20,
+          tint: AppTheme.glassTintStrong,
+          padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  decoration: InputDecoration(
+                    hintText: 'Type a message...',
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    hintStyle:
+                        GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 14),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+                  style: GoogleFonts.inter(fontSize: 14),
+                  onSubmitted: (_) => _sendMessage(),
+                  textInputAction: TextInputAction.send,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: _isWaiting ? null : _sendMessage,
+                icon: const Icon(Icons.send, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppTheme.border,
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Three-dot typing indicator with a 240ms stagger per dot.
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 44,
+      height: 18,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, _) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) {
+              final phase = ((_ctrl.value - i * 0.18) % 1.0).clamp(0.0, 1.0);
+              final opacity = 0.3 + 0.7 * (1 - (phase * 2 - 1).abs());
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppTheme.textSecondary
+                        .withValues(alpha: opacity),
                   ),
                 ),
-                onSubmitted: (_) => _sendMessage(),
-                textInputAction: TextInputAction.send,
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              onPressed: _isWaiting ? null : _sendMessage,
-              icon: const Icon(Icons.send),
-              style: IconButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.grey.shade300,
-              ),
-            ),
-          ],
-        ),
+              );
+            }),
+          );
+        },
       ),
     );
   }
