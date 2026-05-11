@@ -24,6 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, int> _chatCounts = {};
   Map<String, bool> _hasEscalation = {};
   Map<String, bool> _hasEmergency = {};
+  Map<String, List<Map<String, dynamic>>> _conversationPreviews = {};
   bool _loading = true;
 
   @override
@@ -47,6 +48,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Map<String, int> counts = {};
       Map<String, bool> hasEscalation = {};
       Map<String, bool> hasEmergency = {};
+      Map<String, List<Map<String, dynamic>>> previews = {};
       if (properties.isNotEmpty) {
         final ids = properties.map((p) => p['id'] as String).toList();
         final guests = await Supabase.instance.client
@@ -57,19 +59,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final pid = g['property_id'] as String;
           counts[pid] = (counts[pid] ?? 0) + 1;
         }
-        // Load active escalation/emergency state per property
-        final alerts = await Supabase.instance.client
+        // Load active escalation/emergency state + conversation previews per property
+        final convRows = await Supabase.instance.client
             .from('conversations')
-            .select('property_id, escalation_reason')
-            .eq('requires_attention', true)
-            .inFilter('property_id', ids);
-        for (final a in alerts) {
+            .select(
+                'id, property_id, booking_id, mode, requires_attention, escalation_reason')
+            .inFilter('property_id', ids)
+            .order('updated_at', ascending: false);
+
+        for (final a in convRows) {
           final pid = a['property_id'] as String;
-          hasEscalation[pid] = true;
-          final reason = a['escalation_reason'] as String?;
-          if (reason != null && reason.startsWith('emergency_')) {
-            hasEmergency[pid] = true;
+          if (a['requires_attention'] == true) {
+            hasEscalation[pid] = true;
+            final reason = a['escalation_reason'] as String?;
+            if (reason != null && reason.startsWith('emergency_')) {
+              hasEmergency[pid] = true;
+            }
           }
+        }
+
+        // Fetch guest names for conversation previews
+        final bookingIds = convRows
+            .map((c) => c['booking_id'] as String?)
+            .whereType<String>()
+            .toList();
+        final Map<String, String> guestNames = {};
+        if (bookingIds.isNotEmpty) {
+          final guestsData = await Supabase.instance.client
+              .from('guests')
+              .select('booking_id, name')
+              .inFilter('booking_id', bookingIds);
+          for (final g in guestsData) {
+            guestNames[g['booking_id'] as String] =
+                g['name'] as String? ?? 'Guest';
+          }
+        }
+
+        // previews declared above the if block for setState scope
+        for (final c in convRows) {
+          final pid = c['property_id'] as String;
+          final bid = c['booking_id'] as String? ?? '';
+          final merged = {...c, 'guestName': guestNames[bid] ?? 'Guest'};
+          previews[pid] = [...(previews[pid] ?? []), merged];
+        }
+        for (final pid in previews.keys) {
+          previews[pid]!.sort((a, b) {
+            int priority(Map<String, dynamic> x) {
+              final reason = x['escalation_reason'] as String?;
+              if (reason != null && reason.startsWith('emergency_')) return 0;
+              if (x['requires_attention'] == true) return 1;
+              if (x['mode'] == 'intervene') return 2;
+              return 3;
+            }
+            return priority(a).compareTo(priority(b));
+          });
         }
       }
 
@@ -79,6 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _chatCounts = counts;
           _hasEscalation = hasEscalation;
           _hasEmergency = hasEmergency;
+          _conversationPreviews = previews;
         });
       }
     } catch (e) {
@@ -270,7 +314,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
       body: AuroraBackground(
-        intensity: 0.55,
+        intensity: 0.50,
         child: _loading
             ? const Center(
                 child: CircularProgressIndicator(color: AppTheme.primary))
@@ -304,7 +348,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           crossAxisCount: columns,
           crossAxisSpacing: 18,
           mainAxisSpacing: 18,
-          childAspectRatio: 280 / 310,
+          childAspectRatio: 280 / 390,
         ),
         itemCount: items.length,
         itemBuilder: (context, index) {
@@ -318,6 +362,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _hasEscalation[item['id'] as String] ?? false,
                   hasEmergency:
                       _hasEmergency[item['id'] as String] ?? false,
+                  conversationPreviews:
+                      _conversationPreviews[item['id'] as String] ?? [],
                   onExpand: () => _openDrawer(item),
                   onGuestLink: () => _openGuestLink(item),
                   onHostChat: () => _openHostChat(item),

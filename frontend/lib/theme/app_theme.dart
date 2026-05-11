@@ -1,89 +1,89 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Alfred Design System
+/// Alfred Design System — Dark Edition
 ///
-/// Primary : Teal  #0F766E — trust, property management, calm authority
-/// Accent  : Sky   #0EA5E9 — freedom, openness, the product's core promise
-/// Neutrals: Slate scale   — clean, modern, readable
+/// Primary : Electric Indigo #6366F1
+/// Accent  : Soft Mint       #10B981
+/// Base    : Void Slate      #0D0D12
 class AppTheme {
   AppTheme._();
 
-  // ── Primary — Teal ────────────────────────────────────────────────────────
-  static const Color primary            = Color(0xFF0F766E);
-  static const Color primaryHover       = Color(0xFF0D9488);
-  static const Color primaryDark        = Color(0xFF0D5E57);
-  static const Color primaryContainer   = Color(0xFFCCFBF1);
-  static const Color onPrimaryContainer = Color(0xFF134E4A);
+  // ── Primary — Electric Indigo ─────────────────────────────────────────────
+  static const Color primary            = Color(0xFF6366F1);
+  static const Color primaryHover       = Color(0xFF818CF8);
+  static const Color primaryDark        = Color(0xFF4338CA);
+  static const Color primaryContainer   = Color(0xFF1E1B4B);
+  static const Color onPrimaryContainer = Color(0xFFC7D2FE);
 
-  // ── Accent — Sky (freedom flair) ─────────────────────────────────────────
-  static const Color accent              = Color(0xFF0EA5E9);
-  static const Color accentContainer    = Color(0xFFE0F2FE);
-  static const Color onAccentContainer  = Color(0xFF0369A1);
+  // ── Accent — Soft Mint ────────────────────────────────────────────────────
+  static const Color accent             = Color(0xFF10B981);
+  static const Color accentContainer   = Color(0xFF064E3B);
+  static const Color onAccentContainer = Color(0xFF6EE7B7);
 
-  // ── Neutrals — Slate ─────────────────────────────────────────────────────
-  static const Color background    = Color(0xFFF8FAFC);
-  static const Color surface       = Color(0xFFFFFFFF);
-  static const Color surfaceAlt    = Color(0xFFF1F5F9);
-  static const Color border        = Color(0xFFE2E8F0);
-  static const Color borderStrong  = Color(0xFFCBD5E1);
-  static const Color textPrimary   = Color(0xFF1E293B);
-  static const Color textSecondary = Color(0xFF64748B);
-  static const Color textMuted     = Color(0xFF94A3B8);
+  // ── Neutrals — Void Slate scale ───────────────────────────────────────────
+  static const Color background    = Color(0xFF0D0D12);
+  static const Color surface       = Color(0xFF16161F);
+  static const Color surfaceAlt    = Color(0xFF1E1E2A);
+  static const Color border        = Color(0xFF2D2D3F);
+  static const Color borderStrong  = Color(0xFF3D3D55);
+  static const Color textPrimary   = Color(0xFFF9FAFB);
+  static const Color textSecondary = Color(0xFF94A3B8);
+  static const Color textMuted     = Color(0xFF64748B);
 
   // ── Status ────────────────────────────────────────────────────────────────
-  static const Color success           = Color(0xFF059669);
-  static const Color successContainer  = Color(0xFFD1FAE5);
-  static const Color warning           = Color(0xFFD97706);
-  static const Color warningContainer  = Color(0xFFFEF3C7);
-  static const Color danger            = Color(0xFFDC2626);
-  static const Color dangerContainer   = Color(0xFFFEE2E2);
+  static const Color success           = Color(0xFF10B981);
+  static const Color successContainer  = Color(0xFF064E3B);
+  static const Color warning           = Color(0xFFF59E0B);
+  static const Color warningContainer  = Color(0xFF451A03);
+  static const Color danger            = Color(0xFFEF4444);
+  static const Color dangerContainer   = Color(0xFF450A0A);
 
-  // ── Glass primitives ──────────────────────────────────────────────────────
-  static const Color glassTint         = Color(0x99FFFFFF); // white @ 60%
-  static const Color glassTintStrong   = Color(0xCCFFFFFF); // white @ 80% (forms)
-  static const Color glassTintHeavy    = Color(0xE6FFFFFF); // white @ 90% (modals)
-  static const Color glassBorder       = Color(0x33FFFFFF); // white @ 20%
-  static const Color glassBorderStrong = Color(0x4DFFFFFF); // white @ 30% (hover)
+  // ── Glass — tuned for dark background ─────────────────────────────────────
+  static const Color glassTint         = Color(0x18FFFFFF); // white @ 9.4%
+  static const Color glassTintStrong   = Color(0x28FFFFFF); // white @ 15.7%
+  static const Color glassTintHeavy    = Color(0x40FFFFFF); // white @ 25%
+  static const Color glassBorder       = Color(0x22FFFFFF); // white @ 13%
+  static const Color glassBorderStrong = Color(0x44FFFFFF); // white @ 26%
   static const LinearGradient glassInnerHighlight = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0x40FFFFFF), Color(0x00FFFFFF)],
+    colors: [Color(0x30FFFFFF), Color(0x00FFFFFF)],
   );
   static const double glassBlurSigma      = 18.0;
   static const double glassBlurSigmaHeavy = 28.0;
 
-  // ── Aurora — bold background blobs ────────────────────────────────────────
-  static const Color auroraTeal     = Color(0xFF14B8A6);
-  static const Color auroraSky      = Color(0xFF38BDF8);
-  static const Color auroraLavender = Color(0xFFA78BFA);
-  static const Color auroraPeach    = Color(0xFFFDA4AF);
+  // ── Aurora — dark palette blobs ───────────────────────────────────────────
+  static const Color auroraTeal     = Color(0xFF6366F1); // indigo
+  static const Color auroraSky      = Color(0xFF10B981); // mint
+  static const Color auroraLavender = Color(0xFF7C3AED); // violet
+  static const Color auroraPeach    = Color(0xFFF59E0B); // amber
 
   // ── Elevation ─────────────────────────────────────────────────────────────
   static List<BoxShadow> get cardShadow => [
     BoxShadow(
-      color: const Color(0xFF0F172A).withValues(alpha: 0.06),
-      blurRadius: 8,
-      offset: const Offset(0, 2),
+      color: Colors.black.withValues(alpha: 0.4),
+      blurRadius: 12,
+      offset: const Offset(0, 4),
     ),
   ];
 
   static List<BoxShadow> get cardShadowHover => [
     BoxShadow(
-      color: primary.withValues(alpha: 0.12),
-      blurRadius: 20,
-      offset: const Offset(0, 6),
+      color: primary.withValues(alpha: 0.22),
+      blurRadius: 24,
+      offset: const Offset(0, 8),
     ),
     BoxShadow(
-      color: const Color(0xFF0F172A).withValues(alpha: 0.04),
-      blurRadius: 4,
-      offset: const Offset(0, 2),
+      color: Colors.black.withValues(alpha: 0.3),
+      blurRadius: 8,
+      offset: const Offset(0, 4),
     ),
   ];
 
   static List<BoxShadow> get drawerShadow => [
     BoxShadow(
-      color: const Color(0xFF0F172A).withValues(alpha: 0.18),
+      color: Colors.black.withValues(alpha: 0.5),
       blurRadius: 40,
       offset: const Offset(-4, 0),
     ),
@@ -94,7 +94,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: const ColorScheme(
-        brightness: Brightness.light,
+        brightness: Brightness.dark,
         primary: primary,
         onPrimary: Color(0xFFFFFFFF),
         primaryContainer: primaryContainer,
@@ -103,10 +103,10 @@ class AppTheme {
         onSecondary: Color(0xFFFFFFFF),
         secondaryContainer: accentContainer,
         onSecondaryContainer: onAccentContainer,
-        tertiary: Color(0xFF14B8A6),
+        tertiary: Color(0xFF7C3AED),
         onTertiary: Color(0xFFFFFFFF),
-        tertiaryContainer: Color(0xFFCCFBF1),
-        onTertiaryContainer: Color(0xFF134E4A),
+        tertiaryContainer: Color(0xFF2D1B69),
+        onTertiaryContainer: Color(0xFFDDD6FE),
         surface: surface,
         onSurface: textPrimary,
         surfaceContainerHighest: surfaceAlt,
@@ -114,13 +114,13 @@ class AppTheme {
         error: danger,
         onError: Color(0xFFFFFFFF),
         errorContainer: dangerContainer,
-        onErrorContainer: Color(0xFF7F1D1D),
+        onErrorContainer: Color(0xFFFECACA),
         outline: border,
         outlineVariant: borderStrong,
-        shadow: Color(0xFF0F172A),
-        scrim: Color(0xFF0F172A),
+        shadow: Color(0xFF000000),
+        scrim: Color(0xFF000000),
         inverseSurface: textPrimary,
-        onInverseSurface: surface,
+        onInverseSurface: Color(0xFF0D0D12),
         inversePrimary: primaryContainer,
       ),
       scaffoldBackgroundColor: background,
@@ -131,7 +131,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 1,
-        shadowColor: const Color(0x10000000),
+        shadowColor: const Color(0x30000000),
         titleTextStyle: GoogleFonts.poppins(
           fontSize: 20,
           fontWeight: FontWeight.w700,
@@ -189,7 +189,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surface,
+        fillColor: surfaceAlt,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         border: OutlineInputBorder(
@@ -234,7 +234,7 @@ class AppTheme {
       ),
       dialogTheme: DialogThemeData(
         elevation: 8,
-        shadowColor: const Color(0x20000000),
+        shadowColor: const Color(0x40000000),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         backgroundColor: surface,
         titleTextStyle: GoogleFonts.poppins(
@@ -245,8 +245,8 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: textPrimary,
-        contentTextStyle: GoogleFonts.inter(color: surface, fontSize: 14),
+        backgroundColor: surfaceAlt,
+        contentTextStyle: GoogleFonts.inter(color: textPrimary, fontSize: 14),
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -257,13 +257,13 @@ class AppTheme {
             GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 12),
       ),
       listTileTheme: ListTileThemeData(
-        titleTextStyle:
-            GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 14, color: textPrimary),
+        titleTextStyle: GoogleFonts.inter(
+            fontWeight: FontWeight.w500, fontSize: 14, color: textPrimary),
         subtitleTextStyle:
             GoogleFonts.inter(fontSize: 12, color: textSecondary),
       ),
-      splashColor: primary.withValues(alpha: 0.08),
-      highlightColor: primary.withValues(alpha: 0.06),
+      splashColor: primary.withValues(alpha: 0.10),
+      highlightColor: primary.withValues(alpha: 0.08),
     );
   }
 

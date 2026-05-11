@@ -271,7 +271,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         ),
       ),
       body: AuroraBackground(
-        intensity: 0.4,
+        intensity: 0.45,
         child: Padding(
           padding: const EdgeInsets.only(top: kToolbarHeight),
           child: Row(
@@ -344,6 +344,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 _buildGuestLinkSection(),
                 _buildModeToggle(),
                 if (_mode == 'intervene') _buildResolveButton(),
+                if (_mode == 'autopilot' && _escalationReason != null)
+                  _buildUnresolvedBanner(),
                 const Divider(height: 1),
                 Expanded(
                   child: Center(
@@ -586,6 +588,71 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildUnresolvedBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.warningContainer,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppTheme.warning.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: AppTheme.warning, size: 15),
+              const SizedBox(width: 6),
+              Text(
+                'Open issue',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.warning,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _escalationReason ??
+                'Unresolved escalation. Alfred is active but this was not formally resolved.',
+            style:
+                GoogleFonts.inter(fontSize: 11, color: AppTheme.warning),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _isResolving ? null : _resolveIssue,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.warning,
+                side: const BorderSide(color: AppTheme.warning),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                textStyle: GoogleFonts.inter(
+                    fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              child: _isResolving
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppTheme.warning))
+                  : const Text('Mark as Resolved'),
+            ),
+          ),
+        ],
       ),
     );
   }

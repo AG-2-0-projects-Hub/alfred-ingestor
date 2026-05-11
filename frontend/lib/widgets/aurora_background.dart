@@ -13,7 +13,7 @@ class AuroraBackground extends StatelessWidget {
   const AuroraBackground({
     super.key,
     required this.child,
-    this.intensity = 0.55,
+    this.intensity = 0.50,
   });
 
   @override

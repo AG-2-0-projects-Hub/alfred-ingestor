@@ -36,7 +36,7 @@
 
 ---
 
-## Current App State (as of 2026-05-11)
+## Current App State (as of 2026-05-12)
 
 ### What is fully working
 - Auth (login/signup, email confirmations disabled)
@@ -130,6 +130,17 @@
 
 To reset a conversation back to AI: `UPDATE conversations SET mode = 'autopilot', ai_status = 'active' WHERE booking_id = '<id>';`
 Note: `'auto'` is NOT a valid value — constraint will reject it.
+
+---
+
+## Phase 3 Plan (next session)
+
+Plan file: `C:\Users\San_8\.claude\plans\alfred-phase3-dark-redesign.md`
+
+Covers 3 changes (no backend changes, no new packages):
+1. **Open issue disclaimer** — `chat_live_screen.dart`: amber banner + "Mark as Resolved" button when `_mode == 'autopilot' && _escalationReason != null`
+2. **Conversation previews on property card** — `dashboard_screen.dart` fetches guest names + conversation status; `property_card.dart` renders priority-ordered list (emergency → escalation → normal) with colored dots + "Live" pill for intervene mode; max 5 rows + "+N more"; card `childAspectRatio` → `280 / 390`
+3. **Full dark redesign** — new palette: Electric Indigo `#6366F1` primary, Void Slate `#0D0D12` background, Soft Mint `#10B981` success, Golden Hour `#F59E0B` warning, Coral Ember `#EF4444` danger; `aurora_background.dart` inherits blob colors automatically (no rename needed); status glow on cards (BoxShadow by severity)
 
 ---
 

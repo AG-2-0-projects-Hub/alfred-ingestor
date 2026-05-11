@@ -14,6 +14,7 @@ class PropertyCard extends StatelessWidget {
   final int activeChatCount;
   final bool hasEscalation;
   final bool hasEmergency;
+  final List<Map<String, dynamic>> conversationPreviews;
 
   const PropertyCard({
     super.key,
@@ -27,6 +28,7 @@ class PropertyCard extends StatelessWidget {
     this.activeChatCount = 0,
     this.hasEscalation = false,
     this.hasEmergency = false,
+    this.conversationPreviews = const [],
   });
 
   const PropertyCard.add({
@@ -40,7 +42,8 @@ class PropertyCard extends StatelessWidget {
         onCalendar = _noop,
         activeChatCount = 0,
         hasEscalation = false,
-        hasEmergency = false;
+        hasEmergency = false,
+        conversationPreviews = const [];
 
   static void _noop() {}
 
@@ -54,6 +57,7 @@ class PropertyCard extends StatelessWidget {
       activeChatCount: activeChatCount,
       hasEscalation: hasEscalation,
       hasEmergency: hasEmergency,
+      conversationPreviews: conversationPreviews,
       onExpand: onExpand,
       onGuestLink: onGuestLink,
       onHostChat: onHostChat,
@@ -147,6 +151,7 @@ class _PropertyCard extends StatefulWidget {
   final int activeChatCount;
   final bool hasEscalation;
   final bool hasEmergency;
+  final List<Map<String, dynamic>> conversationPreviews;
   final VoidCallback onExpand;
   final VoidCallback onGuestLink;
   final VoidCallback onHostChat;
@@ -158,6 +163,7 @@ class _PropertyCard extends StatefulWidget {
     required this.activeChatCount,
     required this.hasEscalation,
     required this.hasEmergency,
+    required this.conversationPreviews,
     required this.onExpand,
     required this.onGuestLink,
     required this.onHostChat,
@@ -172,6 +178,37 @@ class _PropertyCard extends StatefulWidget {
 class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
   bool _pressed = false;
+
+  List<BoxShadow> _statusGlow() {
+    if (widget.hasEmergency) {
+      return [
+        BoxShadow(
+          color: AppTheme.danger.withValues(alpha: 0.40),
+          blurRadius: 18,
+          spreadRadius: 2,
+        ),
+      ];
+    }
+    if (widget.hasEscalation) {
+      return [
+        BoxShadow(
+          color: AppTheme.warning.withValues(alpha: 0.35),
+          blurRadius: 16,
+          spreadRadius: 2,
+        ),
+      ];
+    }
+    if (widget.activeChatCount > 0) {
+      return [
+        BoxShadow(
+          color: AppTheme.success.withValues(alpha: 0.25),
+          blurRadius: 14,
+          spreadRadius: 1,
+        ),
+      ];
+    }
+    return [];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -204,8 +241,12 @@ class _PropertyCardState extends State<_PropertyCard> {
                     : AppTheme.glassBorderStrong,
                 width: 1,
               ),
-              boxShadow:
-                  _hovered ? AppTheme.cardShadowHover : AppTheme.cardShadow,
+              boxShadow: [
+                ..._statusGlow(),
+                ...(_hovered
+                    ? AppTheme.cardShadowHover
+                    : AppTheme.cardShadow),
+              ],
             ),
             clipBehavior: Clip.antiAlias,
             child: Column(
@@ -286,6 +327,11 @@ class _PropertyCardState extends State<_PropertyCard> {
                           bg: AppTheme.warningContainer,
                           fg: AppTheme.warning,
                         ),
+                      ],
+                      if (widget.conversationPreviews.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _ConversationPreviewList(
+                            previews: widget.conversationPreviews),
                       ],
                       const Spacer(),
                       _buildActions(context, status),
@@ -706,8 +752,8 @@ class _HeroImageState extends State<_HeroImage> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xFF0EA5E9), // sky-500 — open sky (freedom)
-            Color(0xFF0F766E), // teal-700 — grounded (trust)
+            Color(0xFF6366F1), // Electric Indigo
+            Color(0xFF0D0D12), // Void Slate
           ],
         ),
       ),
@@ -717,6 +763,98 @@ class _HeroImageState extends State<_HeroImage> {
           size: 48,
           color: Colors.white.withValues(alpha: 0.7),
         ),
+      ),
+    );
+  }
+}
+
+// ── Conversation preview list ─────────────────────────────────────────────
+class _ConversationPreviewList extends StatelessWidget {
+  final List<Map<String, dynamic>> previews;
+  const _ConversationPreviewList({required this.previews});
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = previews.take(5).toList();
+    final overflow = previews.length - shown.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final c in shown) _ConvPreviewRow(conv: c),
+        if (overflow > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              '+$overflow more',
+              style: GoogleFonts.inter(
+                  fontSize: 10, color: AppTheme.textMuted),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ConvPreviewRow extends StatelessWidget {
+  final Map<String, dynamic> conv;
+  const _ConvPreviewRow({required this.conv});
+
+  Color _dotColor() {
+    final reason = conv['escalation_reason'] as String?;
+    if (reason != null && reason.startsWith('emergency_')) {
+      return AppTheme.danger;
+    }
+    if (conv['requires_attention'] == true) return AppTheme.warning;
+    return AppTheme.success;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final guestName = conv['guestName'] as String? ?? 'Guest';
+    final isIntervene = conv['mode'] == 'intervene';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _dotColor(),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              guestName,
+              style: GoogleFonts.inter(
+                  fontSize: 11, color: AppTheme.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (isIntervene) ...[
+            const SizedBox(width: 4),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Live',
+                style: GoogleFonts.inter(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
