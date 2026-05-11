@@ -12,6 +12,8 @@ class PropertyCard extends StatelessWidget {
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
   final int activeChatCount;
+  final bool hasEscalation;
+  final bool hasEmergency;
 
   const PropertyCard({
     super.key,
@@ -23,6 +25,8 @@ class PropertyCard extends StatelessWidget {
     this.onArchivedChats = _noop,
     this.onCalendar = _noop,
     this.activeChatCount = 0,
+    this.hasEscalation = false,
+    this.hasEmergency = false,
   });
 
   const PropertyCard.add({
@@ -34,7 +38,9 @@ class PropertyCard extends StatelessWidget {
         onHostChat = _noop,
         onArchivedChats = _noop,
         onCalendar = _noop,
-        activeChatCount = 0;
+        activeChatCount = 0,
+        hasEscalation = false,
+        hasEmergency = false;
 
   static void _noop() {}
 
@@ -46,6 +52,8 @@ class PropertyCard extends StatelessWidget {
     return _PropertyCard(
       property: property,
       activeChatCount: activeChatCount,
+      hasEscalation: hasEscalation,
+      hasEmergency: hasEmergency,
       onExpand: onExpand,
       onGuestLink: onGuestLink,
       onHostChat: onHostChat,
@@ -137,6 +145,8 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
 class _PropertyCard extends StatefulWidget {
   final Map<String, dynamic> property;
   final int activeChatCount;
+  final bool hasEscalation;
+  final bool hasEmergency;
   final VoidCallback onExpand;
   final VoidCallback onGuestLink;
   final VoidCallback onHostChat;
@@ -146,6 +156,8 @@ class _PropertyCard extends StatefulWidget {
   const _PropertyCard({
     required this.property,
     required this.activeChatCount,
+    required this.hasEscalation,
+    required this.hasEmergency,
     required this.onExpand,
     required this.onGuestLink,
     required this.onHostChat,
@@ -258,6 +270,23 @@ class _PropertyCardState extends State<_PropertyCard> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
+                      if (widget.hasEmergency) ...[
+                        const SizedBox(height: 6),
+                        const _AlertPill(
+                          label: 'Emergency',
+                          icon: Icons.warning_amber_rounded,
+                          bg: AppTheme.dangerContainer,
+                          fg: AppTheme.danger,
+                        ),
+                      ] else if (widget.hasEscalation) ...[
+                        const SizedBox(height: 6),
+                        const _AlertPill(
+                          label: 'Needs Attention',
+                          icon: Icons.notifications_active_rounded,
+                          bg: AppTheme.warningContainer,
+                          fg: AppTheme.warning,
+                        ),
+                      ],
                       const Spacer(),
                       _buildActions(context, status),
                     ],
@@ -539,6 +568,51 @@ class _StatusBadge extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: fg,
           letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Alert pill (escalation / emergency) ───────────────────────────────────
+class _AlertPill extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color bg;
+  final Color fg;
+
+  const _AlertPill({
+    required this.label,
+    required this.icon,
+    required this.bg,
+    required this.fg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 11, color: fg),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: fg,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
         ),
       ),
     );

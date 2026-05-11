@@ -250,7 +250,7 @@ def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name")
+        .select("id, master_json, name, learned_knowledge")
         .eq("id", property_id)
         .maybe_single()
         .execute()
@@ -298,6 +298,7 @@ def insert_message(
     content: str,
     sentiment: str | None = None,
     is_escalated_interaction: bool = False,
+    used_learned_knowledge: bool = False,
 ) -> dict:
     client = get_client()
     result = client.table("messages").insert({
@@ -307,8 +308,91 @@ def insert_message(
         "sentiment": sentiment,
         "status": "delivered",
         "is_escalated_interaction": is_escalated_interaction,
+        "used_learned_knowledge": used_learned_knowledge,
     }).execute()
     return result.data[0]
+
+
+def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, list[dict]]:
+    """Returns (conversation_id, messages) where messages are all rows since the
+    earliest unresolved escalated message, including host replies and guest follow-ups.
+    Returns (None, []) if no conversation found."""
+    client = get_client()
+    conv_result = (
+        client.table("conversations")
+        .select("id")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv_result and conv_result.data):
+        return None, []
+    conv_id = conv_result.data["id"]
+    first_esc = (
+        client.table("messages")
+        .select("created_at")
+        .eq("conversation_id", conv_id)
+        .eq("is_escalated_interaction", True)
+        .is_("resolution_status", "null")
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
+    if not first_esc.data:
+        return conv_id, []
+    threshold = first_esc.data[0]["created_at"]
+    thread = (
+        client.table("messages")
+        .select("id, sender_type, content, created_at, is_escalated_interaction")
+        .eq("conversation_id", conv_id)
+        .gte("created_at", threshold)
+        .order("created_at")
+        .execute()
+    )
+    return conv_id, (thread.data or [])
+
+
+def resolve_conversation(
+    conversation_id: str,
+    property_id: str,
+    learned_entry: dict | None,
+) -> None:
+    """Atomically de-escalate a conversation and (optionally) append the learned
+    Q&A entry to properties.learned_knowledge."""
+    client = get_client()
+
+    client.table("messages").update({
+        "is_learned": True,
+        "resolution_status": "resolved",
+    }).eq("conversation_id", conversation_id) \
+      .eq("is_escalated_interaction", True) \
+      .is_("resolution_status", "null") \
+      .execute()
+
+    client.table("conversations").update({
+        "mode": "autopilot",
+        "requires_attention": False,
+        "escalation_reason": None,
+        "ai_status": "active",
+        "last_message_at": _now(),
+    }).eq("id", conversation_id).execute()
+
+    if learned_entry:
+        existing = (
+            client.table("properties")
+            .select("learned_knowledge")
+            .eq("id", property_id)
+            .single()
+            .execute()
+        )
+        current_arr = (existing.data or {}).get("learned_knowledge") or []
+        if not isinstance(current_arr, list):
+            current_arr = []
+        current_arr.append(learned_entry)
+        client.table("properties").update({
+            "learned_knowledge": current_arr,
+            "updated_at": _now(),
+        }).eq("id", property_id).execute()
 
 
 def update_conversation(conversation_id: str, **fields) -> None:

@@ -49,9 +49,7 @@
 - Archived chats dialog
 
 ### Chat status (guest-facing `/chat?booking=...`)
-- **Was broken:** `find_or_create_conversation` in `supabase_client.py` crashed with `AttributeError: 'NoneType' object has no attribute 'data'` when the Supabase `.maybe_single().execute()` returned None
-- **Fix applied (2026-05-11, NOT YET PUSHED):** `if result and result.data:` (same guard already used elsewhere in the file)
-- **To activate:** commit + push `backend/services/supabase_client.py` and `backend/main.py` → Render auto-redeploys in ~1 min
+- **Working as of 2026-05-11.** Fix: `if result and result.data:` guard in `find_or_create_conversation` (`supabase_client.py`). Committed and deployed.
 
 ---
 
@@ -137,9 +135,15 @@ Note: `'auto'` is NOT a valid value — constraint will reject it.
 
 ## Pending Actions
 
-### Must push (chat broken until this lands on Render)
-- `backend/services/supabase_client.py` — `if result and result.data:` at line 270
-- `backend/main.py` — `/health` now accepts HEAD (fixes UptimeRobot false-down alerts)
+### ✅ Done (2026-05-11)
+- `backend/services/supabase_client.py` — NoneType crash fix pushed and live
+- `backend/main.py` — `/health` HEAD support live; UptimeRobot confirmed working
+- Chat confirmed working end-to-end
+- Escalation resolve flow + learning system (2026-05-11)
+- New columns: `properties.learned_knowledge`, `conversations.escalation_reason`, `messages.used_learned_knowledge`
+- New endpoint: `POST /api/conversations/resolve`
+- New service function: `gemini_messenger.summarize_escalation` (gemini-2.5-flash)
+- UI: resolve button in intervene mode, escalation window coloring, emergency styling, automated-learning badge, property card alert pills
 
 ### Supabase (if not done yet)
 - Set Site URL → `https://alfred-ingestor.vercel.app` (Auth → URL Configuration)

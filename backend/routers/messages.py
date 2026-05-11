@@ -4,6 +4,7 @@ import os
 import random
 import re
 import string
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services import supabase_client, gemini_messenger
@@ -12,6 +13,10 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 GEMINI_TIMEOUT_S = 45
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class WebIncomingRequest(BaseModel):
@@ -75,6 +80,7 @@ async def web_incoming(req: WebIncomingRequest):
                 conversation_history=history,
                 preferred_language=guest.get("preferred_language") or "not_set",
                 guest_message=req.message,
+                learned_knowledge=property_data.get("learned_knowledge") or [],
             ),
             timeout=GEMINI_TIMEOUT_S,
         )
@@ -117,12 +123,14 @@ async def web_incoming(req: WebIncomingRequest):
         reply,
         sentiment=first_result.get("sentiment"),
         is_escalated_interaction=requires_escalation,
+        used_learned_knowledge=bool(first_result.get("used_learned_knowledge")),
     )
 
     update_fields: dict = {"ai_status": "active"}
     if requires_escalation:
         update_fields["requires_attention"] = True
         update_fields["mode"] = "intervene"
+        update_fields["escalation_reason"] = first_result.get("escalation_reason")
 
     await asyncio.to_thread(
         supabase_client.update_conversation,
@@ -151,6 +159,58 @@ async def host_send(req: HostSendRequest):
         ai_status="paused",
     )
     return {"status": "sent"}
+
+
+# ── Resolve escalation + learn ────────────────────────────────────────────────
+
+class ResolveRequest(BaseModel):
+    booking_id: str
+
+
+@router.post("/conversations/resolve")
+async def resolve_conversation(req: ResolveRequest):
+    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, req.booking_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    conv_id, thread = await asyncio.to_thread(
+        supabase_client.get_conversation_thread_for_resolve,
+        req.booking_id,
+    )
+    if not conv_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    learned_entry = None
+    if thread:
+        try:
+            summary = await asyncio.wait_for(
+                gemini_messenger.summarize_escalation(thread),
+                timeout=GEMINI_TIMEOUT_S,
+            )
+            learned_entry = {
+                "problem_summary": summary.get("problem_summary", ""),
+                "solution_summary": summary.get("solution_summary", ""),
+                "category": summary.get("category", "other"),
+                "language": summary.get("language", "en"),
+                "resolved_at": _now_iso(),
+                "booking_id": req.booking_id,
+            }
+        except asyncio.TimeoutError:
+            log.warning(
+                "Gemini summarizer exceeded %ss for booking=%s; resolving without learning",
+                GEMINI_TIMEOUT_S, req.booking_id,
+            )
+        except Exception as exc:
+            log.exception("Summarizer failed for booking=%s: %s", req.booking_id, exc)
+
+    await asyncio.to_thread(
+        supabase_client.resolve_conversation,
+        conv_id,
+        guest["property_id"],
+        learned_entry,
+    )
+
+    return {"status": "resolved", "learned": learned_entry}
 
 
 # ── Guest link generation ─────────────────────────────────────────────────────

@@ -22,6 +22,8 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _properties = [];
   Map<String, int> _chatCounts = {};
+  Map<String, bool> _hasEscalation = {};
+  Map<String, bool> _hasEmergency = {};
   bool _loading = true;
 
   @override
@@ -43,6 +45,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       // Load guest counts per property for the active chat indicator
       Map<String, int> counts = {};
+      Map<String, bool> hasEscalation = {};
+      Map<String, bool> hasEmergency = {};
       if (properties.isNotEmpty) {
         final ids = properties.map((p) => p['id'] as String).toList();
         final guests = await Supabase.instance.client
@@ -53,12 +57,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final pid = g['property_id'] as String;
           counts[pid] = (counts[pid] ?? 0) + 1;
         }
+        // Load active escalation/emergency state per property
+        final alerts = await Supabase.instance.client
+            .from('conversations')
+            .select('property_id, escalation_reason')
+            .eq('requires_attention', true)
+            .inFilter('property_id', ids);
+        for (final a in alerts) {
+          final pid = a['property_id'] as String;
+          hasEscalation[pid] = true;
+          final reason = a['escalation_reason'] as String?;
+          if (reason != null && reason.startsWith('emergency_')) {
+            hasEmergency[pid] = true;
+          }
+        }
       }
 
       if (mounted) {
         setState(() {
           _properties = properties;
           _chatCounts = counts;
+          _hasEscalation = hasEscalation;
+          _hasEmergency = hasEmergency;
         });
       }
     } catch (e) {
@@ -294,6 +314,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               : PropertyCard(
                   property: item,
                   activeChatCount: _chatCounts[item['id'] as String] ?? 0,
+                  hasEscalation:
+                      _hasEscalation[item['id'] as String] ?? false,
+                  hasEmergency:
+                      _hasEmergency[item['id'] as String] ?? false,
                   onExpand: () => _openDrawer(item),
                   onGuestLink: () => _openGuestLink(item),
                   onHostChat: () => _openHostChat(item),

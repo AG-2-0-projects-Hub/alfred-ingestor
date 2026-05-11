@@ -28,10 +28,13 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   bool _copiedLink = false;
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
+  String? _escalationReason;
   bool _isSending = false;
+  bool _isResolving = false;
   final _hostController = TextEditingController();
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
 
   @override
   void initState() {
@@ -42,6 +45,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   @override
   void dispose() {
     _subscription?.cancel();
+    _convSubscription?.cancel();
     _hostController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -51,7 +55,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     final results = await Future.wait([
       Supabase.instance.client
           .from('conversations')
-          .select('id, mode')
+          .select('id, mode, escalation_reason')
           .eq('booking_id', widget.bookingId)
           .maybeSingle(),
       Supabase.instance.client
@@ -69,11 +73,32 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         if (conv != null) {
           _conversationId = conv['id'] as String;
           _mode = conv['mode'] as String? ?? 'autopilot';
+          _escalationReason = conv['escalation_reason'] as String?;
         }
         _guestChatUrl = guest?['guest_chat_url'] as String?;
       });
-      if (_conversationId != null) _subscribeToMessages(_conversationId!);
+      if (_conversationId != null) {
+        _subscribeToMessages(_conversationId!);
+        _subscribeToConversation(_conversationId!);
+      }
     }
+  }
+
+  void _subscribeToConversation(String conversationId) {
+    _convSubscription?.cancel();
+    _convSubscription = Supabase.instance.client
+        .from('conversations')
+        .stream(primaryKey: ['id'])
+        .eq('id', conversationId)
+        .listen((rows) {
+          if (mounted && rows.isNotEmpty) {
+            final row = rows.first;
+            setState(() {
+              _mode = row['mode'] as String? ?? 'autopilot';
+              _escalationReason = row['escalation_reason'] as String?;
+            });
+          }
+        });
   }
 
   Future<void> _copyGuestLink() async {
@@ -126,6 +151,43 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         .from('conversations')
         .update({'mode': mode}).eq('id', _conversationId!);
     if (mounted) setState(() => _mode = mode);
+  }
+
+  Future<void> _resolveIssue() async {
+    if (_isResolving) return;
+    setState(() => _isResolving = true);
+    try {
+      await ApiClient.postJson(
+        '/api/conversations/resolve',
+        {'booking_id': widget.bookingId},
+      );
+      if (mounted) {
+        setState(() {
+          _mode = 'autopilot';
+          _escalationReason = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Issue resolved. Alfred is back on autopilot.'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to resolve: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isResolving = false);
+    }
   }
 
   Future<void> _sendHostMessage() async {
@@ -235,12 +297,22 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                             ],
                           ),
                         )
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _messages.length,
-                          itemBuilder: (_, i) => _buildBubble(_messages[i]),
-                        ),
+                      : Builder(builder: (_) {
+                          final window = _computeEscalationWindow();
+                          final isEmergency =
+                              _escalationReason?.startsWith('emergency_') ==
+                                  true;
+                          return ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _messages.length,
+                            itemBuilder: (_, i) => _buildBubble(
+                              _messages[i],
+                              inEscalationWindow: window[i],
+                              isEmergency: isEmergency,
+                            ),
+                          );
+                        }),
                 ),
               ],
             ),
@@ -254,6 +326,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               children: [
                 _buildGuestLinkSection(),
                 _buildModeToggle(),
+                if (_mode == 'intervene') _buildResolveButton(),
                 const Divider(height: 1),
                 Expanded(
                   child: Center(
@@ -450,18 +523,83 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     );
   }
 
-  Widget _buildBubble(Map<String, dynamic> msg) {
+  List<bool> _computeEscalationWindow() {
+    // For each message index, true if it falls within an unresolved escalation
+    // window (i.e., after an is_escalated_interaction=true message that has not
+    // yet been resolved).
+    final out = List<bool>.filled(_messages.length, false);
+    bool inWindow = false;
+    for (int i = 0; i < _messages.length; i++) {
+      final m = _messages[i];
+      if (m['is_escalated_interaction'] == true) {
+        inWindow = true;
+      }
+      out[i] = inWindow;
+      if (m['resolution_status'] == 'resolved') {
+        inWindow = false;
+      }
+    }
+    return out;
+  }
+
+  Widget _buildResolveButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _isResolving ? null : _resolveIssue,
+          icon: _isResolving
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.check_circle_outline_rounded, size: 18),
+          label: Text(_isResolving ? 'Resolving…' : 'Mark Issue as Resolved'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBubble(
+    Map<String, dynamic> msg, {
+    required bool inEscalationWindow,
+    required bool isEmergency,
+  }) {
     final senderType = msg['sender_type'] as String;
     final isGuest = senderType == 'guest';
     final isHost = senderType == 'host';
     final isEscalated = msg['is_escalated_interaction'] == true;
+    final usedLearned = msg['used_learned_knowledge'] == true;
 
     Color bgColor;
     Color textColor = AppTheme.textPrimary;
     BorderRadius radius;
+    Border? border;
 
     if (isGuest) {
-      bgColor = AppTheme.primaryContainer;
+      if (inEscalationWindow && isEmergency) {
+        bgColor = AppTheme.dangerContainer;
+        border = Border.all(color: AppTheme.danger, width: 1.5);
+      } else if (inEscalationWindow) {
+        bgColor = AppTheme.warningContainer;
+        border = Border.all(color: AppTheme.warning, width: 1.5);
+      } else {
+        bgColor = AppTheme.primaryContainer;
+        border = null;
+      }
       radius = const BorderRadius.only(
         topLeft: Radius.circular(14),
         topRight: Radius.circular(14),
@@ -470,14 +608,20 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
       );
     } else if (isHost) {
       bgColor = AppTheme.surface;
+      border = Border.all(color: AppTheme.border);
       radius = const BorderRadius.only(
         topLeft: Radius.circular(3),
         topRight: Radius.circular(14),
         bottomLeft: Radius.circular(14),
         bottomRight: Radius.circular(14),
       );
+    } else if (isEscalated && isEmergency) {
+      bgColor = AppTheme.dangerContainer;
+      border = Border.all(color: AppTheme.danger, width: 1.5);
+      radius = BorderRadius.circular(14);
     } else if (isEscalated) {
       bgColor = AppTheme.warningContainer;
+      border = Border.all(color: AppTheme.warning, width: 1.5);
       radius = BorderRadius.circular(14);
     } else {
       bgColor = AppTheme.surfaceAlt;
@@ -493,17 +637,25 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         ? 'Guest'
         : isHost
             ? 'You'
-            : isEscalated
-                ? 'Alfred — needs attention'
-                : 'Alfred';
+            : isEscalated && isEmergency
+                ? 'Alfred — EMERGENCY 🚨'
+                : isEscalated
+                    ? 'Alfred — needs attention'
+                    : 'Alfred';
 
     final senderColor = isGuest
-        ? AppTheme.primary
+        ? (inEscalationWindow && isEmergency
+            ? AppTheme.danger
+            : inEscalationWindow
+                ? AppTheme.warning
+                : AppTheme.primary)
         : isHost
             ? AppTheme.textSecondary
-            : isEscalated
-                ? AppTheme.warning
-                : AppTheme.textMuted;
+            : isEscalated && isEmergency
+                ? AppTheme.danger
+                : isEscalated
+                    ? AppTheme.warning
+                    : AppTheme.textMuted;
 
     return Align(
       alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
@@ -514,11 +666,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: radius,
-          border: isHost
-              ? Border.all(color: AppTheme.border)
-              : isEscalated
-                  ? Border.all(color: AppTheme.warning, width: 1.5)
-                  : null,
+          border: border,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -537,6 +685,34 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               msg['content'] as String,
               style: GoogleFonts.inter(fontSize: 13, color: textColor, height: 1.5),
             ),
+            if (!isGuest && !isHost && usedLearned) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: AppTheme.accent.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.bolt_rounded, size: 11, color: AppTheme.accent),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Resolved via automated learning',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.accent,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -328,6 +328,7 @@ You MUST output ONLY valid JSON. No markdown backticks, no text before or after 
   "sentiment": "positive" | "neutral" | "negative",
   "requires_escalation": true | false,
   "escalation_reason": "emergency_fire" | "financial_request" | "essential_amenity_broken_ac" | "guest_hostility" | "out_of_scope_request" | "host_approval_required_early_checkin" | "information_not_in_database" | "conflicting_information_in_database" | null,
+  "used_learned_knowledge": true | false,
   "requires_web_search": true | false,
   "search_query": "specific geo-locked search string" | null,
   "detected_language": "spanish" | "english" | "german" | "french" | "italian" | "portuguese" | "any_other_language",
@@ -343,6 +344,10 @@ You MUST output ONLY valid JSON. No markdown backticks, no text before or after 
 **requires_escalation:** `true` if ANY escalation trigger detected
 
 **escalation_reason:** specific reason code or `null`
+
+**used_learned_knowledge:**
+- `true` — You answered using a Q&A pair from the "Past Resolutions (Automated Learning)" section in DATA CONTEXT
+- `false` — You answered from Master JSON or your standard reasoning (default)
 
 **requires_web_search:**
 - `true` — guest asked about local recommendations, events, or anything outside the property
@@ -407,9 +412,29 @@ def _build_user_prompt(
     conversation_history: list[dict],
     preferred_language: str,
     guest_message: str,
+    learned_knowledge: list[dict] | None = None,
 ) -> str:
     history_text = _format_conversation_history(conversation_history)
     master_str = json.dumps(master_json, ensure_ascii=False)
+
+    learned_block = ""
+    if learned_knowledge:
+        learned_lines = []
+        for entry in learned_knowledge:
+            cat = entry.get("category", "other")
+            q = entry.get("problem_summary", "")
+            a = entry.get("solution_summary", "")
+            learned_lines.append(f"- [{cat}] Q: {q}\n  A: {a}")
+        learned_block = (
+            "\n\n**Past Resolutions (Automated Learning):**\n"
+            "The following Q&A pairs were learned from previous host interventions for THIS property.\n"
+            "Use them to answer confidently WITHOUT escalating, when the guest's question matches.\n"
+            "When you use one of these to answer, set \"used_learned_knowledge\": true in your output.\n"
+            "```\n"
+            + "\n".join(learned_lines)
+            + "\n```"
+        )
+
     return f"""\
 ## DATA CONTEXT
 
@@ -429,6 +454,7 @@ def _build_user_prompt(
 2024-05-21 14:31 - Alfred: The wifi is...
 2024-05-21 14:32 - Guest: And check-out time?
 ```
+{learned_block}
 
 **Guest's Preferred Language (if available):**
 ```
@@ -499,10 +525,15 @@ async def first_pass(
     conversation_history: list[dict],
     preferred_language: str,
     guest_message: str,
+    learned_knowledge: list[dict] | None = None,
 ) -> dict:
     client = _get_client()
     user_prompt = _build_user_prompt(
-        master_json, conversation_history, preferred_language, guest_message
+        master_json,
+        conversation_history,
+        preferred_language,
+        guest_message,
+        learned_knowledge,
     )
     response = await client.aio.models.generate_content(
         model=MODEL,
@@ -537,3 +568,86 @@ async def second_pass_with_search(
         ),
     )
     return response.text.strip()
+
+
+# ─── Summarizer (knowledge base curator) ──────────────────────────────────────
+# Verbatim from "Supabase Alfred Airbnb - E - The Bot.blueprint.json" curator prompt.
+SUMMARIZER_MODEL = "gemini-2.5-flash"
+
+SUMMARIZER_PROMPT = """\
+You are a knowledge base curator for a vacation rental AI assistant. Your task is to extract structured learning data from escalated guest-host conversations that will help the AI answer similar questions in the future.
+
+**Input:** A chronological transcript of the escalated conversation thread.
+
+**Your Task:**
+1. Summarize the core problem from the guest's perspective (what went wrong or what they needed)
+2. Summarize how the host resolved it (the solution/answer provided)
+3. Categorize the issue with a simple, lowercase keyword (e.g., "check-in", "wifi", "amenities", "maintenance", "house-rules", "payment", "complaint", "other")
+4. Detect the conversation language
+
+**Output Requirements:**
+- Be concise but specific (include key details like codes, locations, instructions)
+- Focus on actionable information the bot can use later
+- Ignore pleasantries unless they contain important context
+- Category should be a single lowercase word or hyphenated phrase
+
+**Output Format (JSON only, no markdown):**
+{
+  "problem_summary": "Clear description of what the guest needed or what went wrong",
+  "solution_summary": "How the host resolved it, including specific details (codes, steps, etc.)",
+  "category": "simple-category-keyword",
+  "language": "en/es/etc (detected from conversation)"
+}
+
+**Example:**
+
+Input:
+[guest]: No encuentro el código del lockbox
+[host]: El código es 1234. El lockbox está en la puerta principal, lado derecho
+[guest]: Perfecto, gracias
+
+Output:
+{
+  "problem_summary": "El huésped no pudo encontrar el código del lockbox para entrar",
+  "solution_summary": "Código proporcionado: 1234. Ubicación: puerta principal, lado derecho",
+  "category": "check-in",
+  "language": "es"
+}
+
+**Now analyze this conversation:**
+__TRANSCRIPT__
+
+**Important:** Return ONLY the JSON object, no explanations or markdown formatting.
+"""
+
+
+async def summarize_escalation(messages: list[dict]) -> dict:
+    """Call Gemini 2.5 Flash to produce a structured Q&A summary of an escalated
+    conversation thread. Returns {problem_summary, solution_summary, category, language}."""
+    if not messages:
+        return {
+            "problem_summary": "",
+            "solution_summary": "",
+            "category": "other",
+            "language": "en",
+        }
+
+    lines = []
+    for m in messages:
+        sender = m["sender_type"]
+        label = {"guest": "guest", "host": "host", "ai": "alfred"}.get(sender, sender)
+        lines.append(f"[{label}]: {m['content']}")
+    transcript = "\n".join(lines)
+
+    prompt_text = SUMMARIZER_PROMPT.replace("__TRANSCRIPT__", transcript)
+
+    client = _get_client()
+    response = await client.aio.models.generate_content(
+        model=SUMMARIZER_MODEL,
+        contents=[types.Content(role="user", parts=[types.Part(text=prompt_text)])],
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            response_mime_type="application/json",
+        ),
+    )
+    return _parse_json_response(response.text)
