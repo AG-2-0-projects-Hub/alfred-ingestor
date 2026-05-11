@@ -65,7 +65,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .select(
                 'id, property_id, booking_id, mode, requires_attention, escalation_reason')
             .inFilter('property_id', ids)
-            .order('updated_at', ascending: false);
+            .order('created_at', ascending: false);
 
         for (final a in convRows) {
           final pid = a['property_id'] as String;
