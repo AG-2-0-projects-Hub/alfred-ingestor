@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-15
+**Last Session:** 2026-05-15 (Phase 4 + build fix + Phase 4.5/5 plans)
 
 ---
 
@@ -47,7 +47,7 @@
 - Property detail drawer (4 tabs: Overview / Files / Knowledge / Resolve)
 - Edit property (per-file delete + re-ingest)
 - Archived chats dialog
-- **Phase 4 (2026-05-15):** Dual-theme toggle (Daylight/Midnight), `ThemeController` + `shared_preferences` persistence, `AppPalette` ThemeExtension, `InactivityWrapper` (1h auto-logout), `SetupStatusBanner` on drawer + edit property, `ConversationPill` replacing `_ConvPreviewRow`, `PropertyExpandedView` modal, `FileThumbnail` widget, `relativeTime` util, optimistic send in ChatLive, markdown styleSheet contrast fix, JSON copy button, clickable Airbnb URLs, real-time dashboard subscriptions, theme toggle in AppBar
+- **Phase 4 (2026-05-15):** Dual-theme toggle (Daylight/Midnight), `ThemeController` + `shared_preferences` persistence, `AppPalette` ThemeExtension, `InactivityWrapper` (1h auto-logout), `SetupStatusBanner` on drawer + edit property, `ConversationPill` replacing `_ConvPreviewRow`, `PropertyExpandedView` modal, `FileThumbnail` widget, `relativeTime` util, optimistic send in ChatLive, markdown styleSheet contrast fix, JSON copy button, clickable Airbnb URLs, real-time dashboard subscriptions, theme toggle in AppBar. **Deployed on Vercel** (commit `2c7d1e4` after build-fix for `const`/`context.palette` violations).
 
 ### Chat status (guest-facing `/chat?booking=...`)
 - **Working as of 2026-05-11.** Fix: `if result and result.data:` guard in `find_or_create_conversation` (`supabase_client.py`). Committed and deployed.
@@ -164,8 +164,22 @@ Covers (no backend changes, no SQL migrations):
 13. **Empty state** for zero properties (welcome hero)
 14. **Confirm dialogs** for destructive actions (file delete)
 
-### Phase 4.5 (after Phase 4 ships)
-Browser push notifications for escalations via Web Notification API. Separate plan file.
+### Phase 4.5 — Browser Push Notifications (PLANNED)
+Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
+- Web Notification API (no FCM, no service worker — tab must be open)
+- `push_notification_service.dart` singleton via `package:web` JS interop
+- `_prevRequiresAttention` diff map in DashboardScreen for false→true edge detection
+- Permission prompt on first escalation, not on init
+- Click handler: `window.focus()` + open `PropertyExpandedView` for relevant property
+- No backend changes, no SQL migrations
+
+### Phase 5 — UI/UX Audit (PLANNED)
+Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
+- Skills: `web-design-guidelines` (Vercel) + `ui-ux-pro-max-skill` (v2.5.0) + `_ingestor/frontend-design.md`
+- 5 audit categories: Accessibility (WCAG 2.1 AA), Typography, Layout & Spacing, Interaction & Animation, Brand & Consistency
+- Both Daylight and Midnight themes must pass
+- Findings format: `[P0|P1|P2] file:line — finding — fix`
+- One commit per category after fixes
 
 ### Future Backend Work (deferred — needs SQL migrations)
 - `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
@@ -229,6 +243,12 @@ Covers 3 changes (no backend changes, no new packages):
 - **Add** `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` to Render scraper env vars
 - **End-to-end REQ-08 test** (CSV upload)
 - **Google Cloud Run migration** — eliminates Render cold-start entirely; need to write Dockerfile
+
+---
+
+## Build Notes
+- **dart2js strictness:** `context.palette.X` is a runtime value — never wrap in `const`. dart2js catches this even when the local analyzer doesn't. Rule: any widget referencing `context.palette` must not have `const` on itself or any ancestor that contains it.
+- **Map type inference:** `{...someMap, 'key': value}` infers `Map<dynamic, dynamic>` — always annotate as `<String, dynamic>{...}` when assigning to a typed map.
 
 ---
 
