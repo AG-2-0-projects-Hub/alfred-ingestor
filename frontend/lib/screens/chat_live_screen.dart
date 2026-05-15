@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../utils/relative_time.dart';
 import '../widgets/aurora_background.dart';
 
 class ChatLiveScreen extends StatefulWidget {
@@ -185,7 +186,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text('Issue resolved. Alfred is back on autopilot.'),
-              backgroundColor: AppTheme.success,
+              backgroundColor: context.palette.success,
             ),
           );
         }
@@ -211,21 +212,40 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     final text = _hostController.text.trim();
     if (text.isEmpty || _conversationId == null || _isSending) return;
     _hostController.clear();
-    setState(() => _isSending = true);
+
+    // Optimistic local message — shown immediately while API call is in flight
+    final optimisticId = 'local-${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _isSending = true;
+      _messages = [
+        ..._messages,
+        {
+          'id': optimisticId,
+          'sender_type': 'host',
+          'content': text,
+          'status': 'sending',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      ];
+    });
+    _scrollToBottom();
 
     try {
       await ApiClient.postJson(
         '/api/messages/host-send',
         {'conversation_id': _conversationId, 'message': text},
       );
+      // Real-time stream will replace _messages on next tick; optimistic row drops naturally
     } on ApiException catch (e) {
       if (mounted) {
+        setState(() => _messages = _messages.where((m) => m['id'] != optimisticId).toList());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.userMessage)),
         );
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _messages = _messages.where((m) => m['id'] != optimisticId).toList());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to send: $e')),
         );
@@ -246,7 +266,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: AppBar(
-              backgroundColor: AppTheme.glassTint,
+              backgroundColor: context.palette.glassTint,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
               title: Column(
@@ -257,12 +277,12 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                     style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
-                        color: AppTheme.primary),
+                        color: context.palette.primary),
                   ),
                   Text(
                     widget.bookingId,
                     style: GoogleFonts.inter(
-                        fontSize: 11, color: AppTheme.textMuted),
+                        fontSize: 11, color: context.palette.textMuted),
                   ),
                 ],
               ),
@@ -284,14 +304,14 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               children: [
                 Container(
                   width: double.infinity,
-                  color: AppTheme.surfaceAlt,
+                  color: context.palette.surfaceAlt,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Text(
                     'Conversation',
                     style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
-                        color: AppTheme.textSecondary),
+                        color: context.palette.textSecondary),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -304,12 +324,12 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                             children: [
                               Icon(Icons.chat_bubble_outline_rounded,
                                   size: 40,
-                                  color: AppTheme.border),
+                                  color: context.palette.border),
                               const SizedBox(height: 12),
                               Text(
                                 'No messages yet.',
                                 style: GoogleFonts.inter(
-                                    color: AppTheme.textMuted, fontSize: 13),
+                                    color: context.palette.textMuted, fontSize: 13),
                               ),
                             ],
                           ),
@@ -356,7 +376,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                             ? 'Alfred is handling this conversation.\n\nSwitch to Intervene to reply manually.'
                             : 'You are in control.\nType below to reply to the guest.',
                         style: GoogleFonts.inter(
-                          color: AppTheme.textSecondary,
+                          color: context.palette.textSecondary,
                           fontSize: 13,
                           height: 1.6,
                         ),
@@ -391,21 +411,21 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
-                    color: AppTheme.textPrimary),
+                    color: context.palette.textPrimary),
               ),
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: AppTheme.surfaceAlt,
+                  color: context.palette.surfaceAlt,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.border),
+                  border: Border.all(color: context.palette.border),
                 ),
                 child: Text(
                   _guestChatUrl!,
                   style: GoogleFonts.inter(
-                      fontSize: 11, color: AppTheme.textSecondary),
+                      fontSize: 11, color: context.palette.textSecondary),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -424,12 +444,12 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                   label: Text(_copiedLink ? 'Copied!' : 'Copy Guest Link'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _copiedLink
-                        ? AppTheme.success
-                        : AppTheme.primary,
+                        ? context.palette.success
+                        : context.palette.primary,
                     side: BorderSide(
                         color: _copiedLink
-                            ? AppTheme.success
-                            : AppTheme.border),
+                            ? context.palette.success
+                            : context.palette.border),
                   ),
                 ),
               ),
@@ -438,13 +458,13 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.check_circle_rounded,
-                        size: 12, color: AppTheme.success),
+                    Icon(Icons.check_circle_rounded,
+                        size: 12, color: context.palette.success),
                     const SizedBox(width: 4),
                     Text(
                       'Link copied to clipboard.',
                       style: GoogleFonts.inter(
-                          fontSize: 11, color: AppTheme.success),
+                          fontSize: 11, color: context.palette.success),
                     ),
                   ],
                 ),
@@ -469,15 +489,15 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
-                color: AppTheme.textPrimary),
+                color: context.palette.textPrimary),
           ),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              color: AppTheme.surfaceAlt,
+              color: context.palette.surfaceAlt,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.border),
+              border: Border.all(color: context.palette.border),
             ),
             child: Row(
               children: [
@@ -485,7 +505,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                   child: _modeButton(
                     label: 'Autopilot',
                     active: isAutopilot,
-                    activeColor: AppTheme.primary,
+                    activeColor: context.palette.primary,
                     onTap: isAutopilot ? null : () => _setMode('autopilot'),
                   ),
                 ),
@@ -493,7 +513,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                   child: _modeButton(
                     label: 'Intervene',
                     active: !isAutopilot,
-                    activeColor: AppTheme.warning,
+                    activeColor: context.palette.warning,
                     onTap: !isAutopilot ? null : () => _setMode('intervene'),
                   ),
                 ),
@@ -517,7 +537,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: active ? AppTheme.surface : Colors.transparent,
+          color: active ? context.palette.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           boxShadow: active
               ? [
@@ -533,7 +553,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           label,
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(
-            color: active ? activeColor : AppTheme.textMuted,
+            color: active ? activeColor : context.palette.textMuted,
             fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             fontSize: 13,
           ),
@@ -577,10 +597,10 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                     color: Colors.white,
                   ),
                 )
-              : const Icon(Icons.check_circle_outline_rounded, size: 18),
+              : Icon(Icons.check_circle_outline_rounded, size: 18),
           label: Text(_isResolving ? 'Resolving…' : 'Mark Issue as Resolved'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primary,
+            backgroundColor: context.palette.primary,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 12),
             shape: RoundedRectangleBorder(
@@ -597,10 +617,10 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.warningContainer,
+        color: context.palette.warningContainer,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: AppTheme.warning.withValues(alpha: 0.5),
+          color: context.palette.warning.withValues(alpha: 0.5),
           width: 1,
         ),
       ),
@@ -609,15 +629,15 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: AppTheme.warning, size: 15),
+              Icon(Icons.warning_amber_rounded,
+                  color: context.palette.warning, size: 15),
               const SizedBox(width: 6),
               Text(
                 'Open issue',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.warning,
+                  color: context.palette.warning,
                 ),
               ),
             ],
@@ -627,7 +647,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             _escalationReason ??
                 'Unresolved escalation. Alfred is active but this was not formally resolved.',
             style:
-                GoogleFonts.inter(fontSize: 11, color: AppTheme.warning),
+                GoogleFonts.inter(fontSize: 11, color: context.palette.warning),
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           ),
@@ -637,18 +657,18 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             child: OutlinedButton(
               onPressed: _isResolving ? null : _resolveIssue,
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.warning,
-                side: const BorderSide(color: AppTheme.warning),
+                foregroundColor: context.palette.warning,
+                side: BorderSide(color: context.palette.warning),
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 textStyle: GoogleFonts.inter(
                     fontSize: 12, fontWeight: FontWeight.w600),
               ),
               child: _isResolving
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppTheme.warning))
+                          strokeWidth: 2, color: context.palette.warning))
                   : const Text('Mark as Resolved'),
             ),
           ),
@@ -672,7 +692,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             msg['content'] as String,
             style: GoogleFonts.inter(
               fontSize: 11,
-              color: AppTheme.textMuted,
+              color: context.palette.textMuted,
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -699,9 +719,9 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               errorBuilder: (_, __, ___) => Container(
                 width: 200,
                 height: 80,
-                color: AppTheme.surfaceAlt,
-                child: const Center(
-                  child: Icon(Icons.broken_image_outlined, color: AppTheme.textMuted),
+                color: context.palette.surfaceAlt,
+                child: Center(
+                  child: Icon(Icons.broken_image_outlined, color: context.palette.textMuted),
                 ),
               ),
             ),
@@ -720,19 +740,19 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     final usedLearned = msg['used_learned_knowledge'] == true;
 
     Color bgColor;
-    Color textColor = AppTheme.textPrimary;
+    Color textColor = context.palette.textPrimary;
     BorderRadius radius;
     Border? border;
 
     if (isGuest) {
       if (inEscalationWindow && isEmergency) {
-        bgColor = AppTheme.dangerContainer;
-        border = Border.all(color: AppTheme.danger, width: 1.5);
+        bgColor = context.palette.dangerContainer;
+        border = Border.all(color: context.palette.danger, width: 1.5);
       } else if (inEscalationWindow) {
-        bgColor = AppTheme.warningContainer;
-        border = Border.all(color: AppTheme.warning, width: 1.5);
+        bgColor = context.palette.warningContainer;
+        border = Border.all(color: context.palette.warning, width: 1.5);
       } else {
-        bgColor = AppTheme.primaryContainer;
+        bgColor = context.palette.primaryContainer;
         border = null;
       }
       radius = const BorderRadius.only(
@@ -742,8 +762,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         bottomRight: Radius.circular(3),
       );
     } else if (isHost) {
-      bgColor = AppTheme.surface;
-      border = Border.all(color: AppTheme.border);
+      bgColor = context.palette.surface;
+      border = Border.all(color: context.palette.border);
       radius = const BorderRadius.only(
         topLeft: Radius.circular(3),
         topRight: Radius.circular(14),
@@ -751,15 +771,15 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         bottomRight: Radius.circular(14),
       );
     } else if (isEscalated && isEmergency) {
-      bgColor = AppTheme.dangerContainer;
-      border = Border.all(color: AppTheme.danger, width: 1.5);
+      bgColor = context.palette.dangerContainer;
+      border = Border.all(color: context.palette.danger, width: 1.5);
       radius = BorderRadius.circular(14);
     } else if (isEscalated) {
-      bgColor = AppTheme.warningContainer;
-      border = Border.all(color: AppTheme.warning, width: 1.5);
+      bgColor = context.palette.warningContainer;
+      border = Border.all(color: context.palette.warning, width: 1.5);
       radius = BorderRadius.circular(14);
     } else {
-      bgColor = AppTheme.surfaceAlt;
+      bgColor = context.palette.surfaceAlt;
       radius = const BorderRadius.only(
         topLeft: Radius.circular(3),
         topRight: Radius.circular(14),
@@ -780,75 +800,88 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
 
     final senderColor = isGuest
         ? (inEscalationWindow && isEmergency
-            ? AppTheme.danger
+            ? context.palette.danger
             : inEscalationWindow
-                ? AppTheme.warning
-                : AppTheme.primary)
+                ? context.palette.warning
+                : context.palette.primary)
         : isHost
-            ? AppTheme.textSecondary
+            ? context.palette.textSecondary
             : isEscalated && isEmergency
-                ? AppTheme.danger
+                ? context.palette.danger
                 : isEscalated
-                    ? AppTheme.warning
-                    : AppTheme.textMuted;
+                    ? context.palette.warning
+                    : context.palette.textMuted;
 
+    final isSending = msg['status'] == 'sending';
+    final ts = parseTime(msg['created_at']);
     return Align(
       alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-        constraints: const BoxConstraints(maxWidth: 420),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: radius,
-          border: border,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              senderLabel,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: senderColor,
-                letterSpacing: 0.2,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              msg['content'] as String,
-              style: GoogleFonts.inter(fontSize: 13, color: textColor, height: 1.5),
-            ),
-            if (!isGuest && !isHost && usedLearned) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppTheme.accentContainer,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: AppTheme.accent.withValues(alpha: 0.4)),
+      child: Opacity(
+        opacity: isSending ? 0.6 : 1.0,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+          constraints: const BoxConstraints(maxWidth: 420),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: radius,
+            border: border,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                senderLabel,
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: senderColor,
+                  letterSpacing: 0.2,
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.bolt_rounded, size: 11, color: AppTheme.accent),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Resolved via automated learning',
-                      style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.accent,
-                        letterSpacing: 0.2,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                msg['content'] as String,
+                style: GoogleFonts.inter(fontSize: 13, color: textColor, height: 1.5),
+              ),
+              if (!isGuest && !isHost && usedLearned) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: context.palette.accentContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: context.palette.accent.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bolt_rounded, size: 11, color: context.palette.accent),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Resolved via automated learning',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: context.palette.accent,
+                          letterSpacing: 0.2,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                isSending ? 'Sending…' : (ts != null ? relativeTime(ts) : ''),
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  color: context.palette.textMuted,
                 ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -857,8 +890,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   Widget _buildHostInput() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppTheme.border)),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: context.palette.border)),
       ),
       child: Row(
         children: [
@@ -868,21 +901,21 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               decoration: InputDecoration(
                 hintText: 'Reply to guest…',
                 hintStyle: GoogleFonts.inter(
-                    fontSize: 13, color: AppTheme.textMuted),
+                    fontSize: 13, color: context.palette.textMuted),
                 filled: true,
-                fillColor: AppTheme.surfaceAlt,
+                fillColor: context.palette.surfaceAlt,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
-                  borderSide: const BorderSide(color: AppTheme.border),
+                  borderSide: BorderSide(color: context.palette.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
-                  borderSide: const BorderSide(color: AppTheme.border),
+                  borderSide: BorderSide(color: context.palette.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
                   borderSide:
-                      const BorderSide(color: AppTheme.primary, width: 1.5),
+                      BorderSide(color: context.palette.primary, width: 1.5),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -897,12 +930,12 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           const SizedBox(width: 8),
           IconButton(
             onPressed: _isSending ? null : _sendHostMessage,
-            icon: const Icon(Icons.send_rounded, size: 18),
+            icon: Icon(Icons.send_rounded, size: 18),
             style: IconButton.styleFrom(
-              backgroundColor: AppTheme.primary,
+              backgroundColor: context.palette.primary,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: AppTheme.border,
-              disabledForegroundColor: AppTheme.textMuted,
+              disabledBackgroundColor: context.palette.border,
+              disabledForegroundColor: context.palette.textMuted,
             ),
           ),
         ],
@@ -958,9 +991,9 @@ class _AudioBubbleState extends State<_AudioBubble> {
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: widget.isGuest ? AppTheme.primaryContainer : AppTheme.surfaceAlt,
+          color: widget.isGuest ? context.palette.primaryContainer : context.palette.surfaceAlt,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.border),
+          border: Border.all(color: context.palette.border),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -971,14 +1004,14 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 22,
               ),
-              color: AppTheme.primary,
+              color: context.palette.primary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
             const SizedBox(width: 6),
             Text(
               'Voice message',
-              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textPrimary),
+              style: GoogleFonts.inter(fontSize: 13, color: context.palette.textPrimary),
             ),
           ],
         ),

@@ -77,7 +77,8 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final dragColor = AppTheme.primary;
+    final palette = context.palette;
+    final dragColor = palette.primary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -109,7 +110,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
               scale: _isDragging ? 1.015 : 1.0,
               child: CustomPaint(
                 painter: _DashedBorderPainter(
-                  color: _isDragging ? dragColor : AppTheme.borderStrong,
+                  color: _isDragging ? dragColor : palette.borderStrong,
                   strokeWidth: _isDragging ? 2.0 : 1.5,
                   radius: 14,
                   dashLength: 8,
@@ -120,8 +121,8 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                   height: 132,
                   decoration: BoxDecoration(
                     color: _isDragging
-                        ? AppTheme.primaryContainer.withValues(alpha: 0.55)
-                        : AppTheme.glassTint,
+                        ? palette.primaryContainer.withValues(alpha: 0.55)
+                        : palette.glassTint,
                     borderRadius: BorderRadius.circular(14),
                     boxShadow: _isDragging
                         ? [
@@ -142,7 +143,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                         child: Icon(
                           Icons.cloud_upload_outlined,
                           size: 36,
-                          color: _isDragging ? dragColor : AppTheme.textSecondary,
+                          color: _isDragging ? dragColor : palette.textSecondary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -157,7 +158,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                               : FontWeight.w500,
                           color: _isDragging
                               ? dragColor
-                              : AppTheme.textPrimary,
+                              : palette.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 3),
@@ -165,7 +166,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                         'PDF · DOCX · Images · Sheets · Audio',
                         style: GoogleFonts.inter(
                           fontSize: 11,
-                          color: AppTheme.textMuted,
+                          color: palette.textMuted,
                         ),
                       ),
                     ],
@@ -182,7 +183,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
               _unsupportedError!,
               style: GoogleFonts.inter(
                 fontSize: 12,
-                color: AppTheme.danger,
+                color: palette.danger,
                 fontWeight: FontWeight.w500,
               ),
             ),

@@ -38,13 +38,14 @@ class _GlassPanelState extends State<GlassPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final tint = widget.tint ?? AppTheme.glassTint;
+    final palette = context.palette;
+    final tint = widget.tint ?? palette.glassTint;
     final hoverTint = widget.tint == null
-        ? AppTheme.glassTintStrong
+        ? palette.glassTintStrong
         : Color.alphaBlend(Colors.white.withValues(alpha: 0.1), widget.tint!);
     final borderColor = _hovered
-        ? AppTheme.glassBorderStrong
-        : (widget.border ?? AppTheme.glassBorder);
+        ? palette.glassBorderStrong
+        : (widget.border ?? palette.glassBorder);
 
     final panel = AnimatedContainer(
       duration: const Duration(milliseconds: 200),
@@ -57,8 +58,8 @@ class _GlassPanelState extends State<GlassPanel> {
         border: Border.all(color: borderColor, width: 1),
         boxShadow: widget.shadow ??
             (_hovered && widget.hoverable
-                ? AppTheme.cardShadowHover
-                : AppTheme.cardShadow),
+                ? palette.cardShadowHover
+                : palette.cardShadow),
       ),
       child: widget.child,
     );

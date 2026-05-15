@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'voice_recorder.dart';
 import 'file_status_list.dart';
 import 'conflict_questionnaire.dart';
@@ -11,6 +12,8 @@ import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
 import '../screens/edit_property_screen.dart';
 import '../theme/app_theme.dart';
+import '../utils/setup_status.dart';
+import 'setup_status_banner.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -356,11 +359,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
     return Material(
       elevation: 0,
-      color: AppTheme.surface,
+      color: context.palette.surface,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: AppTheme.surface,
-          boxShadow: AppTheme.drawerShadow,
+          color: context.palette.surface,
+          boxShadow: context.palette.drawerShadow,
         ),
         child: SizedBox(
           width: 440,
@@ -380,7 +383,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.warning_amber_rounded,
-                              size: 14, color: AppTheme.warning),
+                              size: 14, color: context.palette.warning),
                           const SizedBox(width: 4),
                           const Text('Resolve'),
                         ],
@@ -415,12 +418,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [AppTheme.primaryDark, AppTheme.primary, AppTheme.accent],
+          colors: [context.palette.primaryDark, context.palette.primary, context.palette.accent],
           stops: const [0.0, 0.55, 1.0],
         ),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.25),
+            color: context.palette.primary.withValues(alpha: 0.25),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
@@ -437,7 +440,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               border: Border.all(
                   color: Colors.white.withValues(alpha: 0.25), width: 1),
             ),
-            child: const Icon(Icons.home_work_rounded,
+            child: Icon(Icons.home_work_rounded,
                 color: Colors.white, size: 18),
           ),
           const SizedBox(width: 12),
@@ -466,7 +469,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close_rounded,
+            icon: Icon(Icons.close_rounded,
                 color: Colors.white, size: 20),
             onPressed: () => Navigator.of(context).pop(),
           ),
@@ -479,12 +482,26 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final status = _property['status'] as String? ?? '';
     final airbnbUrl = _property['airbnb_url'] as String? ?? '';
     final createdAt = _property['created_at'] as String? ?? '';
+    final setupStep = nextStepFor(status);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (setupStep != null)
+            SetupStatusBanner(
+              step: setupStep,
+              compact: true,
+              onAction: () {
+                final nav = Navigator.of(context);
+                final refresh = widget.onRefresh;
+                nav.pop();
+                nav.push(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(property: _property),
+                )).then((_) => refresh());
+              },
+            ),
           // Hero image
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
@@ -496,15 +513,62 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                       errorBuilder: (_, __, ___) => _heroPlaceholder())
                   : _heroLoaded
                       ? _heroPlaceholder()
-                      : const ColoredBox(color: AppTheme.primaryContainer),
+                      : ColoredBox(color: context.palette.primaryContainer),
             ),
           ),
           const SizedBox(height: 16),
           _infoRow('Status', status),
           if (airbnbUrl.isNotEmpty)
-            _infoRow('Airbnb URL', airbnbUrl, isLink: true),
+            _airbnbUrlRow(airbnbUrl),
           if (createdAt.isNotEmpty)
             _infoRow('Added', _formatDate(createdAt)),
+        ],
+      ),
+    );
+  }
+
+  Widget _airbnbUrlRow(String url) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text('Airbnb URL:',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 13)),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () => launchUrl(
+                Uri.parse(url),
+                mode: LaunchMode.externalApplication,
+              ),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      url,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.open_in_new_rounded,
+                    size: 12,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -529,7 +593,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 builder: (_) => EditPropertyScreen(property: _property),
               )).then((_) => refresh());
             },
-            icon: const Icon(Icons.edit_outlined, size: 16),
+            icon: Icon(Icons.edit_outlined, size: 16),
             label: const Text('Edit Property / Add Files'),
           ),
         ),
@@ -549,7 +613,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   children: fingerprints.entries.map((e) {
                     return ListTile(
                       dense: true,
-                      leading: const Icon(Icons.insert_drive_file_outlined,
+                      leading: Icon(Icons.insert_drive_file_outlined,
                           size: 20),
                       title: Text(e.key,
                           style: const TextStyle(fontSize: 13)),
@@ -697,7 +761,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.bolt_rounded, size: 15, color: AppTheme.accent),
+                    Icon(Icons.bolt_rounded, size: 15, color: context.palette.accent),
                     const SizedBox(width: 6),
                     Text(
                       'Automated Learning',
@@ -711,20 +775,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 const SizedBox(height: 4),
                 Text(
                   'Q&A entries captured automatically when issues are resolved.',
-                  style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+                  style: GoogleFonts.inter(fontSize: 11, color: context.palette.textMuted),
                 ),
                 const SizedBox(height: 12),
                 if (_loadingLearned)
                   const Center(
                     child: Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: CircularProgressIndicator(color: AppTheme.primary),
+                      child: CircularProgressIndicator(color: context.palette.primary),
                     ),
                   )
                 else if (_learnedKnowledge.isEmpty)
                   Text(
                     'No automated learning entries yet. Resolve an escalation to generate one.',
-                    style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                    style: GoogleFonts.inter(fontSize: 12, color: context.palette.textMuted),
                   )
                 else
                   ..._learnedKnowledge.asMap().entries.map((e) {
@@ -809,12 +873,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                           ] else ...[
                             Text(
                               'Q: ${entry['problem_summary'] ?? ''}',
-                              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textPrimary, height: 1.4),
+                              style: GoogleFonts.inter(fontSize: 12, color: context.palette.textPrimary, height: 1.4),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'A: ${entry['solution_summary'] ?? ''}',
-                              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                              style: GoogleFonts.inter(fontSize: 12, color: context.palette.textSecondary, height: 1.4),
                             ),
                             const SizedBox(height: 10),
                             Row(
@@ -822,7 +886,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                 if (!reviewed)
                                   OutlinedButton.icon(
                                     onPressed: () => _acceptLearned(index),
-                                    icon: const Icon(Icons.check_rounded, size: 14),
+                                    icon: Icon(Icons.check_rounded, size: 14),
                                     label: const Text('Accept'),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: Colors.green.shade700,
@@ -838,11 +902,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                     _editSolutionCtrl.text = entry['solution_summary'] as String? ?? '';
                                     setState(() => _editingLearnedIndex = index);
                                   },
-                                  icon: const Icon(Icons.edit_outlined, size: 14),
+                                  icon: Icon(Icons.edit_outlined, size: 14),
                                   label: const Text('Edit'),
                                   style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppTheme.textSecondary,
-                                    side: const BorderSide(color: AppTheme.border),
+                                    foregroundColor: context.palette.textSecondary,
+                                    side: BorderSide(color: context.palette.border),
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     textStyle: GoogleFonts.inter(fontSize: 12),
                                   ),
@@ -850,7 +914,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                 const SizedBox(width: 6),
                                 OutlinedButton.icon(
                                   onPressed: () => _discardLearned(index),
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                                  icon: Icon(Icons.delete_outline_rounded, size: 14),
                                   label: const Text('Discard'),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.red.shade700,
@@ -877,8 +941,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           // Knowledge base chat
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded,
-                  size: 15, color: AppTheme.accent),
+              Icon(Icons.auto_awesome_rounded,
+                  size: 15, color: context.palette.accent),
               const SizedBox(width: 6),
               Text('Ask the Knowledge Base',
                   style: Theme.of(context)
@@ -890,7 +954,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           const SizedBox(height: 4),
           Text(
             'Ask Alfred anything about this property\'s knowledge base.',
-            style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+            style: GoogleFonts.inter(fontSize: 11, color: context.palette.textMuted),
           ),
           const SizedBox(height: 12),
 
@@ -916,7 +980,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                             child: Container(
                               padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                               decoration: BoxDecoration(
-                                color: AppTheme.primaryContainer,
+                                color: context.palette.primaryContainer,
                                 borderRadius: const BorderRadius.only(
                                   topLeft: Radius.circular(12),
                                   topRight: Radius.circular(12),
@@ -927,7 +991,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                               child: Text(q,
                                   style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: AppTheme.onPrimaryContainer,
+                                    color: context.palette.onPrimaryContainer,
                                   )),
                             ),
                           ),
@@ -942,12 +1006,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                     height: 12,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 1.5,
-                                        color: AppTheme.accent)),
+                                        color: context.palette.accent)),
                                 const SizedBox(width: 6),
                                 Text('Alfred is thinking…',
                                     style: GoogleFonts.inter(
                                         fontSize: 11,
-                                        color: AppTheme.textMuted,
+                                        color: context.palette.textMuted,
                                         fontStyle: FontStyle.italic)),
                               ]),
                             )
@@ -955,7 +1019,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                             Container(
                               padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                               decoration: BoxDecoration(
-                                color: AppTheme.surfaceAlt,
+                                color: context.palette.surfaceAlt,
                                 borderRadius: const BorderRadius.only(
                                   topLeft: Radius.circular(3),
                                   topRight: Radius.circular(12),
@@ -966,7 +1030,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                               child: Text(a,
                                   style: GoogleFonts.inter(
                                       fontSize: 12,
-                                      color: AppTheme.textPrimary)),
+                                      color: context.palette.textPrimary)),
                             ),
                         ],
                       ),
@@ -985,28 +1049,28 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   decoration: InputDecoration(
                     hintText: 'e.g. How many guests can stay?',
                     hintStyle: GoogleFonts.inter(
-                        fontSize: 12, color: AppTheme.textMuted),
+                        fontSize: 12, color: context.palette.textMuted),
                     filled: true,
-                    fillColor: AppTheme.surfaceAlt,
+                    fillColor: context.palette.surfaceAlt,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
-                      borderSide: const BorderSide(color: AppTheme.border),
+                      borderSide: BorderSide(color: context.palette.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
-                      borderSide: const BorderSide(color: AppTheme.border),
+                      borderSide: BorderSide(color: context.palette.border),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
                       borderSide: const BorderSide(
-                          color: AppTheme.primary, width: 1.5),
+                          color: context.palette.primary, width: 1.5),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
                     isDense: true,
                   ),
                   style: GoogleFonts.inter(
-                      fontSize: 13, color: AppTheme.textPrimary),
+                      fontSize: 13, color: context.palette.textPrimary),
                   onSubmitted: (_) => _queryKnowledgeBase(),
                   textInputAction: TextInputAction.send,
                 ),
@@ -1019,12 +1083,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppTheme.primary))
-                    : const Icon(Icons.send_rounded,
-                        size: 18, color: AppTheme.primary),
+                            strokeWidth: 2, color: context.palette.primary))
+                    : Icon(Icons.send_rounded,
+                        size: 18, color: context.palette.primary),
                 style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.primaryContainer,
-                  disabledBackgroundColor: AppTheme.surfaceAlt,
+                  backgroundColor: context.palette.primaryContainer,
+                  disabledBackgroundColor: context.palette.surfaceAlt,
                 ),
               ),
             ],
@@ -1037,7 +1101,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           // Danger zone: delete property
           OutlinedButton.icon(
             onPressed: _confirmDeleteProperty,
-            icon: const Icon(Icons.delete_forever_outlined, size: 16),
+            icon: Icon(Icons.delete_forever_outlined, size: 16),
             label: const Text('Delete Property'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.red.shade700,
@@ -1142,8 +1206,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.border)),
+        color: context.palette.surface,
+        border: Border(top: BorderSide(color: context.palette.border)),
       ),
       child: Row(
         children: [
@@ -1157,7 +1221,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                       GenerateGuestLinkDialog(property: _property),
                 );
               },
-              icon: const Icon(Icons.link, size: 16),
+              icon: Icon(Icons.link, size: 16),
               label: const Text('+ Guest Link'),
             ),
           ),
@@ -1173,7 +1237,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   ),
                 );
               },
-              icon: const Icon(Icons.chat_bubble_outline, size: 16),
+              icon: Icon(Icons.chat_bubble_outline, size: 16),
               label: const Text('Host Chat'),
             ),
           ),
@@ -1188,7 +1252,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [AppTheme.accent, AppTheme.primary],
+          colors: [context.palette.accent, context.palette.primary],
         ),
       ),
       child: Center(
@@ -1215,7 +1279,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               value,
               style: TextStyle(
                   fontSize: 13,
-                  color: isLink ? AppTheme.accent : null),
+                  color: isLink ? context.palette.accent : null),
               overflow: TextOverflow.ellipsis,
               maxLines: 2,
             ),

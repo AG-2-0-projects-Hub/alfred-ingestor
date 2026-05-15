@@ -53,7 +53,7 @@ class _AuthScreenState extends State<AuthScreen> {
     } on AuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppTheme.danger),
+          SnackBar(content: Text(e.message), backgroundColor: context.palette.danger),
         );
       }
     } catch (e) {
@@ -61,7 +61,7 @@ class _AuthScreenState extends State<AuthScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text('Error: $e'),
-              backgroundColor: AppTheme.danger),
+              backgroundColor: context.palette.danger),
         );
       }
     } finally {
@@ -72,7 +72,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.palette.background,
       body: LayoutBuilder(builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 900;
         if (isWide) return _buildWideLayout();
@@ -222,7 +222,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Widget _buildLogo({required bool large, bool light = false}) {
-    final color = light ? Colors.white : AppTheme.primary;
+    final color = light ? Colors.white : context.palette.primary;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -232,7 +232,7 @@ class _AuthScreenState extends State<AuthScreen> {
           decoration: BoxDecoration(
             color: light
                 ? Colors.white.withValues(alpha: 0.2)
-                : AppTheme.primaryContainer,
+                : context.palette.primaryContainer,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(
@@ -265,7 +265,7 @@ class _AuthScreenState extends State<AuthScreen> {
           style: GoogleFonts.poppins(
             fontSize: 26,
             fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
+            color: context.palette.textPrimary,
           ),
         ),
         const SizedBox(height: 6),
@@ -275,7 +275,7 @@ class _AuthScreenState extends State<AuthScreen> {
               : 'Start giving yourself time back',
           style: GoogleFonts.inter(
             fontSize: 14,
-            color: AppTheme.textSecondary,
+            color: context.palette.textSecondary,
           ),
         ),
         const SizedBox(height: 32),
@@ -305,7 +305,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       ? Icons.visibility_off_outlined
                       : Icons.visibility_outlined,
                   size: 20,
-                  color: AppTheme.textMuted,
+                  color: context.palette.textMuted,
                 ),
                 splashRadius: 22,
                 tooltip: _showPassword ? 'Hide password' : 'Show password',
@@ -354,7 +354,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   ? "Don't have an account?"
                   : 'Already have an account?',
               style: GoogleFonts.inter(
-                  fontSize: 13, color: AppTheme.textSecondary),
+                  fontSize: 13, color: context.palette.textSecondary),
             ),
             TextButton(
               onPressed: _isLoading
@@ -370,7 +370,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.primary,
+                  color: context.palette.primary,
                 ),
               ),
             ),

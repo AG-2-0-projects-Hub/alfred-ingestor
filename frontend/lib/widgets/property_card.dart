@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
+import 'conversation_pill.dart';
 
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
-  final VoidCallback onExpand;
+  final void Function(String bookingId) onOpenChat;
+  final VoidCallback onOpenExpanded;
+  final VoidCallback onOpenSettings;
   final VoidCallback onGuestLink;
-  final VoidCallback onHostChat;
   final VoidCallback onAddProperty;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
@@ -19,9 +21,10 @@ class PropertyCard extends StatelessWidget {
   const PropertyCard({
     super.key,
     required this.property,
-    required this.onExpand,
+    required this.onOpenChat,
+    required this.onOpenExpanded,
+    required this.onOpenSettings,
     required this.onGuestLink,
-    required this.onHostChat,
     required this.onAddProperty,
     this.onArchivedChats = _noop,
     this.onCalendar = _noop,
@@ -35,9 +38,10 @@ class PropertyCard extends StatelessWidget {
     super.key,
     required this.onAddProperty,
   })  : property = const {},
-        onExpand = _noop,
+        onOpenChat = _noopChat,
+        onOpenExpanded = _noop,
+        onOpenSettings = _noop,
         onGuestLink = _noop,
-        onHostChat = _noop,
         onArchivedChats = _noop,
         onCalendar = _noop,
         activeChatCount = 0,
@@ -46,6 +50,7 @@ class PropertyCard extends StatelessWidget {
         conversationPreviews = const [];
 
   static void _noop() {}
+  static void _noopChat(String _) {}
 
   bool get _isAddCard => property.isEmpty;
 
@@ -58,9 +63,10 @@ class PropertyCard extends StatelessWidget {
       hasEscalation: hasEscalation,
       hasEmergency: hasEmergency,
       conversationPreviews: conversationPreviews,
-      onExpand: onExpand,
+      onOpenChat: onOpenChat,
+      onOpenExpanded: onOpenExpanded,
+      onOpenSettings: onOpenSettings,
       onGuestLink: onGuestLink,
-      onHostChat: onHostChat,
       onArchivedChats: onArchivedChats,
       onCalendar: onCalendar,
     );
@@ -81,6 +87,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -90,16 +97,14 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           decoration: BoxDecoration(
-            color: _hovered
-                ? AppTheme.primaryContainer
-                : AppTheme.surface,
+            color: _hovered ? palette.primaryContainer : palette.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: _hovered ? AppTheme.primary : AppTheme.primaryHover,
+              color: _hovered ? palette.primary : palette.primaryHover,
               width: _hovered ? 1.5 : 1,
               style: BorderStyle.solid,
             ),
-            boxShadow: _hovered ? AppTheme.cardShadowHover : [],
+            boxShadow: _hovered ? palette.cardShadowHover : [],
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -110,14 +115,14 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
                 height: 64,
                 decoration: BoxDecoration(
                   color: _hovered
-                      ? AppTheme.primary.withValues(alpha: 0.12)
-                      : AppTheme.primaryContainer,
+                      ? palette.primary.withValues(alpha: 0.12)
+                      : palette.primaryContainer,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.add_rounded,
                   size: 32,
-                  color: AppTheme.primary,
+                  color: palette.primary,
                 ),
               ),
               const SizedBox(height: 16),
@@ -126,7 +131,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
                 style: GoogleFonts.poppins(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.primary,
+                  color: palette.primary,
                 ),
               ),
               const SizedBox(height: 6),
@@ -134,7 +139,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
                 'Connect your Airbnb listing',
                 style: GoogleFonts.inter(
                   fontSize: 12,
-                  color: AppTheme.textMuted,
+                  color: palette.textMuted,
                 ),
               ),
             ],
@@ -152,9 +157,10 @@ class _PropertyCard extends StatefulWidget {
   final bool hasEscalation;
   final bool hasEmergency;
   final List<Map<String, dynamic>> conversationPreviews;
-  final VoidCallback onExpand;
+  final void Function(String bookingId) onOpenChat;
+  final VoidCallback onOpenExpanded;
+  final VoidCallback onOpenSettings;
   final VoidCallback onGuestLink;
-  final VoidCallback onHostChat;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
 
@@ -164,9 +170,10 @@ class _PropertyCard extends StatefulWidget {
     required this.hasEscalation,
     required this.hasEmergency,
     required this.conversationPreviews,
-    required this.onExpand,
+    required this.onOpenChat,
+    required this.onOpenExpanded,
+    required this.onOpenSettings,
     required this.onGuestLink,
-    required this.onHostChat,
     required this.onArchivedChats,
     required this.onCalendar,
   });
@@ -179,11 +186,11 @@ class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
   bool _pressed = false;
 
-  List<BoxShadow> _statusGlow() {
+  List<BoxShadow> _statusGlow(AppPalette p) {
     if (widget.hasEmergency) {
       return [
         BoxShadow(
-          color: AppTheme.danger.withValues(alpha: 0.40),
+          color: p.danger.withValues(alpha: 0.40),
           blurRadius: 18,
           spreadRadius: 2,
         ),
@@ -192,7 +199,7 @@ class _PropertyCardState extends State<_PropertyCard> {
     if (widget.hasEscalation) {
       return [
         BoxShadow(
-          color: AppTheme.warning.withValues(alpha: 0.35),
+          color: p.warning.withValues(alpha: 0.35),
           blurRadius: 16,
           spreadRadius: 2,
         ),
@@ -201,7 +208,7 @@ class _PropertyCardState extends State<_PropertyCard> {
     if (widget.activeChatCount > 0) {
       return [
         BoxShadow(
-          color: AppTheme.success.withValues(alpha: 0.25),
+          color: p.success.withValues(alpha: 0.25),
           blurRadius: 14,
           spreadRadius: 1,
         ),
@@ -212,6 +219,7 @@ class _PropertyCardState extends State<_PropertyCard> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     final status = widget.property['status'] as String? ?? '';
     final name = widget.property['name'] as String? ?? 'Unnamed';
     final propertyId = widget.property['id'] as String;
@@ -221,7 +229,7 @@ class _PropertyCardState extends State<_PropertyCard> {
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: widget.onExpand,
+        onTap: widget.onOpenExpanded,
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) => setState(() => _pressed = false),
         onTapCancel: () => setState(() => _pressed = false),
@@ -232,122 +240,119 @@ class _PropertyCardState extends State<_PropertyCard> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(
-              color: _hovered ? AppTheme.glassTintStrong : AppTheme.glassTint,
+              color: _hovered ? palette.glassTintStrong : palette.glassTint,
               gradient: AppTheme.glassInnerHighlight,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: _hovered
-                    ? AppTheme.primaryHover.withValues(alpha: 0.5)
-                    : AppTheme.glassBorderStrong,
+                    ? palette.primaryHover.withValues(alpha: 0.5)
+                    : palette.glassBorderStrong,
                 width: 1,
               ),
               boxShadow: [
-                ..._statusGlow(),
-                ...(_hovered
-                    ? AppTheme.cardShadowHover
-                    : AppTheme.cardShadow),
+                ..._statusGlow(palette),
+                ...(_hovered ? palette.cardShadowHover : palette.cardShadow),
               ],
             ),
             clipBehavior: Clip.antiAlias,
             child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Hero image with status badge overlay
-              SizedBox(
-                height: 160,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _HeroImage(propertyId: propertyId, status: status),
-                    // Gradient fade at bottom for text legibility
-                    Positioned(
-                      left: 0, right: 0, bottom: 0,
-                      height: 56,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.28),
-                              Colors.transparent,
-                            ],
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 160,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _HeroImage(propertyId: propertyId, status: status),
+                      Positioned(
+                        left: 0, right: 0, bottom: 0,
+                        height: 56,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.28),
+                                Colors.transparent,
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    // Status badge top-right
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: _StatusBadge(status: status),
-                    ),
-                    // Active chat indicator bottom-left
-                    if (widget.activeChatCount > 0)
                       Positioned(
-                        bottom: 8,
-                        left: 12,
-                        child: _ChatBadge(count: widget.activeChatCount),
+                        top: 10,
+                        right: 10,
+                        child: _StatusBadge(status: status),
                       ),
-                  ],
-                ),
-              ),
-              // Card body
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Property name
-                      Text(
-                        name,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                      if (widget.activeChatCount > 0)
+                        Positioned(
+                          bottom: 8,
+                          left: 12,
+                          child: _ChatBadge(count: widget.activeChatCount),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      if (widget.hasEmergency) ...[
-                        const SizedBox(height: 6),
-                        const _AlertPill(
-                          label: 'Emergency',
-                          icon: Icons.warning_amber_rounded,
-                          bg: AppTheme.dangerContainer,
-                          fg: AppTheme.danger,
-                        ),
-                      ] else if (widget.hasEscalation) ...[
-                        const SizedBox(height: 6),
-                        const _AlertPill(
-                          label: 'Needs Attention',
-                          icon: Icons.notifications_active_rounded,
-                          bg: AppTheme.warningContainer,
-                          fg: AppTheme.warning,
-                        ),
-                      ],
-                      if (widget.conversationPreviews.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        _ConversationPreviewList(
-                            previews: widget.conversationPreviews),
-                      ],
-                      const Spacer(),
-                      _buildActions(context, status),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: palette.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        if (widget.hasEmergency) ...[
+                          const SizedBox(height: 6),
+                          _AlertPill(
+                            label: 'Emergency',
+                            icon: Icons.warning_amber_rounded,
+                            bg: palette.dangerContainer,
+                            fg: palette.danger,
+                          ),
+                        ] else if (widget.hasEscalation) ...[
+                          const SizedBox(height: 6),
+                          _AlertPill(
+                            label: 'Needs Attention',
+                            icon: Icons.notifications_active_rounded,
+                            bg: palette.warningContainer,
+                            fg: palette.warning,
+                          ),
+                        ],
+                        if (widget.conversationPreviews.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Expanded(
+                            child: _PillPreviewList(
+                              previews: widget.conversationPreviews,
+                              onOpenChat: widget.onOpenChat,
+                              onOpenAll: widget.onOpenExpanded,
+                            ),
+                          ),
+                        ] else
+                          const Spacer(),
+                        _buildActions(context, status, palette),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActions(BuildContext context, String status) {
+  Widget _buildActions(BuildContext context, String status, AppPalette palette) {
     final isProcessing = status == 'Ingesting' || status == 'Training';
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
@@ -363,31 +368,30 @@ class _PropertyCardState extends State<_PropertyCard> {
           height: 14,
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            color: AppTheme.accent,
+            color: palette.accent,
           ),
         ),
         const SizedBox(width: 8),
         Text(
           'Processing…',
           style: GoogleFonts.inter(
-              fontSize: 12, color: AppTheme.textSecondary),
+              fontSize: 12, color: palette.textSecondary),
         ),
       ]);
     }
 
     if (isError) {
       return Row(children: [
-        const Icon(Icons.error_outline_rounded,
-            size: 15, color: AppTheme.danger),
+        Icon(Icons.error_outline_rounded, size: 15, color: palette.danger),
         const SizedBox(width: 6),
         GestureDetector(
-          onTap: widget.onExpand,
+          onTap: widget.onOpenSettings,
           child: Text(
             'Re-ingest',
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.danger,
+              color: palette.danger,
             ),
           ),
         ),
@@ -396,17 +400,16 @@ class _PropertyCardState extends State<_PropertyCard> {
 
     if (isConflict) {
       return Row(children: [
-        const Icon(Icons.warning_amber_rounded,
-            size: 15, color: AppTheme.warning),
+        Icon(Icons.warning_amber_rounded, size: 15, color: palette.warning),
         const SizedBox(width: 6),
         GestureDetector(
-          onTap: widget.onExpand,
+          onTap: widget.onOpenSettings,
           child: Text(
             'Resolve conflicts',
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.warning,
+              color: palette.warning,
             ),
           ),
         ),
@@ -416,20 +419,18 @@ class _PropertyCardState extends State<_PropertyCard> {
     if (isReady) {
       return _ReadyActions(
         onGuestLink: widget.onGuestLink,
-        onHostChat: widget.onHostChat,
-        onExpand: widget.onExpand,
+        onOpenSettings: widget.onOpenSettings,
         onArchivedChats: widget.onArchivedChats,
         onCalendar: widget.onCalendar,
       );
     }
 
-    // Ingested / unknown
     return Align(
       alignment: Alignment.centerRight,
       child: _CardAction(
         icon: Icons.open_in_new_rounded,
         label: 'Details',
-        onTap: widget.onExpand,
+        onTap: widget.onOpenSettings,
       ),
     );
   }
@@ -438,15 +439,13 @@ class _PropertyCardState extends State<_PropertyCard> {
 // ── Ready-state action row ────────────────────────────────────────────────
 class _ReadyActions extends StatelessWidget {
   final VoidCallback onGuestLink;
-  final VoidCallback onHostChat;
-  final VoidCallback onExpand;
+  final VoidCallback onOpenSettings;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
 
   const _ReadyActions({
     required this.onGuestLink,
-    required this.onHostChat,
-    required this.onExpand,
+    required this.onOpenSettings,
     required this.onArchivedChats,
     required this.onCalendar,
   });
@@ -463,12 +462,11 @@ class _ReadyActions extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         _CardAction(
-          icon: Icons.chat_bubble_outline_rounded,
-          label: 'Chats',
-          onTap: onHostChat,
+          icon: Icons.settings_rounded,
+          label: 'Settings',
+          onTap: onOpenSettings,
         ),
         const Spacer(),
-        // Utility icons
         _TinyIconBtn(
           icon: Icons.calendar_month_outlined,
           tooltip: 'Reservations',
@@ -485,7 +483,6 @@ class _ReadyActions extends StatelessWidget {
   }
 }
 
-// ── Individual action button ──────────────────────────────────────────────
 class _CardAction extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -501,7 +498,8 @@ class _CardAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = accent ? AppTheme.accent : AppTheme.primary;
+    final palette = context.palette;
+    final color = accent ? palette.accent : palette.primary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -531,7 +529,6 @@ class _CardAction extends StatelessWidget {
   }
 }
 
-// ── Tiny utility icon button ──────────────────────────────────────────────
 class _TinyIconBtn extends StatelessWidget {
   final IconData icon;
   final String tooltip;
@@ -549,7 +546,7 @@ class _TinyIconBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         child: Padding(
           padding: const EdgeInsets.all(5),
-          child: Icon(icon, size: 15, color: AppTheme.textMuted),
+          child: Icon(icon, size: 15, color: context.palette.textMuted),
         ),
       ),
     );
@@ -563,41 +560,18 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final (label, bg, fg) = switch (status) {
-      'Ingesting' || 'Training' => (
-          'Processing',
-          AppTheme.accentContainer,
-          AppTheme.accent,
-        ),
-      'Ingested' => (
-          'Ingested',
-          AppTheme.warningContainer,
-          AppTheme.warning,
-        ),
-      'Merged' || 'Trained' || 'Resolved' => (
-          'Ready',
-          AppTheme.successContainer,
-          AppTheme.success,
-        ),
-      'Active' => (
-          'Active',
-          AppTheme.successContainer,
-          AppTheme.success,
-        ),
-      'Conflict_Pending' => (
-          'Conflicts',
-          AppTheme.warningContainer,
-          AppTheme.warning,
-        ),
-      String s when s.contains('Error') => (
-          'Error',
-          AppTheme.dangerContainer,
-          AppTheme.danger,
-        ),
+      'Ingesting' || 'Training' => ('Processing', p.accentContainer, p.accent),
+      'Ingested' => ('Ingested', p.warningContainer, p.warning),
+      'Merged' || 'Trained' || 'Resolved' => ('Ready', p.successContainer, p.success),
+      'Active' => ('Active', p.successContainer, p.success),
+      'Conflict_Pending' => ('Conflicts', p.warningContainer, p.warning),
+      String s when s.contains('Error') => ('Error', p.dangerContainer, p.danger),
       _ => (
           status.isNotEmpty ? status : 'Unknown',
-          AppTheme.surfaceAlt,
-          AppTheme.textSecondary,
+          p.surfaceAlt,
+          p.textSecondary,
         ),
     };
 
@@ -675,7 +649,7 @@ class _ChatBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppTheme.success,
+        color: context.palette.success,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -697,7 +671,7 @@ class _ChatBadge extends StatelessWidget {
   }
 }
 
-// ── Hero image with sky-gradient placeholder ──────────────────────────────
+// ── Hero image with gradient placeholder ──────────────────────────────────
 class _HeroImage extends StatefulWidget {
   final String propertyId;
   final String status;
@@ -730,8 +704,9 @@ class _HeroImageState extends State<_HeroImage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     if (!_loaded) {
-      return const ColoredBox(color: AppTheme.primaryContainer);
+      return ColoredBox(color: palette.primaryContainer);
     }
     if (_url != null) {
       return Image.network(
@@ -739,21 +714,21 @@ class _HeroImageState extends State<_HeroImage> {
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
-        errorBuilder: (_, __, ___) => _placeholder(),
+        errorBuilder: (_, __, ___) => _placeholder(palette),
       );
     }
-    return _placeholder();
+    return _placeholder(palette);
   }
 
-  Widget _placeholder() {
+  Widget _placeholder(AppPalette palette) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xFF6366F1), // Electric Indigo
-            Color(0xFF0D0D12), // Void Slate
+            palette.primary,
+            palette.background,
           ],
         ),
       ),
@@ -768,94 +743,56 @@ class _HeroImageState extends State<_HeroImage> {
   }
 }
 
-// ── Conversation preview list ─────────────────────────────────────────────
-class _ConversationPreviewList extends StatelessWidget {
+// ── Pill preview list (replaces _ConversationPreviewList) ─────────────────
+class _PillPreviewList extends StatelessWidget {
   final List<Map<String, dynamic>> previews;
-  const _ConversationPreviewList({required this.previews});
+  final void Function(String bookingId) onOpenChat;
+  final VoidCallback onOpenAll;
+  const _PillPreviewList({
+    required this.previews,
+    required this.onOpenChat,
+    required this.onOpenAll,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final shown = previews.take(5).toList();
-    final overflow = previews.length - shown.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final c in shown) _ConvPreviewRow(conv: c),
-        if (overflow > 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Text(
-              '+$overflow more',
-              style: GoogleFonts.inter(
-                  fontSize: 10, color: AppTheme.textMuted),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _ConvPreviewRow extends StatelessWidget {
-  final Map<String, dynamic> conv;
-  const _ConvPreviewRow({required this.conv});
-
-  Color _dotColor() {
-    final reason = conv['escalation_reason'] as String?;
-    if (reason != null && reason.startsWith('emergency_')) {
-      return AppTheme.danger;
-    }
-    if (conv['requires_attention'] == true) return AppTheme.warning;
-    return AppTheme.success;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final guestName = conv['guestName'] as String? ?? 'Guest';
-    final isIntervene = conv['mode'] == 'intervene';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+    return LayoutBuilder(builder: (ctx, constraints) {
+      const perPill = 32.0;
+      final available = constraints.maxHeight;
+      final int maxFit = (available / perPill).floor().clamp(2, 5);
+      final shown = previews.take(maxFit).toList();
+      final overflow = previews.length - shown.length;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _dotColor(),
+          for (final c in shown)
+            ConversationPill(
+              conv: c,
+              compact: true,
+              onTap: () => onOpenChat(c['booking_id'] as String),
             ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              guestName,
-              style: GoogleFonts.inter(
-                  fontSize: 11, color: AppTheme.textSecondary),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (isIntervene) ...[
-            const SizedBox(width: 4),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.15),
+          if (overflow > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: InkWell(
+                onTap: onOpenAll,
                 borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'Live',
-                style: GoogleFonts.inter(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.primary,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Text(
+                    '+$overflow more active',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: ctx.palette.textSecondary,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ],
         ],
-      ),
-    );
+      );
+    });
   }
 }

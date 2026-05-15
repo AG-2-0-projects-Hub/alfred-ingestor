@@ -3,9 +3,37 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-05-12 — ag-switch extended to write Claude Code settings.json (resolves the 2026-04-15 gap)
+
+**Context:** Claude Code in the AG IDE had no access to the MCPs Gemini was using. `~/.claude/settings.json` was empty, so no MCP tools loaded into Claude Code sessions. The 2026-04-15 lesson flagged this as a permanent split between the two configs.
+
+**Discovery:**
+1. **Two separate config endpoints, one source of truth is achievable.** Gemini reads `/mnt/c/Users/San_8/.gemini/antigravity/mcp_config.json`. Claude Code reads `/mnt/c/Users/San_8/.claude/settings.json` (Windows side, not WSL home). The two are independent. But ag-switch can write to both in one pass, using `global.json` + `[project].json` as the single source.
+2. **Format translation is required, not a copy.** Claude Code does not understand Gemini's `disabled` / `disabledTools` fields. The translation is:
+   - `disabled: true` MCP → omit from `mcpServers` entirely
+   - `disabledTools: [tool_a, tool_b]` → add to `permissions.deny` as `mcp__<server>__<tool>` (hyphens in server name → underscores)
+3. **Path trap (three layers — don't skip any).**
+   - Layer 1: First assumption was `C:\Users\San_8\.claude\settings.json` = `/mnt/c/Users/San_8/.claude/settings.json`. WRONG for VS Code WSL Remote — the extension reads the WSL home, not the Windows mount.
+   - Layer 2: Wrote `mcpServers` to `~/.claude/settings.json` (WSL home). `claude mcp list` still returned empty. `settings.json` is for Claude Code *settings* (permissions, model prefs) — it is NOT the MCP registry.
+   - Layer 3 (correct): The MCP registry is `~/.claude.json` (a flat file in WSL home, distinct from the `~/.claude/` directory). `claude mcp add-json <name> <json> --scope user` writes here. `claude mcp list` reads here. ag-switch STEP 3 must write `mcpServers` to `~/.claude.json` and `permissions.deny` to `~/.claude/settings.json` — two separate files, two separate roles.
+   - Bonus: `claude mcp list` run from inside WSL shows "Failed to connect" for all `wsl`-routed servers (WSL-in-WSL). This is a false negative — the VS Code extension starts these servers from the Windows host where `wsl` works fine. Do not treat this as an error indicator.
+4. **Refresh model differs.** Gemini supports mid-session "Hit Refresh" in the MCP panel. Claude Code does NOT — MCPs only load at session boot. After ag-switch, you must start a new Claude Code session for the config to take effect.
+5. **Non-managed fields must survive.** `~/.claude/settings.json` already holds user preferences (`effortLevel`, `model`, `permissions.allow`, hooks, etc.). The Claude-sync step must merge only `mcpServers` and `permissions.deny`, leaving everything else verbatim.
+
+**Impact:**
+- `_scripts/ag-switch.sh` gained a STEP 3 that emits a Claude-flavored config to `/mnt/c/Users/San_8/.claude/settings.json` after every switch. Also added a `--quiet` flag (uses `exec >/dev/null` after the `--list` check) for use from hooks or scripts.
+- `_scripts/new-project.sh` now calls `ag-switch --quiet [project]` at the end of Step 5 so new projects bootstrap a working Claude Code MCP config automatically, and the "Next steps" block now mentions starting a new Claude Code session.
+- The 2026-04-15 lesson below is **resolved by this change**. Adding a Supabase MCP for a project no longer requires a manual edit to `~/.claude/settings.json` — running ag-switch propagates it to both sides.
+- One pre-existing quirk surfaced and was **not** fixed in scope: ag-switch's STEP 2 controls per-tool allowlists but not per-MCP inclusion. Any MCP marked `disabled: false` in `global.json` leaks into every project regardless of whether it's listed in `[project].json`. Example: `supabase-scraper` showed up in the-ingestor's active MCPs even though it isn't in `the-ingestor.json`. Fix would be a one-line change in STEP 2 ("disable any server not in profile"). Flagged for a future task.
+
+**Global Candidate:** Yes — this is the canonical pattern for any AG-managed machine. Promote the workflow, the path trap, and the format-translation rules to `_global_lessons/lessons.md`.
+
+---
+
 ## Lesson: mcp-tool-manager skill does not affect Claude Code's MCP config
 **Date:** 2026-04-15
 **Component:** MCP / Tool Management
+**Status:** RESOLVED 2026-05-12 — see the 2026-05-12 ag-switch extension lesson above
 **Global Candidate: Yes**
 
 ### Finding

@@ -1,10 +1,17 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import '../theme/app_theme.dart';
+import '../utils/setup_status.dart';
 import '../widgets/drop_zone.dart';
+import '../widgets/file_thumbnail.dart';
+import '../widgets/setup_status_banner.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
@@ -47,6 +54,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         text: widget.property['name'] as String? ?? '');
     final raw = widget.property['file_fingerprints'] as Map<String, dynamic>? ?? {};
     _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
+    _propertyStatus = widget.property['status'] as String?;
   }
 
   @override
@@ -94,7 +102,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
               child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: context.palette.danger),
             child: const Text('Remove'),
           ),
         ],
@@ -257,7 +265,53 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+        SnackBar(content: Text(msg), backgroundColor: context.palette.danger));
+  }
+
+  void _handleNextStepAction(SetupStep step) {
+    // Dispatch per-status action: for most steps, the screen itself is the action
+    // (user uploads files, clicks RE-INGEST, or resolves conflicts here)
+    final status = _propertyStatus ?? '';
+    if (status == 'Scraped') {
+      // Scroll to dropzone — no-op; user can see it
+    } else if (status == 'Ingested') {
+      _runMerge();
+    }
+    // Conflict_Pending: conflicts panel is visible below; Merged: no train endpoint yet
+  }
+
+  MarkdownStyleSheet _markdownStyleSheet(BuildContext context) {
+    final palette = context.palette;
+    final cs = Theme.of(context).colorScheme;
+    return MarkdownStyleSheet(
+      p: TextStyle(color: palette.textPrimary, fontSize: 13, height: 1.6),
+      strong: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
+      em: TextStyle(color: palette.textPrimary, fontStyle: FontStyle.italic),
+      h1: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: palette.textPrimary),
+      h2: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600, color: palette.textPrimary),
+      h3: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: palette.textPrimary),
+      code: TextStyle(
+        color: cs.secondary,
+        fontFamily: 'monospace',
+        fontSize: 12,
+        backgroundColor: palette.surfaceAlt,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: palette.border),
+      ),
+      codeblockPadding: const EdgeInsets.all(12),
+      blockquote: TextStyle(color: palette.textSecondary, fontStyle: FontStyle.italic),
+      blockquoteDecoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(6),
+        border: Border(left: BorderSide(color: cs.primary, width: 3)),
+      ),
+      blockquotePadding: const EdgeInsets.all(12),
+      listBullet: TextStyle(color: palette.textPrimary),
+      a: TextStyle(color: cs.primary, decoration: TextDecoration.underline),
+    );
   }
 
   @override
@@ -279,6 +333,19 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Guided next-step banner
+                Builder(builder: (ctx) {
+                  final step = nextStepFor(_propertyStatus ?? '');
+                  if (step == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: SetupStatusBanner(
+                      step: step,
+                      onAction: () => _handleNextStepAction(step),
+                    ),
+                  );
+                }),
+
                 // Property name (editable)
                 TextField(
                   controller: _nicknameController,
@@ -288,13 +355,38 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Airbnb URL (read-only info)
+                // Airbnb URL (clickable)
                 if ((widget.property['airbnb_url'] as String?)?.isNotEmpty ?? false)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      'Airbnb: ${widget.property['airbnb_url']}',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: () => launchUrl(
+                        Uri.parse(widget.property['airbnb_url'] as String),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              widget.property['airbnb_url'] as String,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.primary,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.open_in_new_rounded,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
 
@@ -310,12 +402,12 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text('No files ingested yet.',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                        style: TextStyle(color: context.palette.textSecondary, fontSize: 13)),
                   )
                 else
                   Container(
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade200),
+                      border: Border.all(color: context.palette.border),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
@@ -324,8 +416,11 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                         ..._existingFiles.entries.map((e) {
                           return ListTile(
                             dense: true,
-                            leading: const Icon(Icons.insert_drive_file_outlined,
-                                size: 18),
+                            leading: FileThumbnail(
+                              propertyId: _propertyId,
+                              fileName: e.key,
+                              size: 32,
+                            ),
                             title: Text(e.key,
                                 style: const TextStyle(fontSize: 13)),
                             trailing: _isDeletingFile
@@ -336,7 +431,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                                         CircularProgressIndicator(strokeWidth: 2))
                                 : IconButton(
                                     icon: Icon(Icons.delete_outline,
-                                        size: 18, color: Colors.red.shade400),
+                                        size: 18, color: context.palette.danger),
                                     tooltip: 'Remove file',
                                     onPressed: () => _confirmDeleteFile(e.key),
                                   ),
@@ -347,28 +442,28 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                           return ListTile(
                             dense: true,
                             leading: Icon(Icons.remove_circle_outline,
-                                size: 18, color: Colors.red.shade300),
+                                size: 18, color: context.palette.danger),
                             title: Text(
                               filename,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.grey.shade400,
+                                color: context.palette.textMuted,
                                 decoration: TextDecoration.lineThrough,
-                                decorationColor: Colors.grey.shade400,
+                                decorationColor: context.palette.textMuted,
                               ),
                             ),
                             trailing: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                border: Border.all(color: Colors.red.shade200),
+                                color: context.palette.dangerContainer,
+                                border: Border.all(color: context.palette.danger.withValues(alpha: 0.4)),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text('Removed',
                                   style: TextStyle(
                                       fontSize: 10,
-                                      color: Colors.red.shade600,
+                                      color: context.palette.danger,
                                       fontWeight: FontWeight.w500)),
                             ),
                           );
@@ -383,22 +478,22 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
-                      border: Border.all(color: Colors.amber.shade300),
+                      color: context.palette.warningContainer,
+                      border: Border.all(color: context.palette.warning.withValues(alpha: 0.5)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(Icons.warning_amber_rounded,
-                            color: Colors.amber.shade700, size: 18),
+                            color: context.palette.warning, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'The knowledge database still contains data extracted from removed files. '
                             'Add new files below and re-ingest to keep the knowledge base up to date.',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.amber.shade900),
+                                fontSize: 12, color: context.palette.warning),
                           ),
                         ),
                       ],
@@ -475,13 +570,14 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      border: Border.all(color: Colors.grey.shade200),
+                      color: context.palette.surfaceAlt,
+                      border: Border.all(color: context.palette.border),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: MarkdownBody(
                       data: _ingestedMarkdown!,
                       selectable: true,
+                      styleSheet: _markdownStyleSheet(context),
                     ),
                   ),
                 ],
@@ -495,7 +591,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       onPressed: _isMerging ? null : _runMerge,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        backgroundColor: Colors.indigo.shade600,
+                        backgroundColor: context.palette.primary,
                         textStyle: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -520,11 +616,31 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   if (_postMergeStatuses.contains(_propertyStatus)) ...[
                     const SizedBox(height: 24),
                     if (_masterJson != null) ...[
-                      Text('Master JSON',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      Row(
+                        children: [
+                          Text('Master JSON',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.copy_rounded, size: 16),
+                            tooltip: 'Copy JSON',
+                            onPressed: () {
+                              final jsonStr = const JsonEncoder.withIndent('  ')
+                                  .convert(_masterJson);
+                              Clipboard.setData(ClipboardData(text: jsonStr));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('JSON copied to clipboard'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 8),
                       Container(
                         constraints: const BoxConstraints(maxHeight: 400),

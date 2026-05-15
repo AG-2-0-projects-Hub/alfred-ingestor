@@ -143,11 +143,11 @@ class _ChatScreenState extends State<ChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(e.userMessage),
       duration: const Duration(seconds: 8),
-      backgroundColor: AppTheme.textPrimary,
+      backgroundColor: context.palette.textPrimary,
       action: e.retry
           ? SnackBarAction(
               label: 'Retry',
-              textColor: AppTheme.accent,
+              textColor: context.palette.accent,
               onPressed: () => _sendMessage(overrideText: retryWith),
             )
           : null,
@@ -282,7 +282,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
           child: AppBar(
-            backgroundColor: AppTheme.glassTint,
+            backgroundColor: context.palette.glassTint,
             elevation: 0,
             surfaceTintColor: Colors.transparent,
             title: Row(
@@ -294,7 +294,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
-                      colors: [AppTheme.primary, AppTheme.accent],
+                      colors: [context.palette.primary, context.palette.accent],
                     ),
                   ),
                   child: const Icon(Icons.support_agent,
@@ -309,12 +309,12 @@ class _ChatScreenState extends State<ChatScreen> {
                         style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w700,
                             fontSize: 18,
-                            color: AppTheme.primary)),
+                            color: context.palette.primary)),
                     if (_propertyName != null)
                       Text(
                         _propertyName!,
                         style: GoogleFonts.inter(
-                            fontSize: 11, color: AppTheme.textMuted),
+                            fontSize: 11, color: context.palette.textMuted),
                       ),
                   ],
                 ),
@@ -334,7 +334,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'Send a message to start the conversation.',
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(
-              color: AppTheme.textSecondary, fontSize: 14, height: 1.5),
+              color: context.palette.textSecondary, fontSize: 14, height: 1.5),
         ),
       ),
     );
@@ -359,18 +359,18 @@ class _ChatScreenState extends State<ChatScreen> {
               return Container(
                 width: 200,
                 height: 150,
-                color: AppTheme.surfaceAlt,
+                color: context.palette.surfaceAlt,
                 child: const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primary),
+                  child: CircularProgressIndicator(color: context.palette.primary),
                 ),
               );
             },
             errorBuilder: (_, __, ___) => Container(
               width: 200,
               height: 80,
-              color: AppTheme.surfaceAlt,
+              color: context.palette.surfaceAlt,
               child: const Center(
-                child: Icon(Icons.broken_image_outlined, color: AppTheme.textMuted),
+                child: Icon(Icons.broken_image_outlined, color: context.palette.textMuted),
               ),
             ),
           ),
@@ -388,7 +388,7 @@ class _ChatScreenState extends State<ChatScreen> {
             msg['content'] as String,
             style: GoogleFonts.inter(
               fontSize: 11,
-              color: AppTheme.textMuted,
+              color: context.palette.textMuted,
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -406,8 +406,8 @@ class _ChatScreenState extends State<ChatScreen> {
         isGuest: isGuest,
       );
     }
-    final bg = isGuest ? AppTheme.primary : AppTheme.surface;
-    final fg = isGuest ? Colors.white : AppTheme.textPrimary;
+    final bg = isGuest ? context.palette.primary : context.palette.surface;
+    final fg = isGuest ? Colors.white : context.palette.textPrimary;
     return Align(
       alignment: isGuest ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -422,8 +422,8 @@ class _ChatScreenState extends State<ChatScreen> {
             bottomLeft: Radius.circular(isGuest ? 16 : 4),
             bottomRight: Radius.circular(isGuest ? 4 : 16),
           ),
-          border: isGuest ? null : Border.all(color: AppTheme.border),
-          boxShadow: AppTheme.cardShadow,
+          border: isGuest ? null : Border.all(color: context.palette.border),
+          boxShadow: context.palette.cardShadow,
         ),
         child: Text(
           msg['content'] as String,
@@ -440,10 +440,10 @@ class _ChatScreenState extends State<ChatScreen> {
         margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
-          border: Border.all(color: AppTheme.border),
+          color: context.palette.surface,
+          border: Border.all(color: context.palette.border),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: AppTheme.cardShadow,
+          boxShadow: context.palette.cardShadow,
         ),
         child: const _TypingDots(),
       ),
@@ -458,7 +458,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: GlassPanel(
           radius: 28,
           blurSigma: 20,
-          tint: AppTheme.glassTintStrong,
+          tint: context.palette.glassTintStrong,
           padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
           child: Row(
             children: [
@@ -476,7 +476,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       vertical: 12,
                     ),
                     hintStyle:
-                        GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 14),
+                        GoogleFonts.inter(color: context.palette.textMuted, fontSize: 14),
                   ),
                   style: GoogleFonts.inter(fontSize: 14),
                   onSubmitted: (_) => _sendMessage(),
@@ -486,7 +486,7 @@ class _ChatScreenState extends State<ChatScreen> {
               IconButton(
                 onPressed: _isWaiting ? null : _pickAndSendImage,
                 icon: const Icon(Icons.image_outlined, size: 20),
-                color: AppTheme.textSecondary,
+                color: context.palette.textSecondary,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
@@ -500,7 +500,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       : Icons.mic_none_rounded,
                   size: 20,
                 ),
-                color: _isRecording ? AppTheme.danger : AppTheme.textSecondary,
+                color: _isRecording ? context.palette.danger : context.palette.textSecondary,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
@@ -509,9 +509,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 onPressed: _isWaiting ? null : _sendMessage,
                 icon: const Icon(Icons.send, size: 20),
                 style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
+                  backgroundColor: context.palette.primary,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: AppTheme.border,
+                  disabledBackgroundColor: context.palette.border,
                   padding: const EdgeInsets.all(12),
                 ),
               ),
@@ -570,10 +570,10 @@ class _AudioBubbleState extends State<_AudioBubble> {
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: widget.isGuest ? AppTheme.primary : AppTheme.surface,
+          color: widget.isGuest ? context.palette.primary : context.palette.surface,
           borderRadius: BorderRadius.circular(16),
-          border: widget.isGuest ? null : Border.all(color: AppTheme.border),
-          boxShadow: AppTheme.cardShadow,
+          border: widget.isGuest ? null : Border.all(color: context.palette.border),
+          boxShadow: context.palette.cardShadow,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -584,7 +584,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 22,
               ),
-              color: widget.isGuest ? Colors.white : AppTheme.primary,
+              color: widget.isGuest ? Colors.white : context.palette.primary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
@@ -593,7 +593,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
               'Voice message',
               style: GoogleFonts.inter(
                 fontSize: 13,
-                color: widget.isGuest ? Colors.white : AppTheme.textPrimary,
+                color: widget.isGuest ? Colors.white : context.palette.textPrimary,
               ),
             ),
           ],
@@ -650,7 +650,7 @@ class _TypingDotsState extends State<_TypingDots>
                   height: 8,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: AppTheme.textSecondary
+                    color: context.palette.textSecondary
                         .withValues(alpha: opacity),
                   ),
                 ),

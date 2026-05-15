@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-11
+**Last Session:** 2026-05-15
 
 ---
 
@@ -36,17 +36,18 @@
 
 ---
 
-## Current App State (as of 2026-05-12)
+## Current App State (as of 2026-05-15)
 
 ### What is fully working
 - Auth (login/signup, email confirmations disabled)
-- Dashboard (property grid, responsive, glassmorphism design)
+- Dashboard (property grid, responsive, glassmorphism design, real-time via Supabase stream)
 - Property ingestion (SSE stream, file upload to Supabase, Gemini processing)
 - Guest link generation (slug-based booking ID)
 - Host panel (per-property conversation list)
 - Property detail drawer (4 tabs: Overview / Files / Knowledge / Resolve)
 - Edit property (per-file delete + re-ingest)
 - Archived chats dialog
+- **Phase 4 (2026-05-15):** Dual-theme toggle (Daylight/Midnight), `ThemeController` + `shared_preferences` persistence, `AppPalette` ThemeExtension, `InactivityWrapper` (1h auto-logout), `SetupStatusBanner` on drawer + edit property, `ConversationPill` replacing `_ConvPreviewRow`, `PropertyExpandedView` modal, `FileThumbnail` widget, `relativeTime` util, optimistic send in ChatLive, markdown styleSheet contrast fix, JSON copy button, clickable Airbnb URLs, real-time dashboard subscriptions, theme toggle in AppBar
 
 ### Chat status (guest-facing `/chat?booking=...`)
 - **Working as of 2026-05-11.** Fix: `if result and result.data:` guard in `find_or_create_conversation` (`supabase_client.py`). Committed and deployed.
@@ -85,8 +86,16 @@
 | `widgets/drop_zone.dart` | Dashed-border drag-drop zone (custom CustomPainter) |
 | `widgets/generate_guest_link_dialog.dart` | 2-step dialog: name → copy URLs |
 | `widgets/archived_chats_dialog.dart` | Past guests list per property |
+| `widgets/conversation_pill.dart` | Color-coded clickable pill per conversation with pulse dot + Live badge |
+| `widgets/property_expanded_view.dart` | Glassmorphic dialog showing active + archived conversations |
+| `widgets/setup_status_banner.dart` | Guided next-step banner mapped from property status |
+| `widgets/file_thumbnail.dart` | Async signed URL image or themed file-type icon |
+| `widgets/inactivity_wrapper.dart` | 1-hour idle → auto-logout via Listener + Timer |
 | `services/api_client.dart` | Typed HTTP wrapper: 60s timeout, 1 retry, ApiException hierarchy |
-| `theme/app_theme.dart` | Design tokens (glass, aurora, typography, shadows) |
+| `theme/app_theme.dart` | AppPalette ThemeExtension, daylightTheme + midnightTheme, PaletteX context extension |
+| `theme/theme_controller.dart` | ChangeNotifier for Daylight/Midnight toggle, persisted via shared_preferences |
+| `utils/setup_status.dart` | nextStepFor(status) → SetupStep (headline, subtext, icon, accent) |
+| `utils/relative_time.dart` | relativeTime(DateTime) → "Just now / 5m ago / Yesterday / Mar 12" |
 
 ---
 
@@ -111,14 +120,16 @@
 
 ---
 
-## Design System (AppTheme)
-- **Primary:** `#0F766E` teal-700
-- **Accent:** `#0EA5E9` sky-500
-- **Background:** `#F8FAFC` slate-50 (behind aurora)
-- **Glass:** `glassTint` = white@60%, `glassTintStrong` = white@80%, blur sigma 18–28
-- **Aurora blobs:** teal / sky / lavender / peach at 4 corners, blur sigma 60
+## Design System (AppTheme / Phase 4)
+Two themes via `AppPalette extends ThemeExtension<AppPalette>`:
+- **Daylight:** Primary `#0F766E` teal-700, Accent `#0EA5E9` sky-500, Background `#F8FAFC` slate-50
+- **Midnight:** Primary `#6366F1` indigo-500, Accent `#22D3EE` cyan-400, Background `#0D0D12` void-slate
+- **Glass:** `glassTint`, `glassTintStrong`, `glassTintHeavy` — alpha varies per theme; blur sigma 18–28
+- **Aurora blobs:** teal / sky / lavender / peach at 4 corners, blur sigma 60 — inherited from palette
 - **Typography:** Poppins (headings) + Inter (body)
 - **Animations:** 150–300ms ease-out; `.withValues(alpha:)` throughout (Flutter 3.27+)
+- **Access pattern:** `context.palette.X` everywhere (PaletteX BuildContext extension)
+- **Toggle:** `themeController.toggle()` in AppBar — persisted via `shared_preferences`
 
 ---
 
@@ -133,7 +144,41 @@ Note: `'auto'` is NOT a valid value — constraint will reject it.
 
 ---
 
-## Phase 3 Plan (next session)
+## Phase 4 Plan (COMPLETED 2026-05-15)
+
+Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-polish-guided-setup.md`
+
+Covers (no backend changes, no SQL migrations):
+1. **Theme toggle** — Daylight (old teal/sky palette) / Midnight (current indigo/void); persisted via `shared_preferences`; default = Daylight; AppPalette ThemeExtension refactor
+2. **Inactivity auto-logout** — 1 hour idle → signOut + redirect to AuthScreen (excludes guest chat)
+3. **Guided setup flow** — `setup_status.dart` helper maps status → next step (Scraped → Add Files, Ingested → Merge, Conflict_Pending → Resolve, Merged → Train Alfred); `SetupStatusBanner` shown on property card, drawer Overview, and Edit Property top
+4. **"Train Alfred" vs "Update Knowledge"** button label — status-based + first-time success dialog with celebratory CTA
+5. **Conversation pills (replacing simple rows)** — color-coded clickable pills opening ChatLiveScreen; Live sub-badge for intervene; pulsing unread glow for `requires_attention`; LayoutBuilder responsive density; "+N more active" → opens expanded view
+6. **Card tap = expanded view** — `PropertyExpandedView` modal with Active + Archived sections + New Guest Link CTA; replaces drawer-on-tap behavior
+7. **Settings icon** replaces "Chats" button in card action row → opens `PropertyDetailDrawer`
+8. **Real-time dashboard** — Supabase `.stream()` on properties + conversations + guests, debounced re-process, immediate UI updates without refresh
+9. **File thumbnails** — actual image previews for jpg/png/webp/heic, themed icons for PDF/DOCX/audio/etc.
+10. **Clickable Airbnb URL** — `url_launcher` in drawer + edit property
+11. **Markdown / Master JSON / Resolve Conflicts contrast fix** — explicit `MarkdownStyleSheet` with theme-aware colors
+12. **Optimistic message send** in ChatLiveScreen + relative-time timestamps everywhere
+13. **Empty state** for zero properties (welcome hero)
+14. **Confirm dialogs** for destructive actions (file delete)
+
+### Phase 4.5 (after Phase 4 ships)
+Browser push notifications for escalations via Web Notification API. Separate plan file.
+
+### Future Backend Work (deferred — needs SQL migrations)
+- `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
+- `conversations.checked_out_at` or `is_archived` flag — true "guest checked out" detection for Archived section in expanded view
+- `ai_status` + active chat count filtering by recency (currently counts all guests)
+- Reservations calendar — real data + UI
+- Google Cloud Run migration — eliminates Render cold-start
+- `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY` env vars on Render scraper
+- End-to-end REQ-08 test (CSV upload)
+
+---
+
+## Phase 3 Plan (completed)
 
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase3-dark-redesign.md`
 

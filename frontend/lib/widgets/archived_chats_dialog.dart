@@ -55,7 +55,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.palette.surface,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520, maxHeight: 600),
         child: Column(
@@ -69,11 +69,11 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryContainer,
+                      color: context.palette.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.history_rounded,
-                        color: AppTheme.primary, size: 18),
+                        color: context.palette.primary, size: 18),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -85,14 +85,14 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
-                            color: AppTheme.textPrimary,
+                            color: context.palette.textPrimary,
                           ),
                         ),
                         Text(
                           widget.propertyName,
                           style: GoogleFonts.inter(
                             fontSize: 12,
-                            color: AppTheme.textSecondary,
+                            color: context.palette.textSecondary,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -101,7 +101,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded,
-                        size: 20, color: AppTheme.textMuted),
+                        size: 20, color: context.palette.textMuted),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -114,7 +114,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                   ? const Padding(
                       padding: EdgeInsets.all(40),
                       child: CircularProgressIndicator(
-                          color: AppTheme.primary),
+                          color: context.palette.primary),
                     )
                   : _guests.isEmpty
                       ? Padding(
@@ -126,13 +126,13 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                 width: 64,
                                 height: 64,
                                 decoration: BoxDecoration(
-                                  color: AppTheme.surfaceAlt,
+                                  color: context.palette.surfaceAlt,
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(
                                     Icons.chat_bubble_outline_rounded,
                                     size: 28,
-                                    color: AppTheme.textMuted),
+                                    color: context.palette.textMuted),
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -140,7 +140,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                 style: GoogleFonts.poppins(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
-                                  color: AppTheme.textPrimary,
+                                  color: context.palette.textPrimary,
                                 ),
                               ),
                               const SizedBox(height: 6),
@@ -148,7 +148,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                 'Guest conversations will appear here.',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary),
+                                    color: context.palette.textSecondary),
                               ),
                             ],
                           ),
@@ -170,13 +170,13 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                   horizontal: 20, vertical: 6),
                               leading: CircleAvatar(
                                 radius: 20,
-                                backgroundColor: AppTheme.primaryContainer,
+                                backgroundColor: context.palette.primaryContainer,
                                 child: Text(
                                   name.isNotEmpty
                                       ? name[0].toUpperCase()
                                       : '?',
                                   style: GoogleFonts.poppins(
-                                    color: AppTheme.primary,
+                                    color: context.palette.primary,
                                     fontWeight: FontWeight.w700,
                                     fontSize: 14,
                                   ),
@@ -187,18 +187,18 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                 style: GoogleFonts.inter(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
-                                    color: AppTheme.textPrimary),
+                                    color: context.palette.textPrimary),
                               ),
                               subtitle: Text(
                                 '$bookingId · $date',
                                 style: GoogleFonts.inter(
                                     fontSize: 11,
-                                    color: AppTheme.textSecondary),
+                                    color: context.palette.textSecondary),
                               ),
                               trailing: const Icon(
                                 Icons.arrow_forward_ios_rounded,
                                 size: 13,
-                                color: AppTheme.textMuted,
+                                color: context.palette.textMuted,
                               ),
                               onTap: () => _openChat(g),
                             );

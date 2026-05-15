@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -267,7 +268,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: AppTheme.danger,
+      backgroundColor: context.palette.danger,
       duration: const Duration(seconds: 8),
     ));
   }
@@ -287,7 +288,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 20,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: AppTheme.glassTintHeavy,
+            tint: context.palette.glassTintHeavy,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -298,11 +299,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
-                      colors: [AppTheme.primary, AppTheme.accent],
+                      colors: [context.palette.primary, context.palette.accent],
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.primary.withValues(alpha: 0.35),
+                        color: context.palette.primary.withValues(alpha: 0.35),
                         blurRadius: 20,
                         offset: const Offset(0, 6),
                       ),
@@ -319,7 +320,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   style: GoogleFonts.poppins(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary),
+                      color: context.palette.textPrimary),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
@@ -328,7 +329,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   style: GoogleFonts.inter(
                       fontSize: 15,
                       height: 1.5,
-                      color: AppTheme.textPrimary),
+                      color: context.palette.textPrimary),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
@@ -336,7 +337,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
                   style: GoogleFonts.inter(
                       fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      color: context.palette.textSecondary,
                       height: 1.5),
                   textAlign: TextAlign.center,
                 ),
@@ -377,11 +378,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     };
     // Soft-fill using semantic container tokens (ui-ux-pro-max §6 color-semantic).
     final (bg, fg) = switch (status) {
-      'Ingested' => (AppTheme.warningContainer, AppTheme.warning),
-      'Merged' || 'Trained' => (AppTheme.successContainer, AppTheme.success),
-      'Conflict_Pending' => (AppTheme.warningContainer, AppTheme.warning),
-      'Fully_Trained' => (AppTheme.primaryContainer, AppTheme.onPrimaryContainer),
-      _ => (AppTheme.surfaceAlt, AppTheme.textSecondary),
+      'Ingested' => (context.palette.warningContainer, context.palette.warning),
+      'Merged' || 'Trained' => (context.palette.successContainer, context.palette.success),
+      'Conflict_Pending' => (context.palette.warningContainer, context.palette.warning),
+      'Fully_Trained' => (context.palette.primaryContainer, context.palette.onPrimaryContainer),
+      _ => (context.palette.surfaceAlt, context.palette.textSecondary),
     };
     return Row(
       children: [
@@ -389,7 +390,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
             style: GoogleFonts.inter(
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
-                color: AppTheme.textPrimary)),
+                color: context.palette.textPrimary)),
         const SizedBox(width: 10),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -413,11 +414,29 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Master JSON',
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w600)),
+        Row(
+          children: [
+            Text('Master JSON',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              tooltip: 'Copy JSON',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: prettyJson));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('JSON copied to clipboard'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         Container(
           constraints: const BoxConstraints(maxHeight: 400),
@@ -440,6 +459,40 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     );
   }
 
+  MarkdownStyleSheet _markdownStyleSheet(BuildContext context) {
+    final palette = context.palette;
+    final cs = Theme.of(context).colorScheme;
+    return MarkdownStyleSheet(
+      p: TextStyle(color: palette.textPrimary, fontSize: 13, height: 1.6),
+      strong: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
+      em: TextStyle(color: palette.textPrimary, fontStyle: FontStyle.italic),
+      h1: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: palette.textPrimary),
+      h2: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600, color: palette.textPrimary),
+      h3: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: palette.textPrimary),
+      code: TextStyle(
+        color: cs.secondary,
+        fontFamily: 'monospace',
+        fontSize: 12,
+        backgroundColor: palette.surfaceAlt,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: palette.border),
+      ),
+      codeblockPadding: const EdgeInsets.all(12),
+      blockquote: TextStyle(color: palette.textSecondary, fontStyle: FontStyle.italic),
+      blockquoteDecoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(6),
+        border: Border(left: BorderSide(color: cs.primary, width: 3)),
+      ),
+      blockquotePadding: const EdgeInsets.all(12),
+      listBullet: TextStyle(color: palette.textPrimary),
+      a: TextStyle(color: cs.primary, decoration: TextDecoration.underline),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final canIngest = _urlController.text.trim().isNotEmpty && !_isIngesting;
@@ -455,16 +508,16 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: AppBar(
-              backgroundColor: AppTheme.glassTint,
+              backgroundColor: context.palette.glassTint,
               elevation: 0,
               surfaceTintColor: Colors.transparent,
               title: Text('Add Property',
                   style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w700,
                       fontSize: 18,
-                      color: AppTheme.primary)),
+                      color: context.palette.primary)),
               leading: BackButton(
-                color: AppTheme.primary,
+                color: context.palette.primary,
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ),
@@ -482,7 +535,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               child: GlassPanel(
                 radius: 20,
                 blurSigma: AppTheme.glassBlurSigmaHeavy,
-                tint: AppTheme.glassTintStrong,
+                tint: context.palette.glassTintStrong,
                 padding: const EdgeInsets.fromLTRB(28, 28, 28, 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -601,24 +654,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      border: Border.all(color: Colors.grey.shade200),
+                      color: context.palette.surfaceAlt,
+                      border: Border.all(color: context.palette.border),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: MarkdownBody(
                       data: _ingestedMarkdown!,
                       selectable: true,
-                      styleSheet: MarkdownStyleSheet(
-                        h1: const TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold),
-                        h2: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                        h3: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600),
-                        p: const TextStyle(fontSize: 14, height: 1.6),
-                        listBullet:
-                            const TextStyle(fontSize: 14, height: 1.6),
-                      ),
+                      styleSheet: _markdownStyleSheet(context),
                     ),
                   ),
                 ],
@@ -635,7 +678,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       onPressed: _isMerging ? null : _runMerge,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        backgroundColor: AppTheme.primary,
+                        backgroundColor: context.palette.primary,
                         textStyle: GoogleFonts.poppins(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -668,9 +711,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       label: const Text('Back to Dashboard'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        foregroundColor: AppTheme.primary,
-                        side: const BorderSide(
-                            color: AppTheme.primaryContainer, width: 1.5),
+                        foregroundColor: context.palette.primary,
+                        side: BorderSide(
+                            color: context.palette.primaryContainer, width: 1.5),
                       ),
                     ),
                   ],

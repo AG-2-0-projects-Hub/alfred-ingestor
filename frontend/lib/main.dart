@@ -9,6 +9,8 @@ import 'screens/host_panel_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/chat_live_screen.dart';
 import 'theme/app_theme.dart';
+import 'theme/theme_controller.dart';
+import 'widgets/inactivity_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +21,8 @@ Future<void> main() async {
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
+
+  await themeController.load();
 
   runApp(const IngestorApp());
 }
@@ -36,9 +40,6 @@ class _IngestorAppState extends State<IngestorApp> {
   @override
   void initState() {
     super.initState();
-    // Re-render when auth state changes — this catches the async session
-    // restoration on page reload (Supabase reads localStorage and fires
-    // initialSession event after the first build would otherwise have run).
     _authSub = Supabase.instance.client.auth.onAuthStateChange
         .listen((_) { if (mounted) setState(() {}); });
   }
@@ -55,9 +56,9 @@ class _IngestorAppState extends State<IngestorApp> {
     final path = uri.path;
     final params = uri.queryParameters;
 
-    // Public chat routes — no auth required.
+    // Public chat routes — no auth required, no inactivity timer.
     if (path == '/chat' && params.containsKey('booking')) {
-      return _app(ChatScreen(bookingId: params['booking']!));
+      return _app(ChatScreen(bookingId: params['booking']!), wrapInactivity: false);
     }
     if (path == '/chat-live' && params.containsKey('booking')) {
       return _app(ChatLiveScreen(
@@ -66,33 +67,41 @@ class _IngestorAppState extends State<IngestorApp> {
       ));
     }
 
-    // Host panel deep-link.
     if (path == '/host-panel' && params.containsKey('property')) {
       final session = Supabase.instance.client.auth.currentSession;
-      if (session == null) return _app(const AuthScreen());
+      if (session == null) return _app(const AuthScreen(), wrapInactivity: false);
       return _app(HostPanelScreen(propertyId: params['property']!));
     }
 
-    // Default: auth guard → dashboard.
     final session = Supabase.instance.client.auth.currentSession;
-    return _app(session != null ? const DashboardScreen() : const AuthScreen());
+    if (session != null) {
+      return _app(const DashboardScreen());
+    }
+    return _app(const AuthScreen(), wrapInactivity: false);
   }
 
-  MaterialApp _app(Widget home) {
-    return MaterialApp(
-      title: 'Alfred',
-      theme: AppTheme.light,
-      home: _AuthWatcher(child: home),
-      routes: {
-        '/auth': (_) => const AuthScreen(),
-        '/dashboard': (_) => const DashboardScreen(),
-        '/add-property': (_) => const AddPropertyScreen(),
+  Widget _app(Widget home, {bool wrapInactivity = true}) {
+    return AnimatedBuilder(
+      animation: themeController,
+      builder: (context, _) {
+        final wrapped = wrapInactivity ? InactivityWrapper(child: home) : home;
+        return MaterialApp(
+          title: 'Alfred',
+          theme: AppTheme.daylightTheme,
+          darkTheme: AppTheme.midnightTheme,
+          themeMode: themeController.mode,
+          home: _AuthWatcher(child: wrapped),
+          routes: {
+            '/auth': (_) => const AuthScreen(),
+            '/dashboard': (_) => const DashboardScreen(),
+            '/add-property': (_) => const AddPropertyScreen(),
+          },
+        );
       },
     );
   }
 }
 
-/// Listens to auth state changes and redirects to AuthScreen on logout.
 class _AuthWatcher extends StatefulWidget {
   final Widget child;
   const _AuthWatcher({required this.child});
