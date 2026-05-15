@@ -76,5 +76,6 @@ google-chrome-stable_current_amd64.deb
 .windsurf/
 .zencoder/
 Context/
+_Context/
 Test_files/
 test_api.py

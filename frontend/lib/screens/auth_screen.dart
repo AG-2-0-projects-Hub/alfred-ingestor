@@ -159,9 +159,9 @@ class _AuthScreenState extends State<AuthScreen> {
                 const Spacer(),
                 Text(
                   'Give yourself\nthe gift of time.',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.spaceGrotesk(
                     fontSize: 42,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w300,
                     color: Colors.white,
                     height: 1.2,
                     letterSpacing: -0.5,
@@ -244,9 +244,9 @@ class _AuthScreenState extends State<AuthScreen> {
         const SizedBox(width: 10),
         Text(
           'Alfred',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.spaceGrotesk(
             fontSize: large ? 28 : 22,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w300,
             color: color,
           ),
         ),
@@ -262,9 +262,9 @@ class _AuthScreenState extends State<AuthScreen> {
       children: [
         Text(
           _isLogin ? 'Welcome back' : 'Create your account',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.spaceGrotesk(
             fontSize: 26,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w300,
             color: context.palette.textPrimary,
           ),
         ),
@@ -337,7 +337,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   )
                 : Text(
                     _isLogin ? 'Sign In' : 'Sign Up',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.spaceGrotesk(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                     ),

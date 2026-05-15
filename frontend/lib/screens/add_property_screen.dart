@@ -317,9 +317,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   propertyName.isNotEmpty
                       ? propertyName
                       : 'Property Registered',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.spaceGrotesk(
                       fontSize: 20,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w300,
                       color: context.palette.textPrimary),
                   textAlign: TextAlign.center,
                 ),
@@ -466,9 +466,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       p: TextStyle(color: palette.textPrimary, fontSize: 13, height: 1.6),
       strong: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
       em: TextStyle(color: palette.textPrimary, fontStyle: FontStyle.italic),
-      h1: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: palette.textPrimary),
-      h2: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600, color: palette.textPrimary),
-      h3: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: palette.textPrimary),
+      h1: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.w300, color: palette.textPrimary),
+      h2: GoogleFonts.spaceGrotesk(fontSize: 17, fontWeight: FontWeight.w500, color: palette.textPrimary),
+      h3: GoogleFonts.spaceGrotesk(fontSize: 15, fontWeight: FontWeight.w500, color: palette.textPrimary),
       code: TextStyle(
         color: cs.secondary,
         fontFamily: 'monospace',
@@ -512,8 +512,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               elevation: 0,
               surfaceTintColor: Colors.transparent,
               title: Text('Add Property',
-                  style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
+                  style: GoogleFonts.spaceGrotesk(
+                      fontWeight: FontWeight.w300,
                       fontSize: 18,
                       color: context.palette.primary)),
               leading: BackButton(
@@ -679,9 +679,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         backgroundColor: context.palette.primary,
-                        textStyle: GoogleFonts.poppins(
+                        textStyle: GoogleFonts.spaceGrotesk(
                             fontSize: 15,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w500,
                             letterSpacing: 1.2),
                       ),
                       child: _isMerging

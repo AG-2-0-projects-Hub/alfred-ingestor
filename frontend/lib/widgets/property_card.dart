@@ -98,7 +98,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
           duration: const Duration(milliseconds: 180),
           decoration: BoxDecoration(
             color: _hovered ? palette.primaryContainer : palette.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: _hovered ? palette.primary : palette.primaryHover,
               width: _hovered ? 1.5 : 1,
@@ -128,9 +128,9 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
               const SizedBox(height: 16),
               Text(
                 'Add Property',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.spaceGrotesk(
                   fontSize: 15,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   color: palette.primary,
                 ),
               ),
@@ -235,14 +235,14 @@ class _PropertyCardState extends State<_PropertyCard> {
         onTapCancel: () => setState(() => _pressed = false),
         child: AnimatedScale(
           duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          scale: _pressed ? 0.98 : (_hovered ? 1.012 : 1.0),
+          curve: AppTheme.standardEasing,
+          scale: _pressed ? AppTheme.pressScale : (_hovered ? 1.012 : 1.0),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(
               color: _hovered ? palette.glassTintStrong : palette.glassTint,
               gradient: AppTheme.glassInnerHighlight,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: _hovered
                     ? palette.primaryHover.withValues(alpha: 0.5)
@@ -302,9 +302,9 @@ class _PropertyCardState extends State<_PropertyCard> {
                       children: [
                         Text(
                           name,
-                          style: GoogleFonts.poppins(
+                          style: GoogleFonts.spaceGrotesk(
                             fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w400,
                             color: palette.textPrimary,
                           ),
                           maxLines: 1,

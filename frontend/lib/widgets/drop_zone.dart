@@ -106,7 +106,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
             onTap: _pickFiles,
             child: AnimatedScale(
               duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
+              curve: AppTheme.standardEasing,
               scale: _isDragging ? 1.015 : 1.0,
               child: CustomPaint(
                 painter: _DashedBorderPainter(

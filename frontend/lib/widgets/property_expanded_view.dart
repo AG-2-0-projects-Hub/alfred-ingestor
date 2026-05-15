@@ -87,14 +87,14 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 720, maxHeight: 720),
             decoration: BoxDecoration(
               color: palette.glassTintStrong,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(24),
               border: Border.all(color: palette.glassBorderStrong),
             ),
             child: Padding(
@@ -108,8 +108,8 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                       Expanded(
                         child: Text(
                           widget.property['name'] as String? ?? 'Property',
-                          style: GoogleFonts.poppins(
-                            fontSize: 20, fontWeight: FontWeight.w700,
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 20, fontWeight: FontWeight.w300,
                             color: palette.textPrimary,
                           ),
                         ),
@@ -122,7 +122,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                   ),
                   const SizedBox(height: 12),
                   Text('Active Conversations',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.spaceGrotesk(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: palette.textSecondary,
                     ),
@@ -174,7 +174,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                           ),
                           const SizedBox(width: 6),
                           Text('Archived',
-                            style: GoogleFonts.poppins(
+                            style: GoogleFonts.spaceGrotesk(
                               fontSize: 13, fontWeight: FontWeight.w600,
                               color: palette.textSecondary,
                             ),

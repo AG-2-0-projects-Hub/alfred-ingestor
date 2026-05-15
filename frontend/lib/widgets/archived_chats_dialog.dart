@@ -82,8 +82,8 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                       children: [
                         Text(
                           'Chat History',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
+                          style: GoogleFonts.spaceGrotesk(
+                            fontWeight: FontWeight.w500,
                             fontSize: 16,
                             color: context.palette.textPrimary,
                           ),
@@ -136,7 +136,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                               const SizedBox(height: 16),
                               Text(
                                 'No past chats yet.',
-                                style: GoogleFonts.poppins(
+                                style: GoogleFonts.spaceGrotesk(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
                                   color: context.palette.textPrimary,
@@ -174,9 +174,9 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                   name.isNotEmpty
                                       ? name[0].toUpperCase()
                                       : '?',
-                                  style: GoogleFonts.poppins(
+                                  style: GoogleFonts.spaceGrotesk(
                                     color: context.palette.primary,
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w500,
                                     fontSize: 14,
                                   ),
                                 ),

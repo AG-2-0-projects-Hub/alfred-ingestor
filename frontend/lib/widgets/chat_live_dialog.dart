@@ -182,7 +182,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          curve: AppTheme.standardEasing,
         );
       }
     });
@@ -344,9 +344,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
               children: [
                 Text(
                   widget.propertyName.isEmpty ? 'Live Chat' : widget.propertyName,
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.spaceGrotesk(
                     fontSize: 17,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w300,
                     color: palette.primary,
                   ),
                   maxLines: 1,
@@ -403,7 +403,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Text(
                   'Conversation',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.spaceGrotesk(
                       fontWeight: FontWeight.w600,
                       fontSize: 12,
                       color: context.palette.textSecondary),
@@ -497,7 +497,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             children: [
               Text(
                 'Guest Chat Link',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.spaceGrotesk(
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                     color: context.palette.textPrimary),
@@ -574,7 +574,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         children: [
           Text(
             'Mode',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.spaceGrotesk(
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
                 color: context.palette.textPrimary),

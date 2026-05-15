@@ -298,7 +298,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       transitionBuilder: (_, anim, __, child) => SlideTransition(
         position: Tween(begin: const Offset(1, 0), end: Offset.zero)
-            .animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
+            .animate(CurvedAnimation(parent: anim, curve: AppTheme.standardEasing)),
         child: child,
       ),
     );
@@ -380,8 +380,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 16),
             Text(
               property['name'] as String? ?? 'Property',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w600, fontSize: 15),
+              style: GoogleFonts.spaceGrotesk(
+                  fontWeight: FontWeight.w500, fontSize: 15),
             ),
             const SizedBox(height: 8),
             Text(
@@ -441,9 +441,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(width: 10),
                   Text(
                     'Alfred',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.spaceGrotesk(
                       color: palette.primary,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w300,
                       fontSize: 20,
                     ),
                   ),
@@ -565,9 +565,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 24),
                     Text('Welcome to Alfred',
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.spaceGrotesk(
                           fontSize: 22,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w300,
                           color: palette.textPrimary),
                     ),
                     const SizedBox(height: 8),

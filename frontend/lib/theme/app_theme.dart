@@ -212,60 +212,61 @@ extension PaletteX on BuildContext {
 }
 
 // ── Daylight palette ────────────────────────────────────────────────────────
+// Olive/sage tokens from _Context/Design inspo/Design_inspo_Alfred.json.
 final AppPalette _daylightPalette = AppPalette(
-  primary: const Color(0xFF0F766E),
-  primaryHover: const Color(0xFF0D9488),
-  primaryDark: const Color(0xFF0D5E57),
-  primaryContainer: const Color(0xFFCCFBF1),
-  onPrimaryContainer: const Color(0xFF134E4A),
-  accent: const Color(0xFF0EA5E9),
-  accentContainer: const Color(0xFFE0F2FE),
-  onAccentContainer: const Color(0xFF0369A1),
-  background: const Color(0xFFF8FAFC),
-  surface: const Color(0xFFFFFFFF),
-  surfaceAlt: const Color(0xFFF1F5F9),
-  border: const Color(0xFFE2E8F0),
-  borderStrong: const Color(0xFFCBD5E1),
-  textPrimary: const Color(0xFF1E293B),
-  textSecondary: const Color(0xFF64748B),
-  textMuted: const Color(0xFF94A3B8),
+  primary: const Color(0xFF778643),
+  primaryHover: const Color(0xFF8A9A4D),
+  primaryDark: const Color(0xFF5D6A35),
+  primaryContainer: const Color(0xFFE4E8D4),
+  onPrimaryContainer: const Color(0xFF3A4321),
+  accent: const Color(0xFF6B7280),
+  accentContainer: const Color(0xFFE5E7EB),
+  onAccentContainer: const Color(0xFF374151),
+  background: const Color(0xFFFEFCFB),
+  surface: const Color(0xFFEFEFEF),
+  surfaceAlt: const Color(0xFFE8E8E8),
+  border: const Color.fromRGBO(0, 0, 0, 0.08),
+  borderStrong: const Color.fromRGBO(0, 0, 0, 0.18),
+  textPrimary: const Color(0xFF161E29),
+  textSecondary: const Color(0xFF3D4452),
+  textMuted: const Color(0xFF8A8F98),
   success: const Color(0xFF059669),
   successContainer: const Color(0xFFD1FAE5),
   warning: const Color(0xFFD97706),
   warningContainer: const Color(0xFFFEF3C7),
   danger: const Color(0xFFDC2626),
   dangerContainer: const Color(0xFFFEE2E2),
-  glassTint: const Color(0x99FFFFFF),
-  glassTintStrong: const Color(0xCCFFFFFF),
-  glassTintHeavy: const Color(0xE6FFFFFF),
-  glassBorder: const Color(0x33FFFFFF),
-  glassBorderStrong: const Color(0x4DFFFFFF),
-  auroraTeal: const Color(0xFF14B8A6),
-  auroraSky: const Color(0xFF38BDF8),
-  auroraLavender: const Color(0xFFA78BFA),
-  auroraPeach: const Color(0xFFFDA4AF),
+  glassTint: const Color.fromRGBO(255, 255, 255, 0.60),
+  glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.75),
+  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.90),
+  glassBorder: const Color.fromRGBO(0, 0, 0, 0.08),
+  glassBorderStrong: const Color.fromRGBO(0, 0, 0, 0.15),
+  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.15),
+  auroraSky: const Color.fromRGBO(156, 163, 175, 0.20),
+  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.08),
+  auroraPeach: const Color.fromRGBO(254, 252, 251, 0.50),
   cardShadow: [
     BoxShadow(
-      color: const Color(0xFF1E293B).withValues(alpha: 0.08),
-      blurRadius: 12,
+      color: Colors.black.withValues(alpha: 0.08),
+      blurRadius: 30,
       offset: const Offset(0, 4),
     ),
   ],
   cardShadowHover: [
     BoxShadow(
-      color: const Color(0xFF0F766E).withValues(alpha: 0.18),
+      color: const Color(0xFF778643).withValues(alpha: 0.20),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
     BoxShadow(
-      color: const Color(0xFF1E293B).withValues(alpha: 0.10),
+      color: Colors.black.withValues(alpha: 0.10),
       blurRadius: 10,
       offset: const Offset(0, 4),
     ),
   ],
   drawerShadow: [
     BoxShadow(
-      color: const Color(0xFF1E293B).withValues(alpha: 0.18),
+      color: Colors.black.withValues(alpha: 0.18),
       blurRadius: 40,
       offset: const Offset(-4, 0),
     ),
@@ -273,60 +274,61 @@ final AppPalette _daylightPalette = AppPalette(
 );
 
 // ── Midnight palette ────────────────────────────────────────────────────────
+// Olive/sage tokens from _Context/Design inspo/Design_inspo_Alfred.json.
 final AppPalette _midnightPalette = AppPalette(
-  primary: const Color(0xFF6366F1),
-  primaryHover: const Color(0xFF818CF8),
-  primaryDark: const Color(0xFF4338CA),
-  primaryContainer: const Color(0xFF1E1B4B),
-  onPrimaryContainer: const Color(0xFFC7D2FE),
-  accent: const Color(0xFF10B981),
-  accentContainer: const Color(0xFF064E3B),
-  onAccentContainer: const Color(0xFF6EE7B7),
-  background: const Color(0xFF0D0D12),
-  surface: const Color(0xFF16161F),
-  surfaceAlt: const Color(0xFF1E1E2A),
-  border: const Color(0xFF2D2D3F),
-  borderStrong: const Color(0xFF3D3D55),
-  textPrimary: const Color(0xFFF9FAFB),
-  textSecondary: const Color(0xFF94A3B8),
-  textMuted: const Color(0xFF64748B),
-  success: const Color(0xFF10B981),
-  successContainer: const Color(0xFF064E3B),
-  warning: const Color(0xFFF59E0B),
-  warningContainer: const Color(0xFF451A03),
-  danger: const Color(0xFFEF4444),
-  dangerContainer: const Color(0xFF450A0A),
-  glassTint: const Color(0x18FFFFFF),
-  glassTintStrong: const Color(0x28FFFFFF),
-  glassTintHeavy: const Color(0x40FFFFFF),
-  glassBorder: const Color(0x22FFFFFF),
-  glassBorderStrong: const Color(0x44FFFFFF),
-  auroraTeal: const Color(0xFF6366F1),
-  auroraSky: const Color(0xFF10B981),
-  auroraLavender: const Color(0xFF7C3AED),
-  auroraPeach: const Color(0xFFF59E0B),
+  primary: const Color(0xFF778643),
+  primaryHover: const Color(0xFF8A9A4D),
+  primaryDark: const Color(0xFF5D6A35),
+  primaryContainer: const Color.fromRGBO(119, 134, 67, 0.18),
+  onPrimaryContainer: const Color(0xFFFEFCFB),
+  accent: const Color(0xFF9CA3AF),
+  accentContainer: const Color.fromRGBO(156, 163, 175, 0.15),
+  onAccentContainer: const Color(0xFFFEFCFB),
+  background: const Color(0xFF050506),
+  surface: const Color(0xFF0A0A0C),
+  surfaceAlt: const Color(0xFF0D0D10),
+  border: const Color.fromRGBO(255, 255, 255, 0.08),
+  borderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
+  textPrimary: const Color(0xFFFEFCFB),
+  textSecondary: const Color(0xFFEFEFEF),
+  textMuted: const Color(0xFF8A8F98),
+  success: const Color(0xFF4ADE80),
+  successContainer: const Color.fromRGBO(74, 222, 128, 0.15),
+  warning: const Color(0xFFFBBF24),
+  warningContainer: const Color.fromRGBO(251, 191, 36, 0.15),
+  danger: const Color(0xFFF87171),
+  dangerContainer: const Color.fromRGBO(248, 113, 113, 0.15),
+  glassTint: const Color.fromRGBO(255, 255, 255, 0.05),
+  glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.10),
+  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.15),
+  glassBorder: const Color.fromRGBO(255, 255, 255, 0.08),
+  glassBorderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
+  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.20),
+  auroraSky: const Color.fromRGBO(254, 252, 251, 0.40),
+  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.12),
+  auroraPeach: const Color.fromRGBO(156, 163, 175, 0.15),
   cardShadow: [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.4),
-      blurRadius: 12,
+      color: Colors.black.withValues(alpha: 0.30),
+      blurRadius: 30,
       offset: const Offset(0, 4),
     ),
   ],
   cardShadowHover: [
     BoxShadow(
-      color: const Color(0xFF6366F1).withValues(alpha: 0.22),
+      color: const Color(0xFF778643).withValues(alpha: 0.25),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.3),
+      color: Colors.black.withValues(alpha: 0.30),
       blurRadius: 8,
       offset: const Offset(0, 4),
     ),
   ],
   drawerShadow: [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.5),
+      color: Colors.black.withValues(alpha: 0.50),
       blurRadius: 40,
       offset: const Offset(-4, 0),
     ),
@@ -342,8 +344,14 @@ class AppTheme {
     end: Alignment.bottomRight,
     colors: [Color(0x30FFFFFF), Color(0x00FFFFFF)],
   );
-  static const double glassBlurSigma = 18.0;
-  static const double glassBlurSigmaHeavy = 28.0;
+  static const double glassBlurSigma = 20.0;
+  static const double glassBlurSigmaHeavy = 24.0;
+
+  // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — replaces Curves.easeOut/easeInOut.
+  static const Cubic standardEasing = Cubic(0.16, 1.0, 0.3, 1.0);
+
+  // Design-token interaction-scale: 0.97 → 1.0 on press.
+  static const double pressScale = 0.97;
 
   // ── Themes ────────────────────────────────────────────────────────────────
   static ThemeData get daylightTheme => _buildTheme(_daylightPalette, Brightness.light);
@@ -401,9 +409,9 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 1,
         shadowColor: const Color(0x30000000),
-        titleTextStyle: GoogleFonts.poppins(
+        titleTextStyle: GoogleFonts.spaceGrotesk(
           fontSize: 20,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w300,
           color: p.primary,
         ),
         iconTheme: IconThemeData(color: p.textSecondary),
@@ -412,7 +420,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: p.border, width: 1),
         ),
         color: p.surface,
@@ -490,7 +498,7 @@ class AppTheme {
         indicatorColor: p.primary,
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: p.border,
-        labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 13),
+        labelStyle: GoogleFonts.spaceGrotesk(fontWeight: FontWeight.w600, fontSize: 13),
         unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
       ),
       dividerTheme: DividerThemeData(
@@ -501,11 +509,11 @@ class AppTheme {
       dialogTheme: DialogThemeData(
         elevation: 8,
         shadowColor: const Color(0x40000000),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         backgroundColor: p.surface,
-        titleTextStyle: GoogleFonts.poppins(
+        titleTextStyle: GoogleFonts.spaceGrotesk(
           fontSize: 17,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w300,
           color: p.textPrimary,
         ),
       ),
@@ -531,18 +539,18 @@ class AppTheme {
   }
 
   static TextTheme _buildTextTheme(AppPalette p) {
-    final poppins = GoogleFonts.poppinsTextTheme();
+    final heading = GoogleFonts.spaceGroteskTextTheme();
     final inter = GoogleFonts.interTextTheme();
     return TextTheme(
-      displayLarge:  poppins.displayLarge?.copyWith(fontWeight: FontWeight.w700, color: p.textPrimary),
-      displayMedium: poppins.displayMedium?.copyWith(fontWeight: FontWeight.w700, color: p.textPrimary),
-      displaySmall:  poppins.displaySmall?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
-      headlineLarge:  poppins.headlineLarge?.copyWith(fontWeight: FontWeight.w700, color: p.textPrimary),
-      headlineMedium: poppins.headlineMedium?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
-      headlineSmall:  poppins.headlineSmall?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
-      titleLarge:  poppins.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
-      titleMedium: poppins.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
-      titleSmall:  poppins.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: p.textPrimary),
+      displayLarge:  heading.displayLarge?.copyWith(fontWeight: FontWeight.w300, color: p.textPrimary),
+      displayMedium: heading.displayMedium?.copyWith(fontWeight: FontWeight.w300, color: p.textPrimary),
+      displaySmall:  heading.displaySmall?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
+      headlineLarge:  heading.headlineLarge?.copyWith(fontWeight: FontWeight.w300, color: p.textPrimary),
+      headlineMedium: heading.headlineMedium?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
+      headlineSmall:  heading.headlineSmall?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
+      titleLarge:  heading.titleLarge?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
+      titleMedium: heading.titleMedium?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
+      titleSmall:  heading.titleSmall?.copyWith(fontWeight: FontWeight.w500, color: p.textPrimary),
       bodyLarge:  inter.bodyLarge?.copyWith(color: p.textPrimary, height: 1.6),
       bodyMedium: inter.bodyMedium?.copyWith(color: p.textPrimary, height: 1.6),
       bodySmall:  inter.bodySmall?.copyWith(color: p.textSecondary, height: 1.5),

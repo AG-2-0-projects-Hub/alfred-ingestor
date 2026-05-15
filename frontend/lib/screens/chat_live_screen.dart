@@ -149,7 +149,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          curve: AppTheme.standardEasing,
         );
       }
     });
@@ -274,8 +274,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 children: [
                   Text(
                     'Live Chat',
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w700,
+                    style: GoogleFonts.spaceGrotesk(
+                        fontWeight: FontWeight.w300,
                         fontSize: 18,
                         color: context.palette.primary),
                   ),
@@ -308,7 +308,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Text(
                     'Conversation',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.spaceGrotesk(
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                         color: context.palette.textSecondary),
@@ -408,7 +408,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             children: [
               Text(
                 'Guest Chat Link',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.spaceGrotesk(
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                     color: context.palette.textPrimary),
@@ -486,7 +486,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         children: [
           Text(
             'Mode',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.spaceGrotesk(
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
                 color: context.palette.textPrimary),

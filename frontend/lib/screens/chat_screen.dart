@@ -105,7 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          curve: AppTheme.standardEasing,
         );
       }
     });
@@ -306,8 +306,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('Alfred',
-                        style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w700,
+                        style: GoogleFonts.spaceGrotesk(
+                            fontWeight: FontWeight.w300,
                             fontSize: 18,
                             color: context.palette.primary)),
                     if (_propertyName != null)

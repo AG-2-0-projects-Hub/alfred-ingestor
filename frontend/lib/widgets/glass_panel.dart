@@ -49,7 +49,7 @@ class _GlassPanelState extends State<GlassPanel> {
 
     final panel = AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
+      curve: AppTheme.standardEasing,
       padding: widget.padding,
       decoration: BoxDecoration(
         color: _hovered && widget.hoverable ? hoverTint : tint,
