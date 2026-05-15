@@ -75,7 +75,7 @@ class SetupStatusBanner extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: accent,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                textStyle: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+                textStyle: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500),
               ),
               child: Text(step.actionLabel),
             ),

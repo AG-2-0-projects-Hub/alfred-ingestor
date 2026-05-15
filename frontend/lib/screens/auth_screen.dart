@@ -323,7 +323,7 @@ class _AuthScreenState extends State<AuthScreen> {
         const SizedBox(height: 24),
         // Primary action
         SizedBox(
-          height: 50,
+          height: 48,
           child: FilledButton(
             onPressed: _isLoading ? null : _submit,
             child: _isLoading
@@ -339,7 +339,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     _isLogin ? 'Sign In' : 'Sign Up',
                     style: GoogleFonts.spaceGrotesk(
                       fontSize: 15,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
           ),

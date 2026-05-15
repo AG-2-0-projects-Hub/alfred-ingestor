@@ -590,11 +590,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 FilledButton(
                   onPressed: canIngest ? _startIngest : null,
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    textStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.4),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    textStyle: GoogleFonts.spaceGrotesk(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 1.2),
                   ),
                   child: _isIngesting
                       ? const Row(
@@ -641,8 +641,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   ],
                   if (_officialPropertyName != null) ...[
                     Text(_officialPropertyName!,
-                        style: const TextStyle(
-                            fontSize: 24, fontWeight: FontWeight.bold)),
+                        style: GoogleFonts.spaceGrotesk(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w300,
+                            color: context.palette.textPrimary)),
                     const SizedBox(height: 4),
                   ],
                   Text('Extracted Knowledge',
