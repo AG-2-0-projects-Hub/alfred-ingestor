@@ -164,13 +164,22 @@ Covers (no backend changes, no SQL migrations):
 13. **Empty state** for zero properties (welcome hero)
 14. **Confirm dialogs** for destructive actions (file delete)
 
-### Phase 4.5 — Browser Push Notifications (PLANNED)
+### Phase 4.5 — Push Notifications + In-Screen Chat Dialog (PLANNED)
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
+
+**Feature A — In-Screen Chat Dialog:**
+- Clicking a ConversationPill opens `ChatLiveDialog` modal instead of navigating to `ChatLiveScreen`
+- `ChatLiveDialog` = same two-panel layout (messages left, controls right) inside a glassmorphic dialog
+- Stacks on top of `PropertyExpandedView` — close returns to expanded view
+- `ChatLiveScreen` kept intact as a fallback route; just stop navigating to it from pills/dashboard
+- New file: `frontend/lib/widgets/chat_live_dialog.dart`
+
+**Feature B — Push Notifications:**
 - Web Notification API (no FCM, no service worker — tab must be open)
 - `push_notification_service.dart` singleton via `package:web` JS interop
 - `_prevRequiresAttention` diff map in DashboardScreen for false→true edge detection
 - Permission prompt on first escalation, not on init
-- Click handler: `window.focus()` + open `PropertyExpandedView` for relevant property
+- Click handler: `window.focus()` + open `ChatLiveDialog` for that conversation
 - No backend changes, no SQL migrations
 
 ### Phase 5 — UI/UX Audit (PLANNED)
