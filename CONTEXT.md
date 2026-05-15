@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-15 (Phase 4.5 pushed `3946597` + `b32c781` — Vercel build FAILED both times; fix prepared locally, uncommitted, to be pushed after Phase 5)
+**Last Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1` — Vercel deploys green; Phase 4.5 build fix bundled into Phase 5A so deploys are now landing clean)
 
 ---
 
@@ -123,14 +123,16 @@
 
 ---
 
-## Design System (AppTheme / Phase 4)
-Two themes via `AppPalette extends ThemeExtension<AppPalette>`:
-- **Daylight:** Primary `#0F766E` teal-700, Accent `#0EA5E9` sky-500, Background `#F8FAFC` slate-50
-- **Midnight:** Primary `#6366F1` indigo-500, Accent `#22D3EE` cyan-400, Background `#0D0D12` void-slate
-- **Glass:** `glassTint`, `glassTintStrong`, `glassTintHeavy` — alpha varies per theme; blur sigma 18–28
-- **Aurora blobs:** teal / sky / lavender / peach at 4 corners, blur sigma 60 — inherited from palette
-- **Typography:** Poppins (headings) + Inter (body)
-- **Animations:** 150–300ms ease-out; `.withValues(alpha:)` throughout (Flutter 3.27+)
+## Design System (AppTheme / Phase 5)
+Two themes via `AppPalette extends ThemeExtension<AppPalette>`. Tokens sourced from `_Context/Design inspo/Design_inspo_Alfred.json` (gitignored).
+- **Daylight:** Primary `#778643` olive, Accent `#6B7280` sage, Background `#FEFCFB` warm off-white, Surface `#EFEFEF`
+- **Midnight:** Primary `#778643` olive (same), Accent `#9CA3AF` soft-sage, Background `#050506` near-black, Surface `#0A0A0C` elevated
+- **Glass:** `glassTint`, `glassTintStrong`, `glassTintHeavy` — alpha varies per theme; blur sigma 20/24 (`AppTheme.glassBlurSigma` / `glassBlurSigmaHeavy`)
+- **Aurora blobs:** monochromatic olive family + single dim moon-glow accent (no sage/olive temperature clash) — both themes
+- **Typography:** Space Grotesk (headings, w300 h1, w500 subsection, w400 card name) + Inter (body w400, label w500/w600)
+- **Easing:** `AppTheme.standardEasing` (Cubic(0.16, 1, 0.3, 1)) — replaces Curves.easeOut everywhere
+- **Press scale:** `AppTheme.pressScale` (0.97)
+- **Radii:** cards 12, large panels/dialogs 24, pills 100, inputs 8
 - **Access pattern:** `context.palette.X` everywhere (PaletteX BuildContext extension)
 - **Toggle:** `themeController.toggle()` in AppBar — persisted via `shared_preferences`
 
@@ -184,15 +186,28 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
 - AppBar permission chip (state field `_notifPermission` + `_showNotifChip`)
 - `pubspec.yaml`: `web: ^1.1.0` added
 
-**Status:** Pushed (`3946597`, `b32c781`) — Vercel build FAILED both times on `push_notification_service.dart` dart2js compile. Root cause: `.has()` method lives in `dart:js_interop_unsafe`, not `dart:js_interop`. Fix (one-line: add `import 'dart:js_interop_unsafe';`) is staged locally but UNCOMMITTED — user wants to bundle it with the Phase 5 commit so the next deploy lands clean.
+**Status:** RESOLVED 2026-05-15. The `dart:js_interop_unsafe` import fix shipped bundled with Phase 5A (`d432f22`); subsequent Phase 5 commits all deployed green.
 
-### Phase 5 — UI/UX Audit (PLANNED)
+### Phase 5 — UI/UX Audit & Design Token Migration (COMPLETED 2026-05-15)
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
-- Skills: `web-design-guidelines` (Vercel) + `ui-ux-pro-max-skill` (v2.5.0) + `_ingestor/frontend-design.md`
-- 5 audit categories: Accessibility (WCAG 2.1 AA), Typography, Layout & Spacing, Interaction & Animation, Brand & Consistency
-- Both Daylight and Midnight themes must pass
-- Findings format: `[P0|P1|P2] file:line — finding — fix`
-- One commit per category after fixes
+
+**Part A — Design Token Migration (`d432f22`):**
+- Olive `#778643` primary, sage accent, off-white `#FEFCFB` / near-black `#050506` bases (replaces teal/sky + indigo/void)
+- Poppins → Space Grotesk for all headings (w300 h1, w500 subsection, w400 card name, w600 labels unchanged)
+- `AppTheme.standardEasing` (Cubic(0.16, 1, 0.3, 1)), `AppTheme.pressScale` (0.97), blur sigma 20/24, card radius 12, large-panel 24
+- Bundled Phase 4.5 build fix (`dart:js_interop_unsafe` import) so Vercel deploys went green for the first time since 4.5
+
+**Part B — Audit fixes:**
+- **P0 (`ead7512`):** Aurora harmonization (olive family + dim moon-glow, no temperature clash); touch targets ≥44px; Mode toggle keyboard focus via Material+InkWell; conversation_pill respects reduced motion; FileThumbnail Tooltip+Semantics+loadingBuilder; file_status_list and generate_guest_link_dialog full Colors.X → palette token remap; auth brand panel gradient olive-ified
+- **P1 (`e7295d9`):** Live badge tooltip + readable fontSize; CTA hierarchy (Sign In, INGEST NOW, _officialPropertyName) aligned to button design token (SG w500); 4px grid corrections on property_card + setup_status_banner action button
+- **P2 (`d8c20c1`):** True pill radii (100) on property_card badges; large-panel radii 20→24 across add_property/chat_live screens + archived_chats dialog; bubble radii 14→12 (card token); 4px grid on tiny icon buttons
+
+**Deferred to future polish phase:**
+- Scroll-fade `ShaderMask` indicators (dashboard grid, edit_property knowledge tab, drawer file list)
+- `file_thumbnail` file-type semantic colors → centralized `AppPalette.fileTypeColors` map
+- `chat_live_screen` ↔ `chat_live_dialog` widget duplication → extract shared `LiveChatPanel`
+- `generate_guest_link_dialog` inline `errorText` state (currently SnackBar-only)
+- `ingest_screen.dart` cleanup — dead code, no router references; either delete or wire in
 
 ### Future Backend Work (deferred — needs SQL migrations)
 - `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
