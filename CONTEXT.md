@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-15 (Phase 4 + build fix + Phase 4.5/5 plans)
+**Last Session:** 2026-05-15 (Phase 4.5 pushed `3946597` + `b32c781` — Vercel build FAILED both times; fix prepared locally, uncommitted, to be pushed after Phase 5)
 
 ---
 
@@ -48,6 +48,7 @@
 - Edit property (per-file delete + re-ingest)
 - Archived chats dialog
 - **Phase 4 (2026-05-15):** Dual-theme toggle (Daylight/Midnight), `ThemeController` + `shared_preferences` persistence, `AppPalette` ThemeExtension, `InactivityWrapper` (1h auto-logout), `SetupStatusBanner` on drawer + edit property, `ConversationPill` replacing `_ConvPreviewRow`, `PropertyExpandedView` modal, `FileThumbnail` widget, `relativeTime` util, optimistic send in ChatLive, markdown styleSheet contrast fix, JSON copy button, clickable Airbnb URLs, real-time dashboard subscriptions, theme toggle in AppBar. **Deployed on Vercel** (commit `2c7d1e4` after build-fix for `const`/`context.palette` violations).
+- **Phase 4.5 (2026-05-15):** In-screen `ChatLiveDialog` (replaces full-page nav from conversation pills + push-notification clicks) + browser push notifications via Web Notification API. New files: `widgets/chat_live_dialog.dart`, `services/push_notification_service.dart`. Modified: `screens/dashboard_screen.dart` (added `_prevRequiresAttention` edge-detection map, `_checkForNewEscalations`, notif permission state), `widgets/property_expanded_view.dart` (pill onTap → `ChatLiveDialog.show`), `pubspec.yaml` (`web: ^1.1.0`). `ChatLiveScreen` kept intact as fallback route. **Pushed (`3946597`) but build FAILED on Vercel** — dart2js error: `.has()` not defined on `Window`/`JSObject`. Followup push `b32c781` tried `globalContext.has()` but failed the same way (`.has()` lives in `dart:js_interop_unsafe`, not `dart:js_interop`). **Local fix prepared in `push_notification_service.dart`** — adds `import 'dart:js_interop_unsafe';` so the existing `globalContext.has('Notification')` compiles. Verified via `flutter analyze`: only 2 unnecessary_cast warnings (pre-existing pattern copied from ChatLiveScreen, non-blocking). **Uncommitted** — to be pushed after Phase 5 lands so the deploy goes green in one shot.
 
 ### Chat status (guest-facing `/chat?booking=...`)
 - **Working as of 2026-05-11.** Fix: `if result and result.data:` guard in `find_or_create_conversation` (`supabase_client.py`). Committed and deployed.
@@ -91,6 +92,8 @@
 | `widgets/setup_status_banner.dart` | Guided next-step banner mapped from property status |
 | `widgets/file_thumbnail.dart` | Async signed URL image or themed file-type icon |
 | `widgets/inactivity_wrapper.dart` | 1-hour idle → auto-logout via Listener + Timer |
+| `widgets/chat_live_dialog.dart` | In-screen glassmorphic chat dialog (replaces page nav from pills) — Phase 4.5 |
+| `services/push_notification_service.dart` | Web Notification API singleton via `package:web` JS interop — Phase 4.5 |
 | `services/api_client.dart` | Typed HTTP wrapper: 60s timeout, 1 retry, ApiException hierarchy |
 | `theme/app_theme.dart` | AppPalette ThemeExtension, daylightTheme + midnightTheme, PaletteX context extension |
 | `theme/theme_controller.dart` | ChangeNotifier for Daylight/Midnight toggle, persisted via shared_preferences |
@@ -164,23 +167,24 @@ Covers (no backend changes, no SQL migrations):
 13. **Empty state** for zero properties (welcome hero)
 14. **Confirm dialogs** for destructive actions (file delete)
 
-### Phase 4.5 — Push Notifications + In-Screen Chat Dialog (PLANNED)
+### Phase 4.5 — Push Notifications + In-Screen Chat Dialog (PUSHED, BUILD FAILING — fix prepared locally)
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
 
-**Feature A — In-Screen Chat Dialog:**
-- Clicking a ConversationPill opens `ChatLiveDialog` modal instead of navigating to `ChatLiveScreen`
-- `ChatLiveDialog` = same two-panel layout (messages left, controls right) inside a glassmorphic dialog
-- Stacks on top of `PropertyExpandedView` — close returns to expanded view
-- `ChatLiveScreen` kept intact as a fallback route; just stop navigating to it from pills/dashboard
-- New file: `frontend/lib/widgets/chat_live_dialog.dart`
+**Feature A — In-Screen Chat Dialog (✅ implemented locally):**
+- `ChatLiveDialog` (`widgets/chat_live_dialog.dart`) — glassmorphic dialog with same two-panel layout as ChatLiveScreen
+- `PropertyExpandedView._openChat` now calls `ChatLiveDialog.show(...)` instead of `Navigator.push(ChatLiveScreen)`
+- Stacks on top of PropertyExpandedView — close returns to expanded view
+- `ChatLiveScreen` kept intact as fallback route
 
-**Feature B — Push Notifications:**
-- Web Notification API (no FCM, no service worker — tab must be open)
-- `push_notification_service.dart` singleton via `package:web` JS interop
-- `_prevRequiresAttention` diff map in DashboardScreen for false→true edge detection
-- Permission prompt on first escalation, not on init
-- Click handler: `window.focus()` + open `ChatLiveDialog` for that conversation
-- No backend changes, no SQL migrations
+**Feature B — Push Notifications (✅ implemented locally):**
+- `PushNotificationService` (`services/push_notification_service.dart`) — singleton via `package:web` JS interop
+- DashboardScreen: `_prevRequiresAttention` map for false→true edge detection in `_checkForNewEscalations()`
+- Permission prompt fires on first escalation, not on init
+- Notification onTap → opens `ChatLiveDialog` for that conversation (in-screen, no page nav)
+- AppBar permission chip (state field `_notifPermission` + `_showNotifChip`)
+- `pubspec.yaml`: `web: ^1.1.0` added
+
+**Status:** Pushed (`3946597`, `b32c781`) — Vercel build FAILED both times on `push_notification_service.dart` dart2js compile. Root cause: `.has()` method lives in `dart:js_interop_unsafe`, not `dart:js_interop`. Fix (one-line: add `import 'dart:js_interop_unsafe';`) is staged locally but UNCOMMITTED — user wants to bundle it with the Phase 5 commit so the next deploy lands clean.
 
 ### Phase 5 — UI/UX Audit (PLANNED)
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
@@ -258,6 +262,8 @@ Covers 3 changes (no backend changes, no new packages):
 ## Build Notes
 - **dart2js strictness:** `context.palette.X` is a runtime value — never wrap in `const`. dart2js catches this even when the local analyzer doesn't. Rule: any widget referencing `context.palette` must not have `const` on itself or any ancestor that contains it.
 - **Map type inference:** `{...someMap, 'key': value}` infers `Map<dynamic, dynamic>` — always annotate as `<String, dynamic>{...}` when assigning to a typed map.
+- **`.has()` for JS feature detection:** Lives in `dart:js_interop_unsafe`, NOT `dart:js_interop`. To check if a global JS API exists (e.g. `Notification`), import both and call `globalContext.has('Notification')`. `web.window.has(...)` does NOT compile — `Window` doesn't expose `.has()`.
+- **Local pre-deploy verification:** Always run `flutter analyze <changed files>` before pushing — local analyzer catches dart2js errors that Vercel will hit. To work around snap-flutter XDG issue on WSL2: `export XDG_RUNTIME_DIR=$HOME/.cache/xdg-runtime && mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"` before invoking flutter.
 
 ---
 
