@@ -14,7 +14,7 @@ class PushNotificationService {
 
   static bool get isSupported {
     try {
-      return web.window.has('Notification');
+      return globalContext.has('Notification');
     } catch (_) {
       return false;
     }
