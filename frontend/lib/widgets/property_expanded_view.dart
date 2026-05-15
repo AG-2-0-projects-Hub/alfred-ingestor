@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'conversation_pill.dart';
 import 'generate_guest_link_dialog.dart';
-import '../screens/chat_live_screen.dart';
+import 'chat_live_dialog.dart';
 
 class PropertyExpandedView extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -72,13 +72,12 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
   }
 
   void _openChat(String bookingId) {
-    Navigator.of(context).pop();
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ChatLiveScreen(
-        bookingId: bookingId,
-        propertyId: widget.property['id'] as String,
-      ),
-    ));
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: widget.property['id'] as String,
+      propertyName: widget.property['name'] as String? ?? '',
+    );
   }
 
   @override

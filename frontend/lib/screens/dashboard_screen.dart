@@ -10,9 +10,10 @@ import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
 import '../widgets/property_expanded_view.dart';
 import '../widgets/archived_chats_dialog.dart';
+import '../widgets/chat_live_dialog.dart';
 import 'add_property_screen.dart';
-import 'chat_live_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
+import '../services/push_notification_service.dart';
 import 'auth_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -35,9 +36,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription? _guestStreamSub;
   StreamSubscription? _propertyStreamSub;
 
+  // Push-notification edge detection
+  final Map<String, bool> _prevRequiresAttention = {};
+  String _notifPermission = 'default';
+  bool _showNotifChip = true;
+
   @override
   void initState() {
     super.initState();
+    _notifPermission = PushNotificationService.permissionState;
     _loadProperties().then((_) {
       if (mounted) _subscribeRealtime();
     });
@@ -143,6 +150,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
         return priority(a).compareTo(priority(b));
       });
+    }
+    _checkForNewEscalations(convRows);
+  }
+
+  String _resolvePropertyName(String propertyId) {
+    final p = _properties.firstWhere(
+      (x) => x['id'] == propertyId,
+      orElse: () => <String, dynamic>{},
+    );
+    return p['name'] as String? ?? 'Property';
+  }
+
+  Future<void> _checkForNewEscalations(List<dynamic> rows) async {
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      if (id == null) continue;
+      final current = row['requires_attention'] == true;
+      final hadPrev = _prevRequiresAttention.containsKey(id);
+      final previous = _prevRequiresAttention[id] ?? false;
+      _prevRequiresAttention[id] = current;
+
+      // Only fire on a confirmed false→true edge — skip the seeding pass
+      // (no previous entry means we're learning the row for the first time).
+      if (!hadPrev || !current || previous) continue;
+
+      if (PushNotificationService.permissionState == 'default') {
+        await PushNotificationService.requestPermission();
+        if (mounted) {
+          setState(() => _notifPermission = PushNotificationService.permissionState);
+        }
+      }
+      if (PushNotificationService.permissionState != 'granted') continue;
+
+      final propertyId = row['property_id'] as String? ?? '';
+      final bookingId = row['booking_id'] as String? ?? '';
+      final reason = row['escalation_reason'] as String?;
+      final isEmergency = reason?.startsWith('emergency_') == true;
+      final propertyName = _resolvePropertyName(propertyId);
+
+      PushNotificationService.showEscalationAlert(
+        propertyName: propertyName,
+        bookingId: bookingId,
+        reason: reason,
+        isEmergency: isEmergency,
+        onTap: () {
+          if (!mounted) return;
+          ChatLiveDialog.show(
+            context,
+            bookingId: bookingId,
+            propertyId: propertyId,
+            propertyName: propertyName,
+          );
+        },
+      );
     }
   }
 
@@ -268,9 +329,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openChatLive(String bookingId, String propertyId) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ChatLiveScreen(bookingId: bookingId, propertyId: propertyId),
-    ));
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: propertyId,
+      propertyName: _resolvePropertyName(propertyId),
+    );
   }
 
   void _openGuestLink(Map<String, dynamic> property) {
@@ -386,6 +450,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               actions: [
+                if (_notifPermission == 'denied' && _showNotifChip)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Center(
+                      child: Chip(
+                        avatar: Icon(
+                          Icons.notifications_off_rounded,
+                          size: 14,
+                          color: palette.warning,
+                        ),
+                        label: Text(
+                          'Enable notifications in browser settings',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: palette.textSecondary,
+                          ),
+                        ),
+                        backgroundColor: palette.warningContainer.withValues(alpha: 0.6),
+                        side: BorderSide(color: palette.warning.withValues(alpha: 0.35)),
+                        onDeleted: () => setState(() => _showNotifChip = false),
+                        deleteIconColor: palette.textMuted,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Center(
