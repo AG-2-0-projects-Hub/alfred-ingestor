@@ -360,7 +360,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 width: 200,
                 height: 150,
                 color: context.palette.surfaceAlt,
-                child: const Center(
+                child: Center(
                   child: CircularProgressIndicator(color: context.palette.primary),
                 ),
               );
@@ -369,7 +369,7 @@ class _ChatScreenState extends State<ChatScreen> {
               width: 200,
               height: 80,
               color: context.palette.surfaceAlt,
-              child: const Center(
+              child: Center(
                 child: Icon(Icons.broken_image_outlined, color: context.palette.textMuted),
               ),
             ),

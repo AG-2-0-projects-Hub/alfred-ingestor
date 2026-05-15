@@ -779,9 +779,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 ),
                 const SizedBox(height: 12),
                 if (_loadingLearned)
-                  const Center(
+                  Center(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       child: CircularProgressIndicator(color: context.palette.primary),
                     ),
                   )
@@ -1001,7 +1001,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                             Padding(
                               padding: const EdgeInsets.only(left: 4),
                               child: Row(children: [
-                                const SizedBox(
+                                SizedBox(
                                     width: 12,
                                     height: 12,
                                     child: CircularProgressIndicator(
@@ -1062,7 +1062,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
-                      borderSide: const BorderSide(
+                      borderSide: BorderSide(
                           color: context.palette.primary, width: 1.5),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
@@ -1079,7 +1079,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               IconButton(
                 onPressed: _kbQuerying ? null : _queryKnowledgeBase,
                 icon: _kbQuerying
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
@@ -1205,7 +1205,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   Widget _buildBottomActions() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: context.palette.surface,
         border: Border(top: BorderSide(color: context.palette.border)),
       ),
@@ -1248,7 +1248,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   Widget _heroPlaceholder() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,

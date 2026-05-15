@@ -72,7 +72,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                       color: context.palette.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.history_rounded,
+                    child: Icon(Icons.history_rounded,
                         color: context.palette.primary, size: 18),
                   ),
                   const SizedBox(width: 12),
@@ -100,7 +100,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded,
+                    icon: Icon(Icons.close_rounded,
                         size: 20, color: context.palette.textMuted),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
@@ -113,8 +113,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
               child: _loading
                   ? const Padding(
                       padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(
-                          color: context.palette.primary),
+                      child: CircularProgressIndicator(),
                     )
                   : _guests.isEmpty
                       ? Padding(
@@ -129,7 +128,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                   color: context.palette.surfaceAlt,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                     Icons.chat_bubble_outline_rounded,
                                     size: 28,
                                     color: context.palette.textMuted),
@@ -195,7 +194,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                                     fontSize: 11,
                                     color: context.palette.textSecondary),
                               ),
-                              trailing: const Icon(
+                              trailing: Icon(
                                 Icons.arrow_forward_ios_rounded,
                                 size: 13,
                                 color: context.palette.textMuted,

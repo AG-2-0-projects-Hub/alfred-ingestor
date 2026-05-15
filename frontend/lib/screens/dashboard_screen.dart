@@ -129,7 +129,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           emer[pid] = true;
         }
       }
-      final merged = {...c, 'guestName': guestNames[bid] ?? 'Guest'};
+      final merged = <String, dynamic>{...c, 'guestName': guestNames[bid] ?? 'Guest'};
       previews[pid] = [...(previews[pid] ?? []), merged];
     }
     for (final pid in previews.keys) {
