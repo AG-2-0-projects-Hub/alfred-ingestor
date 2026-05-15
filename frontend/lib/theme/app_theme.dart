@@ -241,10 +241,13 @@ final AppPalette _daylightPalette = AppPalette(
   glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.90),
   glassBorder: const Color.fromRGBO(0, 0, 0, 0.08),
   glassBorderStrong: const Color.fromRGBO(0, 0, 0, 0.15),
-  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.15),
-  auroraSky: const Color.fromRGBO(156, 163, 175, 0.20),
-  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.08),
-  auroraPeach: const Color.fromRGBO(254, 252, 251, 0.50),
+  // Aurora — monochromatic olive family + one warm-white moon glow (oevra-style).
+  // All four blobs sit on the same olive hue at varying alpha to avoid the
+  // sage/olive temperature clash; the moon is the single light accent.
+  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.10),
+  auroraSky: const Color.fromRGBO(254, 252, 251, 0.45),
+  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.06),
+  auroraPeach: const Color.fromRGBO(138, 153, 80, 0.08),
   cardShadow: [
     BoxShadow(
       color: Colors.black.withValues(alpha: 0.08),
@@ -303,10 +306,14 @@ final AppPalette _midnightPalette = AppPalette(
   glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.15),
   glassBorder: const Color.fromRGBO(255, 255, 255, 0.08),
   glassBorderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
-  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.20),
-  auroraSky: const Color.fromRGBO(254, 252, 251, 0.40),
-  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.12),
-  auroraPeach: const Color.fromRGBO(156, 163, 175, 0.15),
+  // Aurora — monochromatic olive field + one dim moon glow (oevra-style).
+  // Top-left dominant olive, bottom-left deeper olive for depth, bottom-right
+  // mid-olive warmth, single moon-white top-right. No sage to avoid the
+  // cool/warm green temperature clash.
+  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.32),
+  auroraSky: const Color.fromRGBO(254, 252, 251, 0.22),
+  auroraLavender: const Color.fromRGBO(93, 106, 53, 0.22),
+  auroraPeach: const Color.fromRGBO(138, 153, 80, 0.18),
   cardShadow: [
     BoxShadow(
       color: Colors.black.withValues(alpha: 0.30),

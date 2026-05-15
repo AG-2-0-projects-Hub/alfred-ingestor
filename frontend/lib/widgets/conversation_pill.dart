@@ -35,7 +35,20 @@ class _ConversationPillState extends State<ConversationPill>
     _pulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduceMotion) {
+      _pulse.stop();
+      _pulse.value = 1.0;
+    } else if (!_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    }
   }
 
   @override
@@ -53,14 +66,15 @@ class _ConversationPillState extends State<ConversationPill>
     final statusColor = widget._statusColor(context);
 
     final pad = widget.compact
-        ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
-        : const EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+        ? const EdgeInsets.symmetric(horizontal: 8, vertical: 12)
+        : const EdgeInsets.symmetric(horizontal: 12, vertical: 12);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),

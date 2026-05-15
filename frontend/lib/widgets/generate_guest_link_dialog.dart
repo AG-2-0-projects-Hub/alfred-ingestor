@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../screens/chat_live_screen.dart';
+import '../theme/app_theme.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -60,7 +62,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text('Error ${response.statusCode}: ${response.body}'),
-                backgroundColor: Colors.red),
+                backgroundColor: context.palette.danger),
           );
         }
       }
@@ -68,7 +70,8 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'), backgroundColor: Colors.red),
+              content: Text('Error: $e'),
+              backgroundColor: context.palette.danger),
         );
       }
     } finally {
@@ -168,11 +171,15 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   }
 
   Widget _urlRow(String label, String url) {
+    final palette = context.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
+                color: palette.textSecondary)),
         const SizedBox(height: 4),
         Row(
           children: [
@@ -180,13 +187,15 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
               child: Text(
                 url,
                 style: TextStyle(
-                    fontSize: 12, color: Colors.indigo.shade700),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: palette.primary),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 2,
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.copy, size: 18),
+              icon: const Icon(Icons.copy_rounded, size: 18),
               tooltip: 'Copy',
               onPressed: () => _copy(url),
             ),

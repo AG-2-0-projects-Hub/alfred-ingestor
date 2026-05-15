@@ -136,9 +136,9 @@ class _AuthScreenState extends State<AuthScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF0D5E57),
-            Color(0xFF0F766E),
-            Color(0xFF0EA5E9),
+            Color(0xFF3A4321),
+            Color(0xFF5D6A35),
+            Color(0xFF778643),
           ],
           stops: [0.0, 0.55, 1.0],
         ),
@@ -309,7 +309,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 splashRadius: 22,
                 tooltip: _showPassword ? 'Hide password' : 'Show password',
-                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 padding: EdgeInsets.zero,
                 onPressed: () =>
                     setState(() => _showPassword = !_showPassword),

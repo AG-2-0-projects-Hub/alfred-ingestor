@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_theme.dart';
 
 class FileStatusList extends StatelessWidget {
   final List<Map<String, String>> statuses;
@@ -33,6 +35,7 @@ class _FileStatusRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -41,11 +44,12 @@ class _FileStatusRow extends StatelessWidget {
           Row(
             children: [
               _StatusIcon(status: status),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   filename,
-                  style: const TextStyle(fontSize: 13),
+                  style: GoogleFonts.inter(
+                      fontSize: 13, color: palette.textPrimary),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -55,10 +59,11 @@ class _FileStatusRow extends StatelessWidget {
           ),
           if ((status == 'error' || status == 'timeout') && message.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 28, top: 2),
+              padding: const EdgeInsets.only(left: 28, top: 4),
               child: Text(
                 message,
-                style: const TextStyle(fontSize: 11, color: Colors.red),
+                style: GoogleFonts.inter(
+                    fontSize: 11, color: palette.danger),
               ),
             ),
         ],
@@ -73,27 +78,36 @@ class _StatusIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     switch (status) {
       case 'queued':
-        return const Icon(Icons.hourglass_empty, size: 18, color: Colors.grey);
+        return Icon(Icons.hourglass_empty_rounded,
+            size: 18, color: palette.textMuted);
       case 'processing':
-        return const SizedBox(
+        return SizedBox(
           width: 18,
           height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
+          child: CircularProgressIndicator(
+              strokeWidth: 2, color: palette.accent),
         );
       case 'done':
-        return const Icon(Icons.check_circle, size: 18, color: Colors.green);
+        return Icon(Icons.check_circle_rounded,
+            size: 18, color: palette.success);
       case 'already_in_db':
-        return const Icon(Icons.storage, size: 18, color: Colors.blueGrey);
+        return Icon(Icons.storage_rounded,
+            size: 18, color: palette.textSecondary);
       case 'file_updated':
-        return const Icon(Icons.update, size: 18, color: Colors.blue);
+        return Icon(Icons.update_rounded,
+            size: 18, color: palette.accent);
       case 'skipped':
-        return const Icon(Icons.skip_next, size: 18, color: Colors.orange);
+        return Icon(Icons.skip_next_rounded,
+            size: 18, color: palette.warning);
       case 'error':
-        return const Icon(Icons.error, size: 18, color: Colors.red);
+        return Icon(Icons.error_rounded,
+            size: 18, color: palette.danger);
       case 'timeout':
-        return const Icon(Icons.timer_off, size: 18, color: Colors.orange);
+        return Icon(Icons.timer_off_rounded,
+            size: 18, color: palette.warning);
       default:
         return const SizedBox(width: 18);
     }
@@ -106,19 +120,20 @@ class _StatusLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     final (label, color) = switch (status) {
-      'queued' => ('Queued', Colors.grey),
-      'processing' => ('Processing...', Colors.blue),
-      'done' => ('Done', Colors.green),
-      'already_in_db' => ('Already in database', Colors.blueGrey),
-      'file_updated' => ('File updated in database', Colors.blue),
-      'skipped' => ('Skipped', Colors.orange),
-      'error' => ('Error', Colors.red),
-      'timeout' => ('Timeout — try again', Colors.orange),
-      _ => (status, Colors.grey),
+      'queued' => ('Queued', palette.textMuted),
+      'processing' => ('Processing…', palette.accent),
+      'done' => ('Done', palette.success),
+      'already_in_db' => ('Already in database', palette.textSecondary),
+      'file_updated' => ('File updated in database', palette.accent),
+      'skipped' => ('Skipped', palette.warning),
+      'error' => ('Error', palette.danger),
+      'timeout' => ('Timeout — try again', palette.warning),
+      _ => (status, palette.textMuted),
     };
     return Text(label,
-        style: TextStyle(
+        style: GoogleFonts.inter(
             fontSize: 12, color: color, fontWeight: FontWeight.w500));
   }
 }

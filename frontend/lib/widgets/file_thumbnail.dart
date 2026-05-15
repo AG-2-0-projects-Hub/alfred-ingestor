@@ -71,21 +71,45 @@ class _FileThumbnailState extends State<FileThumbnail> {
   @override
   Widget build(BuildContext context) {
     final ext = widget.fileName.toLowerCase().split('.').last;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: widget.size,
-        height: widget.size,
-        color: context.palette.surfaceAlt,
-        child: _isImage && _imageUrl != null
-            ? Image.network(_imageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) {
-                final ico = _iconFor(context, ext);
-                return Icon(ico.icon, size: 20, color: ico.color);
-              })
-            : Builder(builder: (ctx) {
-                final ico = _iconFor(ctx, ext);
-                return Icon(ico.icon, size: 20, color: ico.color);
-              }),
+    return Tooltip(
+      message: widget.fileName,
+      child: Semantics(
+        label: 'File: ${widget.fileName}',
+        image: _isImage,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: widget.size,
+            height: widget.size,
+            color: context.palette.surfaceAlt,
+            child: _isImage && _imageUrl != null
+                ? Image.network(
+                    _imageUrl!,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (_, child, progress) {
+                      if (progress == null) return child;
+                      return Center(
+                        child: SizedBox(
+                          width: widget.size * 0.4,
+                          height: widget.size * 0.4,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: context.palette.textMuted,
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) {
+                      final ico = _iconFor(context, ext);
+                      return Icon(ico.icon, size: 20, color: ico.color);
+                    },
+                  )
+                : Builder(builder: (ctx) {
+                    final ico = _iconFor(ctx, ext);
+                    return Icon(ico.icon, size: 20, color: ico.color);
+                  }),
+          ),
+        ),
       ),
     );
   }

@@ -443,7 +443,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     'Alfred',
                     style: GoogleFonts.spaceGrotesk(
                       color: palette.primary,
-                      fontWeight: FontWeight.w300,
+                      fontWeight: FontWeight.w400,
                       fontSize: 20,
                     ),
                   ),

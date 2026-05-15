@@ -648,7 +648,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   Text('Extracted Knowledge',
                       style: TextStyle(
                           fontSize: 13,
-                          color: Colors.grey.shade600,
+                          color: context.palette.textSecondary,
                           fontWeight: FontWeight.w500)),
                   const SizedBox(height: 16),
                   Container(

@@ -1053,15 +1053,15 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                     filled: true,
                     fillColor: context.palette.surfaceAlt,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: context.palette.border),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: context.palette.border),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
                           color: context.palette.primary, width: 1.5),
                     ),
