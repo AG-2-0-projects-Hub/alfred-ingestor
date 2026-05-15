@@ -286,7 +286,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
           child: GlassPanel(
-            radius: 20,
+            radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
             tint: context.palette.glassTintHeavy,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
@@ -533,7 +533,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
               child: GlassPanel(
-                radius: 20,
+                radius: 24,
                 blurSigma: AppTheme.glassBlurSigmaHeavy,
                 tint: context.palette.glassTintStrong,
                 padding: const EdgeInsets.fromLTRB(28, 28, 28, 32),

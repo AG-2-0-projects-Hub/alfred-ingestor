@@ -298,13 +298,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           maxHeight: MediaQuery.of(context).size.height * 0.88,
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
               decoration: BoxDecoration(
                 color: palette.glassTintStrong,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: palette.glassBorderStrong),
               ),
               child: Column(
@@ -364,7 +364,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: modeColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(24),
               border: Border.all(color: modeColor.withValues(alpha: 0.45)),
             ),
             child: Text(
@@ -867,11 +867,11 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     } else if (isEscalated && isEmergency) {
       bgColor = context.palette.dangerContainer;
       border = Border.all(color: context.palette.danger, width: 1.5);
-      radius = BorderRadius.circular(14);
+      radius = BorderRadius.circular(12);
     } else if (isEscalated) {
       bgColor = context.palette.warningContainer;
       border = Border.all(color: context.palette.warning, width: 1.5);
-      radius = BorderRadius.circular(14);
+      radius = BorderRadius.circular(12);
     } else {
       bgColor = context.palette.surfaceAlt;
       radius = const BorderRadius.only(
@@ -1000,15 +1000,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 filled: true,
                 fillColor: context.palette.surfaceAlt,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide(color: context.palette.border),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide(color: context.palette.border),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(24),
                   borderSide:
                       BorderSide(color: context.palette.primary, width: 1.5),
                 ),
@@ -1089,7 +1089,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
           color: widget.isGuest
               ? context.palette.primaryContainer
               : context.palette.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: context.palette.border),
         ),
         child: Row(
