@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -25,6 +26,61 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
   bool _loadingArchived = false;
   List<Map<String, dynamic>> _archivedConvs = [];
 
+  late List<Map<String, dynamic>> _activeConversations;
+  StreamSubscription<List<Map<String, dynamic>>>? _convStream;
+  Map<String, String> _guestNamesByBooking = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _activeConversations =
+        List<Map<String, dynamic>>.from(widget.activeConversations);
+    for (final c in _activeConversations) {
+      final bid = c['booking_id'] as String?;
+      final name = c['guestName'] as String?;
+      if (bid != null && name != null) {
+        _guestNamesByBooking[bid] = name;
+      }
+    }
+    _subscribeConversations();
+  }
+
+  @override
+  void dispose() {
+    _convStream?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeConversations() {
+    _convStream = Supabase.instance.client
+        .from('conversations')
+        .stream(primaryKey: ['id'])
+        .eq('property_id', widget.property['id'] as String)
+        .listen((rows) {
+          if (!mounted) return;
+          final merged = <Map<String, dynamic>>[
+            for (final c in rows)
+              <String, dynamic>{
+                ...c,
+                'guestName':
+                    _guestNamesByBooking[c['booking_id'] as String? ?? ''] ??
+                        'Guest',
+              }
+          ];
+          merged.sort((a, b) {
+            int priority(Map<String, dynamic> x) {
+              final reason = x['escalation_reason'] as String?;
+              if (reason != null && reason.startsWith('emergency_')) return 0;
+              if (x['requires_attention'] == true) return 1;
+              if (x['mode'] == 'intervene') return 2;
+              return 3;
+            }
+            return priority(a).compareTo(priority(b));
+          });
+          setState(() => _activeConversations = merged);
+        });
+  }
+
   Future<void> _toggleArchived() async {
     if (_archivedExpanded) {
       setState(() => _archivedExpanded = false);
@@ -39,7 +95,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
     // in the active conversations list. Matches the existing
     // ArchivedChatsDialog behavior of querying the `guests` table directly.
     try {
-      final activeIds = widget.activeConversations
+      final activeIds = _activeConversations
           .map((c) => c['booking_id'] as String?)
           .whereType<String>()
           .toSet();
@@ -128,7 +184,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (widget.activeConversations.isEmpty)
+                  if (_activeConversations.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Text('No active conversations yet.',
@@ -140,7 +196,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                       child: SingleChildScrollView(
                         child: Column(
                           children: [
-                            for (final c in widget.activeConversations)
+                            for (final c in _activeConversations)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
                                 child: Row(

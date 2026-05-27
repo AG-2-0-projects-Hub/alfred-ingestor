@@ -18,7 +18,11 @@ class SetupStep {
   });
 }
 
-SetupStep? nextStepFor(String status, {bool hasIngestedFiles = false}) {
+SetupStep? nextStepFor(
+  String status, {
+  bool hasIngestedFiles = false,
+  bool hasMasterJson = false,
+}) {
   switch (status) {
     case 'Scraped':
       return SetupStep(
@@ -48,13 +52,14 @@ SetupStep? nextStepFor(String status, {bool hasIngestedFiles = false}) {
       );
     case 'Conflict_Pending':
       return SetupStep(
-        headline: 'Resolve conflicts to continue',
-        subtext: 'A few details disagree between your files. Pick the right answers.',
+        headline: 'Some details need your review',
+        subtext: 'A few items disagree between your files. Pick the right answers.',
         actionLabel: 'Resolve',
         icon: Icons.warning_amber_rounded,
         accent: (ctx) => ctx.palette.warning,
       );
     case 'Merged':
+      if (hasMasterJson) return null;
       return SetupStep(
         headline: 'Train Alfred to enable AI replies',
         subtext: 'Final step — Alfred learns your property and starts answering guests.',

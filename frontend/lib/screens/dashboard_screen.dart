@@ -35,6 +35,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
   StreamSubscription? _propertyStreamSub;
+  Timer? _refreshTimer;
 
   // Push-notification edge detection
   final Map<String, bool> _prevRequiresAttention = {};
@@ -46,7 +47,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _notifPermission = PushNotificationService.permissionState;
     _loadProperties().then((_) {
-      if (mounted) _subscribeRealtime();
+      if (!mounted) return;
+      _subscribeRealtime();
+      // Belt-and-suspenders: Supabase realtime streams can silently drop on
+      // the free tier. Re-fetch every 30s so stale state self-heals without
+      // a manual refresh.
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted) _loadProperties();
+      });
     });
   }
 
@@ -55,6 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _convStreamSub?.cancel();
     _guestStreamSub?.cancel();
     _propertyStreamSub?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
@@ -412,6 +421,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildScaffold(BuildContext context) {
     final palette = context.palette;
     final email = Supabase.instance.client.auth.currentUser?.email ?? '';
+    final screenW = MediaQuery.of(context).size.width;
+    final isNarrow = screenW < 480;
+    final isMedium = screenW < 700;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -454,38 +466,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: Center(
-                      child: Chip(
-                        avatar: Icon(
-                          Icons.notifications_off_rounded,
-                          size: 14,
-                          color: palette.warning,
-                        ),
-                        label: Text(
-                          'Enable notifications in browser settings',
+                      child: isMedium
+                          ? IconButton(
+                              tooltip: 'Notifications blocked — enable in browser settings',
+                              icon: Icon(
+                                Icons.notifications_off_rounded,
+                                size: 18,
+                                color: palette.warning,
+                              ),
+                              onPressed: () => setState(() => _showNotifChip = false),
+                            )
+                          : Chip(
+                              avatar: Icon(
+                                Icons.notifications_off_rounded,
+                                size: 14,
+                                color: palette.warning,
+                              ),
+                              label: Text(
+                                'Enable notifications in browser settings',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: palette.textSecondary,
+                                ),
+                              ),
+                              backgroundColor: palette.warningContainer.withValues(alpha: 0.6),
+                              side: BorderSide(color: palette.warning.withValues(alpha: 0.35)),
+                              onDeleted: () => setState(() => _showNotifChip = false),
+                              deleteIconColor: palette.textMuted,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                    ),
+                  ),
+                if (!isNarrow)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: isMedium ? 140 : 240),
+                        child: Text(
+                          email,
+                          overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: palette.textSecondary,
-                          ),
+                              fontSize: 13, color: palette.textSecondary),
                         ),
-                        backgroundColor: palette.warningContainer.withValues(alpha: 0.6),
-                        side: BorderSide(color: palette.warning.withValues(alpha: 0.35)),
-                        onDeleted: () => setState(() => _showNotifChip = false),
-                        deleteIconColor: palette.textMuted,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
                   ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Center(
-                    child: Text(
-                      email,
-                      style: GoogleFonts.inter(
-                          fontSize: 13, color: palette.textSecondary),
-                    ),
-                  ),
-                ),
                 IconButton(
                   tooltip: themeController.isDark
                       ? 'Switch to Daylight'
@@ -508,16 +535,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     await themeController.toggle();
                   },
                 ),
-                TextButton.icon(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout_rounded, size: 17),
-                  label: const Text('Logout'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: palette.textSecondary,
-                    textStyle: GoogleFonts.inter(
-                        fontWeight: FontWeight.w500, fontSize: 13),
+                if (isNarrow)
+                  IconButton(
+                    tooltip: 'Logout',
+                    onPressed: _logout,
+                    icon: const Icon(Icons.logout_rounded, size: 18),
+                    color: palette.textSecondary,
+                  )
+                else
+                  TextButton.icon(
+                    onPressed: _logout,
+                    icon: const Icon(Icons.logout_rounded, size: 17),
+                    label: const Text('Logout'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: palette.textSecondary,
+                      textStyle: GoogleFonts.inter(
+                          fontWeight: FontWeight.w500, fontSize: 13),
+                    ),
                   ),
-                ),
                 const SizedBox(width: 8),
               ],
             ),
@@ -601,26 +636,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildGrid() {
     final items = [..._properties, <String, dynamic>{}];
+    final n = items.length;
 
     return LayoutBuilder(builder: (context, constraints) {
-      int columns;
-      if (constraints.maxWidth > 1100) {
-        columns = 4;
-      } else if (constraints.maxWidth > 800) {
-        columns = 3;
-      } else if (constraints.maxWidth > 520) {
-        columns = 2;
-      } else {
-        columns = 1;
+      final viewportW = constraints.maxWidth;
+      final viewportH = constraints.maxHeight;
+
+      const minCardW = 240.0;
+      const minCardH = 280.0;
+      const gap = 18.0;
+      const padH = 28.0;
+      const padTop = kToolbarHeight + 28.0;
+      const padBottom = 32.0;
+
+      // Pick the largest column count whose card width is >= minCardW.
+      int bestCols = 1;
+      for (int cols = 1; cols <= 6; cols++) {
+        final cardW = (viewportW - padH * 2 - gap * (cols - 1)) / cols;
+        if (cardW >= minCardW) bestCols = cols;
       }
 
+      final rows = (n / bestCols).ceil();
+      final cardW =
+          (viewportW - padH * 2 - gap * (bestCols - 1)) / bestCols;
+      final availH = viewportH - padTop - padBottom - gap * (rows - 1);
+      final fillH = availH / rows;
+
+      // If all rows fit at minCardH or taller, fill the viewport.
+      // Otherwise, fall back to a scrollable grid with a sensible aspect.
+      final fits = fillH >= minCardH;
+      // Cap the fill height so a lone card on a tall viewport doesn't get
+      // stretched into a ridiculous portrait.
+      final maxCardH = cardW * 1.6;
+      final cardH = fits
+          ? (fillH > maxCardH ? maxCardH : fillH)
+          : (cardW * 340 / 280);
+      final aspect = cardW / cardH;
+
       return GridView.builder(
-        padding: EdgeInsets.fromLTRB(28, kToolbarHeight + 28, 28, 48),
+        padding: const EdgeInsets.fromLTRB(padH, padTop, padH, padBottom),
+        physics: fits
+            ? const NeverScrollableScrollPhysics()
+            : const AlwaysScrollableScrollPhysics(),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: 18,
-          mainAxisSpacing: 18,
-          childAspectRatio: 280 / 390,
+          crossAxisCount: bestCols,
+          crossAxisSpacing: gap,
+          mainAxisSpacing: gap,
+          childAspectRatio: aspect,
         ),
         itemCount: items.length,
         itemBuilder: (context, index) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -58,6 +59,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   final _editProblemCtrl = TextEditingController();
   final _editSolutionCtrl = TextEditingController();
 
+  // Live property subscription while the drawer is open. Without this, the
+  // dashboard's stream updates the underlying property but the drawer keeps
+  // showing stale status / banner state.
+  StreamSubscription<List<Map<String, dynamic>>>? _propStream;
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +74,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       vsync: this,
     );
     _loadHeroUrl();
+    _subscribeProperty();
   }
 
   @override
@@ -77,7 +84,21 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     _kbChatController.dispose();
     _editProblemCtrl.dispose();
     _editSolutionCtrl.dispose();
+    _propStream?.cancel();
     super.dispose();
+  }
+
+  void _subscribeProperty() {
+    _propStream = Supabase.instance.client
+        .from('properties')
+        .stream(primaryKey: ['id'])
+        .eq('id', _property['id'] as String)
+        .listen((rows) {
+          if (!mounted || rows.isEmpty) return;
+          setState(() {
+            _property = <String, dynamic>{..._property, ...rows.first};
+          });
+        });
   }
 
   Future<void> _loadHeroUrl() async {
@@ -482,7 +503,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final status = _property['status'] as String? ?? '';
     final airbnbUrl = _property['airbnb_url'] as String? ?? '';
     final createdAt = _property['created_at'] as String? ?? '';
-    final setupStep = nextStepFor(status);
+    final setupStep = nextStepFor(
+      status,
+      hasMasterJson: _property['master_json'] != null,
+    );
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),

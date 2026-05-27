@@ -55,6 +55,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     final raw = widget.property['file_fingerprints'] as Map<String, dynamic>? ?? {};
     _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
     _propertyStatus = widget.property['status'] as String?;
+    _masterJson = widget.property['master_json'] as Map<String, dynamic>?;
   }
 
   @override
@@ -335,7 +336,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
               children: [
                 // Guided next-step banner
                 Builder(builder: (ctx) {
-                  final step = nextStepFor(_propertyStatus ?? '');
+                  final step = nextStepFor(
+                    _propertyStatus ?? '',
+                    hasMasterJson: _masterJson != null,
+                  );
                   if (step == null) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 20),

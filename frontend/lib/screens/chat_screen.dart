@@ -20,9 +20,11 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen>
+    with SingleTickerProviderStateMixin {
   String? _conversationId;
   String? _propertyName;
+  String _mode = 'autopilot';
   List<Map<String, dynamic>> _messages = [];
   bool _isWaiting = false;
   bool _isRecording = false;
@@ -31,11 +33,17 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _modeSubscription;
+  late final AnimationController _pulseCtrl;
 
   @override
   void initState() {
     super.initState();
     _recorder = AudioRecorder();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
     _loadConversation();
     _watchConversation();
   }
@@ -44,6 +52,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _subscription?.cancel();
     _convSubscription?.cancel();
+    _modeSubscription?.cancel();
+    _pulseCtrl.dispose();
     _recorder?.dispose();
     _controller.dispose();
     _scrollController.dispose();
@@ -53,7 +63,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadConversation() async {
     final result = await Supabase.instance.client
         .from('conversations')
-        .select('id, property_id')
+        .select('id, property_id, mode')
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
@@ -66,6 +76,7 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _conversationId = result['id'] as String;
           _propertyName = propResult?['name'] as String?;
+          _mode = (result['mode'] as String?) ?? 'autopilot';
         });
         _subscribeToMessages(result['id'] as String);
       }
@@ -74,13 +85,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _watchConversation() {
     _convSubscription?.cancel();
-    _convSubscription = Supabase.instance.client
+    _modeSubscription?.cancel();
+    // Stream the conversation row by booking_id. Always update _mode from
+    // incoming rows (do NOT early-return once a conversation exists — the
+    // host taking over flips mode from 'autopilot' to 'intervene' and the
+    // guest must see the banner appear without a refresh).
+    _modeSubscription = Supabase.instance.client
         .from('conversations')
         .stream(primaryKey: ['id'])
         .eq('booking_id', widget.bookingId)
         .listen((rows) {
-          if (!mounted || rows.isEmpty || _conversationId != null) return;
-          _loadConversation();
+          if (!mounted || rows.isEmpty) return;
+          final row = rows.first;
+          final newMode = (row['mode'] as String?) ?? 'autopilot';
+          if (_mode != newMode) {
+            setState(() => _mode = newMode);
+          }
+          if (_conversationId == null) {
+            _loadConversation();
+          }
         });
   }
 
@@ -251,6 +274,7 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(
             children: [
               const SizedBox(height: kToolbarHeight + 24),
+              if (_mode == 'intervene') _buildInterventionBanner(),
               Expanded(
                 child: _messages.isEmpty && !_isWaiting
                     ? _buildEmptyState()
@@ -317,6 +341,71 @@ class _ChatScreenState extends State<ChatScreen> {
                             fontSize: 11, color: context.palette.textMuted),
                       ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInterventionBanner() {
+    final amber = context.palette.warning;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: amber.withValues(alpha: 0.35)),
+              boxShadow: [
+                BoxShadow(
+                  color: amber.withValues(alpha: 0.22),
+                  blurRadius: 18,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                AnimatedBuilder(
+                  animation: _pulseCtrl,
+                  builder: (_, __) {
+                    final t = _pulseCtrl.value;
+                    return Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: amber,
+                        boxShadow: [
+                          BoxShadow(
+                            color: amber.withValues(alpha: 0.55 + 0.35 * t),
+                            blurRadius: 6 + 6 * t,
+                            spreadRadius: 0,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'The host is now attending your inquiry',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: context.palette.textPrimary,
+                    ),
+                  ),
                 ),
               ],
             ),
