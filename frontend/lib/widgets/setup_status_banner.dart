@@ -43,7 +43,7 @@ class SetupStatusBanner extends StatelessWidget {
               children: [
                 Text(
                   step.headline,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                     color: context.palette.textPrimary,

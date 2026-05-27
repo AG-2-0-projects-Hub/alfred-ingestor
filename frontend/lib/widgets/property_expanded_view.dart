@@ -164,7 +164,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                       Expanded(
                         child: Text(
                           widget.property['name'] as String? ?? 'Property',
-                          style: GoogleFonts.spaceGrotesk(
+                          style: GoogleFonts.plusJakartaSans(
                             fontSize: 20, fontWeight: FontWeight.w300,
                             color: palette.textPrimary,
                           ),
@@ -178,7 +178,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                   ),
                   const SizedBox(height: 12),
                   Text('Active Conversations',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.plusJakartaSans(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: palette.textSecondary,
                     ),
@@ -230,7 +230,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                           ),
                           const SizedBox(width: 6),
                           Text('Archived',
-                            style: GoogleFonts.spaceGrotesk(
+                            style: GoogleFonts.plusJakartaSans(
                               fontSize: 13, fontWeight: FontWeight.w600,
                               color: palette.textSecondary,
                             ),

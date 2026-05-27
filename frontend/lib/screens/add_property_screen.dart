@@ -317,7 +317,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   propertyName.isNotEmpty
                       ? propertyName
                       : 'Property Registered',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                       fontSize: 20,
                       fontWeight: FontWeight.w300,
                       color: context.palette.textPrimary),
@@ -466,9 +466,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       p: TextStyle(color: palette.textPrimary, fontSize: 13, height: 1.6),
       strong: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
       em: TextStyle(color: palette.textPrimary, fontStyle: FontStyle.italic),
-      h1: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.w300, color: palette.textPrimary),
-      h2: GoogleFonts.spaceGrotesk(fontSize: 17, fontWeight: FontWeight.w500, color: palette.textPrimary),
-      h3: GoogleFonts.spaceGrotesk(fontSize: 15, fontWeight: FontWeight.w500, color: palette.textPrimary),
+      h1: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w300, color: palette.textPrimary),
+      h2: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w500, color: palette.textPrimary),
+      h3: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w500, color: palette.textPrimary),
       code: TextStyle(
         color: cs.secondary,
         fontFamily: 'monospace',
@@ -512,7 +512,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               elevation: 0,
               surfaceTintColor: Colors.transparent,
               title: Text('Add Property',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                       fontWeight: FontWeight.w300,
                       fontSize: 18,
                       color: context.palette.primary)),
@@ -591,7 +591,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   onPressed: canIngest ? _startIngest : null,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    textStyle: GoogleFonts.spaceGrotesk(
+                    textStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                         letterSpacing: 1.2),
@@ -641,7 +641,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   ],
                   if (_officialPropertyName != null) ...[
                     Text(_officialPropertyName!,
-                        style: GoogleFonts.spaceGrotesk(
+                        style: GoogleFonts.plusJakartaSans(
                             fontSize: 24,
                             fontWeight: FontWeight.w300,
                             color: context.palette.textPrimary)),
@@ -681,7 +681,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         backgroundColor: context.palette.primary,
-                        textStyle: GoogleFonts.spaceGrotesk(
+                        textStyle: GoogleFonts.plusJakartaSans(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                             letterSpacing: 1.2),

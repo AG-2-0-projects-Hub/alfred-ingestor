@@ -389,7 +389,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 16),
             Text(
               property['name'] as String? ?? 'Property',
-              style: GoogleFonts.spaceGrotesk(
+              style: GoogleFonts.plusJakartaSans(
                   fontWeight: FontWeight.w500, fontSize: 15),
             ),
             const SizedBox(height: 8),
@@ -439,24 +439,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               elevation: 0,
               title: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [palette.primary, palette.accent],
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.home_work_rounded,
-                        color: Colors.white, size: 20),
-                  ),
+                  Icon(Icons.home_work_outlined,
+                      color: palette.textPrimary, size: 22),
                   const SizedBox(width: 10),
                   Text(
                     'Alfred',
-                    style: GoogleFonts.spaceGrotesk(
-                      color: palette.primary,
-                      fontWeight: FontWeight.w400,
-                      fontSize: 20,
+                    style: GoogleFonts.plusJakartaSans(
+                      color: palette.textPrimary,
+                      fontWeight: FontWeight.w300,
+                      fontSize: 22,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ],
@@ -600,7 +592,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 24),
                     Text('Welcome to Alfred',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.plusJakartaSans(
                           fontSize: 22,
                           fontWeight: FontWeight.w300,
                           color: palette.textPrimary),

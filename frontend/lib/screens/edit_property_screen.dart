@@ -288,9 +288,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       p: TextStyle(color: palette.textPrimary, fontSize: 13, height: 1.6),
       strong: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
       em: TextStyle(color: palette.textPrimary, fontStyle: FontStyle.italic),
-      h1: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.w300, color: palette.textPrimary),
-      h2: GoogleFonts.spaceGrotesk(fontSize: 17, fontWeight: FontWeight.w500, color: palette.textPrimary),
-      h3: GoogleFonts.spaceGrotesk(fontSize: 15, fontWeight: FontWeight.w500, color: palette.textPrimary),
+      h1: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w300, color: palette.textPrimary),
+      h2: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w500, color: palette.textPrimary),
+      h3: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w500, color: palette.textPrimary),
       code: TextStyle(
         color: cs.secondary,
         fontFamily: 'monospace',

@@ -330,7 +330,7 @@ class _ChatScreenState extends State<ChatScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('Alfred',
-                        style: GoogleFonts.spaceGrotesk(
+                        style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w300,
                             fontSize: 18,
                             color: context.palette.primary)),

@@ -274,7 +274,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 children: [
                   Text(
                     'Live Chat',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w300,
                         fontSize: 18,
                         color: context.palette.primary),
@@ -308,7 +308,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Text(
                     'Conversation',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                         color: context.palette.textSecondary),
@@ -408,7 +408,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
             children: [
               Text(
                 'Guest Chat Link',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                     color: context.palette.textPrimary),
@@ -486,7 +486,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         children: [
           Text(
             'Mode',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.plusJakartaSans(
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
                 color: context.palette.textPrimary),

@@ -136,9 +136,9 @@ class _AuthScreenState extends State<AuthScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF3A4321),
-            Color(0xFF5D6A35),
-            Color(0xFF778643),
+            Color(0xFF1F0E3D), // deepest obsidian-amethyst
+            Color(0xFF3D1C6B), // deep amethyst
+            Color(0xFF6E38A7), // ethereal amethyst
           ],
           stops: [0.0, 0.55, 1.0],
         ),
@@ -159,7 +159,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 const Spacer(),
                 Text(
                   'Give yourself\nthe gift of time.',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                     fontSize: 42,
                     fontWeight: FontWeight.w300,
                     color: Colors.white,
@@ -244,7 +244,7 @@ class _AuthScreenState extends State<AuthScreen> {
         const SizedBox(width: 10),
         Text(
           'Alfred',
-          style: GoogleFonts.spaceGrotesk(
+          style: GoogleFonts.plusJakartaSans(
             fontSize: large ? 28 : 22,
             fontWeight: FontWeight.w300,
             color: color,
@@ -262,7 +262,7 @@ class _AuthScreenState extends State<AuthScreen> {
       children: [
         Text(
           _isLogin ? 'Welcome back' : 'Create your account',
-          style: GoogleFonts.spaceGrotesk(
+          style: GoogleFonts.plusJakartaSans(
             fontSize: 26,
             fontWeight: FontWeight.w300,
             color: context.palette.textPrimary,
@@ -337,7 +337,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   )
                 : Text(
                     _isLogin ? 'Sign In' : 'Sign Up',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.plusJakartaSans(
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
                     ),

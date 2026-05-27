@@ -471,7 +471,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               children: [
                 Text(
                   name,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w500,

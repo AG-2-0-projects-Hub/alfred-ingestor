@@ -128,7 +128,7 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
               const SizedBox(height: 16),
               Text(
                 'Add Property',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.plusJakartaSans(
                   fontSize: 15,
                   fontWeight: FontWeight.w400,
                   color: palette.primary,
@@ -302,7 +302,7 @@ class _PropertyCardState extends State<_PropertyCard> {
                       children: [
                         Text(
                           name,
-                          style: GoogleFonts.spaceGrotesk(
+                          style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
                             fontWeight: FontWeight.w400,
                             color: palette.textPrimary,
@@ -561,17 +561,25 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final (label, bg, fg) = switch (status) {
-      'Ingesting' || 'Training' => ('Processing', p.accentContainer, p.accent),
-      'Ingested' => ('Ingested', p.warningContainer, p.warning),
-      'Merged' || 'Trained' || 'Resolved' => ('Ready', p.successContainer, p.success),
-      'Active' => ('Active', p.successContainer, p.success),
-      'Conflict_Pending' => ('Conflicts', p.warningContainer, p.warning),
-      String s when s.contains('Error') => ('Error', p.dangerContainer, p.danger),
+    // Status → (label, bg, fg, glowAlpha). glowAlpha == 0 means no glow.
+    // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
+    // bioluminescent mint; emergencies/errors get warm red glow.
+    final (label, bg, fg, glowAlpha) = switch (status) {
+      'Ingesting' || 'Training' =>
+        ('Processing', p.accentContainer, p.accent, 0.25),
+      'Ingested' => ('Ingested', p.warningContainer, p.warning, 0.35),
+      'Merged' || 'Trained' || 'Resolved' =>
+        ('Ready', p.successContainer, p.success, 0.35),
+      'Active' => ('Active', p.accentContainer, p.accent, 0.30),
+      'Conflict_Pending' =>
+        ('Conflicts', p.warningContainer, p.warning, 0.35),
+      String s when s.contains('Error') =>
+        ('Error', p.dangerContainer, p.danger, 0.40),
       _ => (
           status.isNotEmpty ? status : 'Unknown',
           p.surfaceAlt,
           p.textSecondary,
+          0.0,
         ),
     };
 
@@ -580,6 +588,15 @@ class _StatusBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(100),
+        boxShadow: glowAlpha > 0
+            ? [
+                BoxShadow(
+                  color: fg.withValues(alpha: glowAlpha),
+                  blurRadius: 8,
+                  spreadRadius: 0,
+                ),
+              ]
+            : null,
       ),
       child: Text(
         label,

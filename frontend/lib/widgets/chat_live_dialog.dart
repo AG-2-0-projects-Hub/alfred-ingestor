@@ -344,7 +344,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
               children: [
                 Text(
                   widget.propertyName.isEmpty ? 'Live Chat' : widget.propertyName,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                     fontSize: 17,
                     fontWeight: FontWeight.w300,
                     color: palette.primary,
@@ -403,7 +403,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Text(
                   'Conversation',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.plusJakartaSans(
                       fontWeight: FontWeight.w600,
                       fontSize: 12,
                       color: context.palette.textSecondary),
@@ -497,7 +497,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             children: [
               Text(
                 'Guest Chat Link',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                     color: context.palette.textPrimary),
@@ -574,7 +574,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         children: [
           Text(
             'Mode',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.plusJakartaSans(
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
                 color: context.palette.textPrimary),

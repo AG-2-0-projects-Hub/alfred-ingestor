@@ -212,42 +212,44 @@ extension PaletteX on BuildContext {
 }
 
 // ── Daylight palette ────────────────────────────────────────────────────────
-// Olive/sage tokens from _Context/Design inspo/Design_inspo_Alfred.json.
+// Amethyst aurora aesthetic — soft lavender-white base, full amethyst primary,
+// vapor-blue accent, teal-mint success.
 final AppPalette _daylightPalette = AppPalette(
-  primary: const Color(0xFF778643),
-  primaryHover: const Color(0xFF8A9A4D),
-  primaryDark: const Color(0xFF5D6A35),
-  primaryContainer: const Color(0xFFE4E8D4),
-  onPrimaryContainer: const Color(0xFF3A4321),
-  accent: const Color(0xFF6B7280),
-  accentContainer: const Color(0xFFE5E7EB),
-  onAccentContainer: const Color(0xFF374151),
-  background: const Color(0xFFFEFCFB),
-  surface: const Color(0xFFEFEFEF),
-  surfaceAlt: const Color(0xFFE8E8E8),
+  primary: const Color(0xFF6E38A7),
+  primaryHover: const Color(0xFF8052BD),
+  primaryDark: const Color(0xFF4F2480),
+  primaryContainer: const Color.fromRGBO(110, 56, 167, 0.10),
+  onPrimaryContainer: const Color(0xFF2A104A),
+  accent: const Color(0xFF3A7FBF),
+  accentContainer: const Color.fromRGBO(58, 127, 191, 0.10),
+  onAccentContainer: const Color(0xFF11365C),
+  background: const Color(0xFFF4F3FF),
+  surface: const Color(0xFFEEEDF8),
+  surfaceAlt: const Color(0xFFE4E2F1),
   border: const Color.fromRGBO(0, 0, 0, 0.08),
   borderStrong: const Color.fromRGBO(0, 0, 0, 0.18),
   textPrimary: const Color(0xFF161E29),
   textSecondary: const Color(0xFF3D4452),
   textMuted: const Color(0xFF8A8F98),
-  success: const Color(0xFF059669),
-  successContainer: const Color(0xFFD1FAE5),
+  success: const Color(0xFF16A875),
+  successContainer: const Color.fromRGBO(22, 168, 117, 0.12),
   warning: const Color(0xFFD97706),
   warningContainer: const Color(0xFFFEF3C7),
-  danger: const Color(0xFFDC2626),
+  danger: const Color(0xFFE05252),
   dangerContainer: const Color(0xFFFEE2E2),
   glassTint: const Color.fromRGBO(255, 255, 255, 0.60),
   glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.75),
   glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.90),
   glassBorder: const Color.fromRGBO(0, 0, 0, 0.08),
   glassBorderStrong: const Color.fromRGBO(0, 0, 0, 0.15),
-  // Aurora — monochromatic olive family + one warm-white moon glow (oevra-style).
-  // All four blobs sit on the same olive hue at varying alpha to avoid the
-  // sage/olive temperature clash; the moon is the single light accent.
-  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.10),
-  auroraSky: const Color.fromRGBO(254, 252, 251, 0.45),
-  auroraLavender: const Color.fromRGBO(119, 134, 67, 0.06),
-  auroraPeach: const Color.fromRGBO(138, 153, 80, 0.08),
+  // Aurora — amethyst-aurora aesthetic. Baked alphas are render-faithful at
+  // intensity = 1.0; AuroraBackground multiplies these by the intensity arg.
+  // Blob slots: teal=amethyst, sky=vapor blue, lavender=mint accent,
+  // peach=deep amethyst (slot names kept for backward compat).
+  auroraTeal: const Color.fromRGBO(110, 56, 167, 0.12),
+  auroraSky: const Color.fromRGBO(77, 166, 255, 0.08),
+  auroraLavender: const Color.fromRGBO(127, 255, 190, 0.06),
+  auroraPeach: const Color.fromRGBO(61, 28, 107, 0.10),
   cardShadow: [
     BoxShadow(
       color: Colors.black.withValues(alpha: 0.08),
@@ -257,7 +259,7 @@ final AppPalette _daylightPalette = AppPalette(
   ],
   cardShadowHover: [
     BoxShadow(
-      color: const Color(0xFF778643).withValues(alpha: 0.20),
+      color: const Color(0xFF6E38A7).withValues(alpha: 0.20),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
@@ -277,43 +279,44 @@ final AppPalette _daylightPalette = AppPalette(
 );
 
 // ── Midnight palette ────────────────────────────────────────────────────────
-// Olive/sage tokens from _Context/Design inspo/Design_inspo_Alfred.json.
+// Deep obsidian base + amethyst aurora. Primary is desaturated from brand
+// pure #6E38A7 to #7B5EA7 for better UI contrast and button usability.
 final AppPalette _midnightPalette = AppPalette(
-  primary: const Color(0xFF778643),
-  primaryHover: const Color(0xFF8A9A4D),
-  primaryDark: const Color(0xFF5D6A35),
-  primaryContainer: const Color.fromRGBO(119, 134, 67, 0.18),
+  primary: const Color(0xFF7B5EA7),
+  primaryHover: const Color(0xFF8D6FC0),
+  primaryDark: const Color(0xFF5E4480),
+  primaryContainer: const Color.fromRGBO(123, 94, 167, 0.18),
   onPrimaryContainer: const Color(0xFFFEFCFB),
-  accent: const Color(0xFF9CA3AF),
-  accentContainer: const Color.fromRGBO(156, 163, 175, 0.15),
+  accent: const Color(0xFF4DA6FF),
+  accentContainer: const Color.fromRGBO(77, 166, 255, 0.12),
   onAccentContainer: const Color(0xFFFEFCFB),
-  background: const Color(0xFF050506),
-  surface: const Color(0xFF0A0A0C),
-  surfaceAlt: const Color(0xFF0D0D10),
+  background: const Color(0xFF0A0B10),
+  surface: const Color(0xFF12141C),
+  surfaceAlt: const Color(0xFF1A1C25),
   border: const Color.fromRGBO(255, 255, 255, 0.08),
   borderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
   textPrimary: const Color(0xFFFEFCFB),
   textSecondary: const Color(0xFFEFEFEF),
   textMuted: const Color(0xFF8A8F98),
-  success: const Color(0xFF4ADE80),
-  successContainer: const Color.fromRGBO(74, 222, 128, 0.15),
-  warning: const Color(0xFFFBBF24),
-  warningContainer: const Color.fromRGBO(251, 191, 36, 0.15),
-  danger: const Color(0xFFF87171),
-  dangerContainer: const Color.fromRGBO(248, 113, 113, 0.15),
-  glassTint: const Color.fromRGBO(255, 255, 255, 0.05),
-  glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.10),
-  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.15),
+  success: const Color(0xFF7FFFBE),
+  successContainer: const Color.fromRGBO(127, 255, 190, 0.12),
+  warning: const Color(0xFFF5A623),
+  warningContainer: const Color.fromRGBO(245, 166, 35, 0.15),
+  danger: const Color(0xFFE05252),
+  dangerContainer: const Color.fromRGBO(224, 82, 82, 0.15),
+  glassTint: const Color.fromRGBO(255, 255, 255, 0.04),
+  glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.08),
+  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.12),
   glassBorder: const Color.fromRGBO(255, 255, 255, 0.08),
   glassBorderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
-  // Aurora — monochromatic olive field + one dim moon glow (oevra-style).
-  // Top-left dominant olive, bottom-left deeper olive for depth, bottom-right
-  // mid-olive warmth, single moon-white top-right. No sage to avoid the
-  // cool/warm green temperature clash.
-  auroraTeal: const Color.fromRGBO(119, 134, 67, 0.32),
-  auroraSky: const Color.fromRGBO(254, 252, 251, 0.22),
-  auroraLavender: const Color.fromRGBO(93, 106, 53, 0.22),
-  auroraPeach: const Color.fromRGBO(138, 153, 80, 0.18),
+  // Aurora — Midnight aesthetic. Baked alphas are render-faithful at
+  // intensity = 1.0; AuroraBackground multiplies these by the intensity arg.
+  // Blob slots: teal=ethereal amethyst, sky=vapor blue, lavender=mint accent,
+  // peach=deep amethyst (slot names kept for backward compat).
+  auroraTeal: const Color.fromRGBO(110, 56, 167, 0.30),
+  auroraSky: const Color.fromRGBO(77, 166, 255, 0.20),
+  auroraLavender: const Color.fromRGBO(127, 255, 190, 0.12),
+  auroraPeach: const Color.fromRGBO(61, 28, 107, 0.25),
   cardShadow: [
     BoxShadow(
       color: Colors.black.withValues(alpha: 0.30),
@@ -323,7 +326,7 @@ final AppPalette _midnightPalette = AppPalette(
   ],
   cardShadowHover: [
     BoxShadow(
-      color: const Color(0xFF778643).withValues(alpha: 0.25),
+      color: const Color(0xFF7B5EA7).withValues(alpha: 0.25),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
@@ -416,7 +419,7 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 1,
         shadowColor: const Color(0x30000000),
-        titleTextStyle: GoogleFonts.spaceGrotesk(
+        titleTextStyle: GoogleFonts.plusJakartaSans(
           fontSize: 20,
           fontWeight: FontWeight.w300,
           color: p.primary,
@@ -505,7 +508,7 @@ class AppTheme {
         indicatorColor: p.primary,
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: p.border,
-        labelStyle: GoogleFonts.spaceGrotesk(fontWeight: FontWeight.w600, fontSize: 13),
+        labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 13),
         unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
       ),
       dividerTheme: DividerThemeData(
@@ -518,7 +521,7 @@ class AppTheme {
         shadowColor: const Color(0x40000000),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         backgroundColor: p.surface,
-        titleTextStyle: GoogleFonts.spaceGrotesk(
+        titleTextStyle: GoogleFonts.plusJakartaSans(
           fontSize: 17,
           fontWeight: FontWeight.w300,
           color: p.textPrimary,
@@ -546,7 +549,7 @@ class AppTheme {
   }
 
   static TextTheme _buildTextTheme(AppPalette p) {
-    final heading = GoogleFonts.spaceGroteskTextTheme();
+    final heading = GoogleFonts.plusJakartaSansTextTheme();
     final inter = GoogleFonts.interTextTheme();
     return TextTheme(
       displayLarge:  heading.displayLarge?.copyWith(fontWeight: FontWeight.w300, color: p.textPrimary),

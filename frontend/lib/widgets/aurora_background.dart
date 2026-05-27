@@ -8,12 +8,14 @@ import '../theme/app_theme.dart';
 /// glassmorphic surfaces.
 class AuroraBackground extends StatelessWidget {
   final Widget child;
+  // Multiplier on the palette's baked-in blob alpha. 1.0 renders the palette
+  // colors faithfully; <1.0 dims the aurora globally (useful on busy screens).
   final double intensity;
 
   const AuroraBackground({
     super.key,
     required this.child,
-    this.intensity = 0.50,
+    this.intensity = 1.0,
   });
 
   @override
@@ -24,29 +26,33 @@ class AuroraBackground extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         ColoredBox(color: p.background),
+        // Ethereal amethyst — top-left dominant blob.
         _Blob(
           color: p.auroraTeal,
           alignment: const Alignment(-0.9, -0.95),
           size: 720,
-          opacity: intensity,
+          intensity: intensity,
         ),
+        // Vapor blue — top-right.
         _Blob(
           color: p.auroraSky,
           alignment: const Alignment(0.9, -0.85),
           size: 640,
-          opacity: intensity * 0.85,
+          intensity: intensity,
         ),
+        // Bioluminescent mint — bottom-left, smaller accent only.
         _Blob(
           color: p.auroraLavender,
           alignment: const Alignment(-0.85, 0.95),
-          size: 680,
-          opacity: intensity * 0.7,
+          size: 420,
+          intensity: intensity,
         ),
+        // Deep amethyst — bottom-right anchor.
         _Blob(
           color: p.auroraPeach,
           alignment: const Alignment(0.95, 0.95),
-          size: 560,
-          opacity: intensity * 0.6,
+          size: 600,
+          intensity: intensity,
         ),
         if (!reduceMotion)
           BackdropFilter(
@@ -63,17 +69,22 @@ class _Blob extends StatelessWidget {
   final Color color;
   final Alignment alignment;
   final double size;
-  final double opacity;
+  final double intensity;
 
   const _Blob({
     required this.color,
     required this.alignment,
     required this.size,
-    required this.opacity,
+    required this.intensity,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Respect the baked-in alpha from the palette so each blob renders at
+    // its theme-specified opacity. The intensity multiplier scales them
+    // globally (e.g. to mute the aurora on busy screens).
+    final baseAlpha = color.a;
+    final alpha = (baseAlpha * intensity).clamp(0.0, 1.0);
     return Align(
       alignment: alignment,
       child: IgnorePointer(
@@ -84,7 +95,7 @@ class _Blob extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                color.withValues(alpha: opacity),
+                color.withValues(alpha: alpha),
                 color.withValues(alpha: 0.0),
               ],
               stops: const [0.0, 1.0],
