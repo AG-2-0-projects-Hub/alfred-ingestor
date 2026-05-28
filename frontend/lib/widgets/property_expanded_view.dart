@@ -139,9 +139,13 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    final screenW = MediaQuery.of(context).size.width;
+    final isMobile = screenW < 600;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+      insetPadding: isMobile
+          ? const EdgeInsets.symmetric(horizontal: 12, vertical: 32)
+          : const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
         child: BackdropFilter(
@@ -154,7 +158,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
               border: Border.all(color: palette.glassBorderStrong),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(isMobile ? 16 : 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,

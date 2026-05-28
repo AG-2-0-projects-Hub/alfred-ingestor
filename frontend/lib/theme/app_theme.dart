@@ -363,6 +363,17 @@ class AppTheme {
   // Design-token interaction-scale: 0.97 → 1.0 on press.
   static const double pressScale = 0.97;
 
+  /// Scale a desktop-tuned heading down for narrow viewports.
+  ///
+  /// Below 600px → 0.85×, below 400px → 0.78×. Use for h1 / large section
+  /// titles only; body text (Inter) is already mobile-friendly at 13–14pt.
+  static double responsiveFontSize(BuildContext context, double base) {
+    final w = MediaQuery.of(context).size.width;
+    if (w < 400) return base * 0.78;
+    if (w < 600) return base * 0.85;
+    return base;
+  }
+
   // ── Themes ────────────────────────────────────────────────────────────────
   static ThemeData get daylightTheme => _buildTheme(_daylightPalette, Brightness.light);
   static ThemeData get midnightTheme => _buildTheme(_midnightPalette, Brightness.dark);

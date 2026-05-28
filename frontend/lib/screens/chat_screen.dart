@@ -266,6 +266,7 @@ class _ChatScreenState extends State<ChatScreen>
     return Scaffold(
       backgroundColor: Colors.transparent,
       extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: AuroraBackground(
         intensity: 0.45,
@@ -577,7 +578,7 @@ class _ChatScreenState extends State<ChatScreen>
                 icon: const Icon(Icons.image_outlined, size: 20),
                 color: context.palette.textSecondary,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               ),
               IconButton(
                 onPressed: _isWaiting
@@ -591,7 +592,7 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
                 color: _isRecording ? context.palette.danger : context.palette.textSecondary,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               ),
               const SizedBox(width: 4),
               IconButton(
@@ -675,7 +676,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
               ),
               color: widget.isGuest ? Colors.white : context.palette.primary,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             ),
             const SizedBox(width: 6),
             Text(

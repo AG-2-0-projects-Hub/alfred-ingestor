@@ -160,7 +160,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 Text(
                   'Give yourself\nthe gift of time.',
                   style: GoogleFonts.plusJakartaSans(
-                    fontSize: 42,
+                    fontSize: AppTheme.responsiveFontSize(context, 42),
                     fontWeight: FontWeight.w300,
                     color: Colors.white,
                     height: 1.2,

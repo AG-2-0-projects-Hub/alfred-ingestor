@@ -100,11 +100,22 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screenW = MediaQuery.of(context).size.width;
+    final isMobile = screenW < 600;
     return AlertDialog(
+      insetPadding: isMobile
+          ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      contentPadding: EdgeInsets.fromLTRB(
+          isMobile ? 14 : 24, 20, isMobile ? 14 : 24, 0),
+      actionsPadding: EdgeInsets.fromLTRB(
+          isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
+      actionsOverflowDirection: VerticalDirection.up,
+      actionsOverflowButtonSpacing: isMobile ? 8 : null,
       title: Text(_result != null
           ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
           : 'New Guest Link'),
-      content: _result == null ? _buildStep1() : _buildStep2(),
+      content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
       actions: _result == null
           ? [
               TextButton(
@@ -135,9 +146,9 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     );
   }
 
-  Widget _buildStep1() {
+  Widget _buildStep1(bool isMobile) {
     return SizedBox(
-      width: 360,
+      width: isMobile ? double.maxFinite : 360,
       child: TextField(
         controller: _nameController,
         decoration: const InputDecoration(
@@ -152,12 +163,12 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     );
   }
 
-  Widget _buildStep2() {
+  Widget _buildStep2(bool isMobile) {
     final guestUrl = _result!['guest_chat_url'] as String;
     final hostUrl = _result!['host_chat_url'] as String;
 
     return SizedBox(
-      width: 360,
+      width: isMobile ? double.maxFinite : 360,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,

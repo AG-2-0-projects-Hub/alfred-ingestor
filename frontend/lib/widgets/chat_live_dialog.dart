@@ -289,9 +289,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    final screenW = MediaQuery.of(context).size.width;
+    final isMobile = screenW < 600;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      insetPadding: isMobile
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 16)
+          : const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: 1320,
@@ -1103,7 +1107,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
               ),
               color: context.palette.primary,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             ),
             const SizedBox(width: 6),
             Text(

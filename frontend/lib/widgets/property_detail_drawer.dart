@@ -377,6 +377,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   @override
   Widget build(BuildContext context) {
     final hasConflict = _property['Conflict_status'] == 'pending';
+    final screenW = MediaQuery.of(context).size.width;
+    final drawerW = screenW < 600 ? screenW : 440.0;
 
     return Material(
       elevation: 0,
@@ -387,7 +389,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           boxShadow: context.palette.drawerShadow,
         ),
         child: SizedBox(
-          width: 440,
+          width: drawerW,
           height: double.infinity,
           child: Column(
             children: [

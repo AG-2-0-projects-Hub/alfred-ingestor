@@ -1012,7 +1012,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
               ),
               color: context.palette.primary,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             ),
             const SizedBox(width: 6),
             Text(

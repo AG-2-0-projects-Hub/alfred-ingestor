@@ -21,6 +21,11 @@ class AuroraBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final screenW = MediaQuery.of(context).size.width;
+    // Mobile: lighter blur + dimmer aurora so mid-tier devices stay smooth.
+    final isMobile = screenW < 600;
+    final blurSigma = isMobile ? 30.0 : 60.0;
+    final blobIntensity = intensity * (isMobile ? 0.75 : 1.0);
     final p = context.palette;
     return Stack(
       fit: StackFit.expand,
@@ -31,32 +36,32 @@ class AuroraBackground extends StatelessWidget {
           color: p.auroraTeal,
           alignment: const Alignment(-0.9, -0.95),
           size: 720,
-          intensity: intensity,
+          intensity: blobIntensity,
         ),
         // Vapor blue — top-right.
         _Blob(
           color: p.auroraSky,
           alignment: const Alignment(0.9, -0.85),
           size: 640,
-          intensity: intensity,
+          intensity: blobIntensity,
         ),
         // Bioluminescent mint — bottom-left, smaller accent only.
         _Blob(
           color: p.auroraLavender,
           alignment: const Alignment(-0.85, 0.95),
           size: 420,
-          intensity: intensity,
+          intensity: blobIntensity,
         ),
         // Deep amethyst — bottom-right anchor.
         _Blob(
           color: p.auroraPeach,
           alignment: const Alignment(0.95, 0.95),
           size: 600,
-          intensity: intensity,
+          intensity: blobIntensity,
         ),
         if (!reduceMotion)
           BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+            filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
             child: const SizedBox.expand(),
           ),
         child,

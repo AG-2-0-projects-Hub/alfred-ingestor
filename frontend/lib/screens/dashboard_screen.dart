@@ -634,6 +634,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final viewportW = constraints.maxWidth;
       final viewportH = constraints.maxHeight;
 
+      // Mobile: single column, banner-style cards (~220 tall), scrollable.
+      // Don't try to fit everything in viewport — vertical scroll is expected.
+      if (viewportW < 500) {
+        const mobilePadH = 16.0;
+        const mobilePadTop = kToolbarHeight + 16.0;
+        const mobilePadBottom = 24.0;
+        const mobileGap = 14.0;
+        final mobileCardW = viewportW - mobilePadH * 2;
+        const mobileCardH = 220.0;
+        return GridView.builder(
+          padding: const EdgeInsets.fromLTRB(
+              mobilePadH, mobilePadTop, mobilePadH, mobilePadBottom),
+          physics: const AlwaysScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 1,
+            crossAxisSpacing: mobileGap,
+            mainAxisSpacing: mobileGap,
+            childAspectRatio: mobileCardW / mobileCardH,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            final item = items[index];
+            final card = item.isEmpty
+                ? PropertyCard.add(onAddProperty: _openAddProperty)
+                : PropertyCard(
+                    property: item,
+                    activeChatCount: _chatCounts[item['id'] as String] ?? 0,
+                    hasEscalation:
+                        _hasEscalation[item['id'] as String] ?? false,
+                    hasEmergency:
+                        _hasEmergency[item['id'] as String] ?? false,
+                    conversationPreviews:
+                        _conversationPreviews[item['id'] as String] ?? [],
+                    onOpenChat: (bookingId) =>
+                        _openChatLive(bookingId, item['id'] as String),
+                    onOpenExpanded: () => _openExpandedView(item),
+                    onOpenSettings: () => _openDrawer(item),
+                    onGuestLink: () => _openGuestLink(item),
+                    onAddProperty: _openAddProperty,
+                    onArchivedChats: () => _openArchivedChats(item),
+                    onCalendar: () => _openCalendar(item),
+                  );
+            return _StaggeredEntry(
+              delayMs: (index * 40).clamp(0, 240),
+              child: card,
+            );
+          },
+        );
+      }
+
       const minCardW = 240.0;
       const minCardH = 280.0;
       const gap = 18.0;
