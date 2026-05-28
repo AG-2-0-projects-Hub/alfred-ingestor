@@ -36,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
   StreamSubscription? _propertyStreamSub;
+  Timer? _silentRefreshTimer;
 
   // Push-notification edge detection
   final Map<String, bool> _prevRequiresAttention = {};
@@ -50,6 +51,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
+      // Safety net: Supabase free-tier realtime can lag or silently drop
+      // updates to low-traffic tables (conversations, properties). A short
+      // silent re-fetch closes any gap the streams miss, without the spinner
+      // flash the old 30s reload caused.
+      _silentRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (mounted) _loadProperties(silent: true);
+      });
     });
   }
 
@@ -59,6 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _convStreamSub?.cancel();
     _guestStreamSub?.cancel();
     _propertyStreamSub?.cancel();
+    _silentRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -74,8 +83,11 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> _loadProperties() async {
-    setState(() => _loading = true);
+  // [silent=true] skips toggling _loading so the safety-net timer and the
+  // post-resolve optimistic refresh don't blank the UI. Used for background
+  // syncs; user-initiated loads pass [silent=false] so the spinner shows.
+  Future<void> _loadProperties({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
       final data = await Supabase.instance.client
           .from('properties')
@@ -125,13 +137,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         });
       }
     } catch (e) {
-      if (mounted) {
+      // Silent refreshes must not surface SnackBar errors — they fire every
+      // 10s in the background and the user can't act on them.
+      if (mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load properties: $e')),
         );
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && !silent) setState(() => _loading = false);
     }
   }
 
@@ -217,6 +231,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             bookingId: bookingId,
             propertyId: propertyId,
             propertyName: propertyName,
+            onResolved: _onChatResolved,
           );
         },
       );
@@ -330,6 +345,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       pageBuilder: (_, __, ___) => PropertyExpandedView(
         property: property,
         activeConversations: _conversationPreviews[property['id']] ?? [],
+        onChatResolved: _onChatResolved,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -350,7 +366,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       bookingId: bookingId,
       propertyId: propertyId,
       propertyName: _resolvePropertyName(propertyId),
+      onResolved: _onChatResolved,
     );
+  }
+
+  // Optimistic dashboard refresh after the host resolves an escalation from
+  // any chat dialog. Silent — no spinner. Closes the gap between the resolve
+  // API returning and Supabase realtime propagating the conversation update.
+  void _onChatResolved() {
+    if (mounted) _loadProperties(silent: true);
   }
 
   void _openGuestLink(Map<String, dynamic> property) {

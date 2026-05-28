@@ -11,10 +11,14 @@ import 'chat_live_dialog.dart';
 class PropertyExpandedView extends StatefulWidget {
   final Map<String, dynamic> property;
   final List<Map<String, dynamic>> activeConversations;
+  // Forwarded to ChatLiveDialog so the dashboard can refresh optimistically
+  // when the host resolves an escalation from inside this expanded view.
+  final VoidCallback? onChatResolved;
   const PropertyExpandedView({
     super.key,
     required this.property,
     required this.activeConversations,
+    this.onChatResolved,
   });
 
   @override
@@ -133,6 +137,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
       bookingId: bookingId,
       propertyId: widget.property['id'] as String,
       propertyName: widget.property['name'] as String? ?? '',
+      onResolved: widget.onChatResolved,
     );
   }
 

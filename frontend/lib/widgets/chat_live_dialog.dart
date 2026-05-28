@@ -19,12 +19,18 @@ class ChatLiveDialog extends StatefulWidget {
   final String bookingId;
   final String propertyId;
   final String propertyName;
+  // Fires after the host successfully marks the issue as resolved. The
+  // dashboard uses this for optimistic refresh — Supabase realtime can lag
+  // several seconds on the free tier, but the host knows the state changed
+  // the instant the API returns, so we can refresh dashboard data right then.
+  final VoidCallback? onResolved;
 
   const ChatLiveDialog({
     super.key,
     required this.bookingId,
     required this.propertyId,
     required this.propertyName,
+    this.onResolved,
   });
 
   static Future<void> show(
@@ -32,6 +38,7 @@ class ChatLiveDialog extends StatefulWidget {
     required String bookingId,
     required String propertyId,
     required String propertyName,
+    VoidCallback? onResolved,
   }) {
     return showGeneralDialog(
       context: context,
@@ -43,6 +50,7 @@ class ChatLiveDialog extends StatefulWidget {
         bookingId: bookingId,
         propertyId: propertyId,
         propertyName: propertyName,
+        onResolved: onResolved,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -236,6 +244,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           _escalationReason = null;
         });
         await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
+        widget.onResolved?.call();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

@@ -1,6 +1,6 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-28 (Commit 4 — Live system + escalation lifecycle colors; analyze clean; **uncommitted, awaiting approval**)
+**Last Session:** 2026-05-28 (Commit 4 shipped `40453c9`; Commit 5 — three-layer real-time fix, **uncommitted**)
 **Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
 
 ---
@@ -189,7 +189,31 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
 
 **Status:** RESOLVED 2026-05-15. The `dart:js_interop_unsafe` import fix shipped bundled with Phase 5A (`d432f22`); subsequent Phase 5 commits all deployed green.
 
-### Commit 4 — Live System + Escalation Lifecycle Colors (2026-05-28, uncommitted)
+### Commit 5 — Three-Layer Real-Time Fix (2026-05-28, uncommitted)
+
+Commit 4's "streams-only + resume-resubscribe" architecture assumed Supabase free-tier realtime is reliable for `conversations` and `properties` table UPDATEs. It isn't — low-traffic tables get throttled, and updates can lag 5–15s or drop entirely. User reported: after marking an issue as resolved in the chat dialog, the dashboard's "needs attention" badge stayed until manual reload. Same symptom for new escalations arriving on the dashboard.
+
+**Three complementary layers — no single point of failure:**
+
+1. **Streams (Commit 4 mechanism, retained)** — fast path when working.
+2. **Optimistic refresh on host action** — `ChatLiveDialog` now takes an `onResolved: VoidCallback?` param. The dashboard passes `_onChatResolved` (which calls `_loadProperties(silent: true)`) at all 3 `ChatLiveDialog.show()` call sites. When the host marks an issue as resolved, the dashboard refreshes the instant the API returns — no waiting for the conversations stream to fire. Callback threaded through `PropertyExpandedView` (new `onChatResolved` field).
+3. **Silent safety-net timer** — `_silentRefreshTimer` polls every 10s while the dashboard is mounted, calling `_loadProperties(silent: true)`. `_loadProperties` now takes `{bool silent = false}` — when silent, skips the `_loading = true` toggle, suppresses SnackBar errors (background sync, user can't act on them). Result: invisible self-healing for cases where the stream dropped AND the user didn't take the action themselves (e.g. guest sends a message from another device).
+
+**Why not just keep the 30s timer from before Commit 4:** User specifically rejected the visible blank-screen reload. The silent variant is invisible — no spinner, no UI disruption. The 10s interval is short enough that perceived lag is negligible.
+
+**Why not push for stream-only:** Supabase free-tier realtime is throttled. We can't fix platform behavior from the client. On a paid Supabase plan ($25/mo Pro), realtime quotas are dedicated and stream reliability improves significantly — the 10s safety-net could likely be removed or raised to 60s. Until then, optimistic + safety-net pattern matches industry norm (Slack, Linear, Notion all use it).
+
+**Files changed:**
+- `frontend/lib/screens/dashboard_screen.dart` — `_loadProperties({bool silent})`, `_silentRefreshTimer`, `_onChatResolved()`, wired at 3 call sites
+- `frontend/lib/widgets/chat_live_dialog.dart` — `onResolved` param on widget + `show()`, fired from `_resolveIssue`
+- `frontend/lib/widgets/property_expanded_view.dart` — `onChatResolved` pass-through field
+- `CONTEXT.md` — this entry
+
+**Not changed:** `chat_live_screen.dart` (full-screen host view). It's opened from non-dashboard flows (`main.dart` deep-link, `generate_guest_link_dialog`, `ingest_screen`, `host_panel_screen`); none of those parents currently consume a resolve callback. If the user reports similar staleness on those flows, we'll thread the same callback through them.
+
+**Verification:** `flutter analyze` clean on the 3 changed files — 2 pre-existing `unnecessary_cast` warnings unchanged.
+
+### Commit 4 — Live System + Escalation Lifecycle Colors (2026-05-28, shipped `40453c9`)
 
 Plan derived inline during session (no `.claude/plans/` file). Prior commits 1–3 in this session series (bug fixes, visual identity redesign, mobile optimization) all shipped earlier in `the-ingestor` history.
 
