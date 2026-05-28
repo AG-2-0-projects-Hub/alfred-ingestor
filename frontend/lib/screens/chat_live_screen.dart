@@ -8,7 +8,10 @@ import 'package:audioplayers/audioplayers.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
+import '../utils/chat_system_messages.dart';
 import '../widgets/aurora_background.dart';
+
+enum _EscalationState { none, active, resolved }
 
 class ChatLiveScreen extends StatefulWidget {
   final String bookingId;
@@ -138,6 +141,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 data.isNotEmpty &&
                 data.last['is_escalated_interaction'] == true) {
               _setMode('intervene');
+              _refreshEscalationReason();
             }
           }
         });
@@ -162,9 +166,26 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         .update({'mode': mode}).eq('id', _conversationId!);
     if (mounted) setState(() => _mode = mode);
     if (mode == 'intervene') {
-      await _insertSystemMessage('You are now speaking with $_hostName.');
+      await _insertSystemMessage(ChatSystemMessages.intervene(_hostName));
     } else {
-      await _insertSystemMessage('Alfred has resumed your conversation.');
+      await _insertSystemMessage(ChatSystemMessages.resume);
+    }
+  }
+
+  // Targeted single-row refresh used when the conversations stream may have
+  // missed an update (e.g. after a backgrounded tab, or a new escalation
+  // arriving right after a resolve). Cheap — fetches just the row we need.
+  Future<void> _refreshEscalationReason() async {
+    if (_conversationId == null) return;
+    final row = await Supabase.instance.client
+        .from('conversations')
+        .select('escalation_reason')
+        .eq('id', _conversationId!)
+        .maybeSingle();
+    if (!mounted || row == null) return;
+    final reason = row['escalation_reason'] as String?;
+    if (_escalationReason != reason) {
+      setState(() => _escalationReason = reason);
     }
   }
 
@@ -181,7 +202,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
           _mode = 'autopilot';
           _escalationReason = null;
         });
-        await _insertSystemMessage('Alfred has resumed your conversation.');
+        await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -335,7 +356,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                           ),
                         )
                       : Builder(builder: (_) {
-                          final window = _computeEscalationWindow();
+                          final states = _computeEscalationWindow();
                           final isEmergency =
                               _escalationReason?.startsWith('emergency_') ==
                                   true;
@@ -345,7 +366,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                             itemCount: _messages.length,
                             itemBuilder: (_, i) => _buildBubble(
                               _messages[i],
-                              inEscalationWindow: window[i],
+                              escalationState: states[i],
                               isEmergency: isEmergency,
                             ),
                           );
@@ -568,21 +589,36 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     );
   }
 
-  List<bool> _computeEscalationWindow() {
-    final out = List<bool>.filled(_messages.length, false);
+  // Classifies each message as part of an active escalation, a resolved
+  // escalation, or neither. When a 'resolved' marker is seen, retroactively
+  // flips every message in the open window from active → resolved so the
+  // bubble renderer can colour them green (closed lifecycle).
+  List<_EscalationState> _computeEscalationWindow() {
+    final out =
+        List<_EscalationState>.filled(_messages.length, _EscalationState.none);
     bool inWindow = false;
+    int windowStart = -1;
     for (int i = 0; i < _messages.length; i++) {
       final m = _messages[i];
-      // Include the guest message that immediately precedes an escalated AI response
       if (!inWindow &&
           m['sender_type'] == 'guest' &&
           i + 1 < _messages.length &&
           _messages[i + 1]['is_escalated_interaction'] == true) {
         inWindow = true;
+        windowStart = i;
       }
-      if (m['is_escalated_interaction'] == true) inWindow = true;
-      out[i] = inWindow;
-      if (m['resolution_status'] == 'resolved') inWindow = false;
+      if (m['is_escalated_interaction'] == true) {
+        if (!inWindow) windowStart = i;
+        inWindow = true;
+      }
+      if (inWindow) out[i] = _EscalationState.active;
+      if (m['resolution_status'] == 'resolved' && inWindow) {
+        for (int j = windowStart; j <= i; j++) {
+          out[j] = _EscalationState.resolved;
+        }
+        inWindow = false;
+        windowStart = -1;
+      }
     }
     return out;
   }
@@ -685,7 +721,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
 
   Widget _buildBubble(
     Map<String, dynamic> msg, {
-    required bool inEscalationWindow,
+    required _EscalationState escalationState,
     required bool isEmergency,
   }) {
     final senderType = msg['sender_type'] as String;
@@ -694,13 +730,14 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
-          child: Text(
+          child: SelectableText(
             msg['content'] as String,
             style: GoogleFonts.inter(
               fontSize: 11,
               color: context.palette.textMuted,
               fontStyle: FontStyle.italic,
             ),
+            textAlign: TextAlign.center,
           ),
         ),
       );
@@ -744,6 +781,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     final isHost = senderType == 'host';
     final isEscalated = msg['is_escalated_interaction'] == true;
     final usedLearned = msg['used_learned_knowledge'] == true;
+    final isActive = escalationState == _EscalationState.active;
+    final isResolved = escalationState == _EscalationState.resolved;
 
     Color bgColor;
     Color textColor = context.palette.textPrimary;
@@ -751,10 +790,13 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
     Border? border;
 
     if (isGuest) {
-      if (inEscalationWindow && isEmergency) {
+      if (isResolved) {
+        bgColor = context.palette.successContainer;
+        border = Border.all(color: context.palette.success, width: 1.5);
+      } else if (isActive && isEmergency) {
         bgColor = context.palette.dangerContainer;
         border = Border.all(color: context.palette.danger, width: 1.5);
-      } else if (inEscalationWindow) {
+      } else if (isActive) {
         bgColor = context.palette.warningContainer;
         border = Border.all(color: context.palette.warning, width: 1.5);
       } else {
@@ -776,6 +818,10 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         bottomLeft: Radius.circular(14),
         bottomRight: Radius.circular(14),
       );
+    } else if (isResolved) {
+      bgColor = context.palette.successContainer;
+      border = Border.all(color: context.palette.success, width: 1.5);
+      radius = BorderRadius.circular(12);
     } else if (isEscalated && isEmergency) {
       bgColor = context.palette.dangerContainer;
       border = Border.all(color: context.palette.danger, width: 1.5);
@@ -798,25 +844,31 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
         ? 'Guest'
         : isHost
             ? 'You'
-            : isEscalated && isEmergency
-                ? 'Alfred — EMERGENCY 🚨'
-                : isEscalated
-                    ? 'Alfred — needs attention'
-                    : 'Alfred';
+            : isResolved
+                ? 'Alfred — resolved'
+                : isEscalated && isEmergency
+                    ? 'Alfred — EMERGENCY 🚨'
+                    : isEscalated
+                        ? 'Alfred — needs attention'
+                        : 'Alfred';
 
     final senderColor = isGuest
-        ? (inEscalationWindow && isEmergency
-            ? context.palette.danger
-            : inEscalationWindow
-                ? context.palette.warning
-                : context.palette.primary)
+        ? (isResolved
+            ? context.palette.success
+            : isActive && isEmergency
+                ? context.palette.danger
+                : isActive
+                    ? context.palette.warning
+                    : context.palette.primary)
         : isHost
             ? context.palette.textSecondary
-            : isEscalated && isEmergency
-                ? context.palette.danger
-                : isEscalated
-                    ? context.palette.warning
-                    : context.palette.textMuted;
+            : isResolved
+                ? context.palette.success
+                : isEscalated && isEmergency
+                    ? context.palette.danger
+                    : isEscalated
+                        ? context.palette.warning
+                        : context.palette.textMuted;
 
     final isSending = msg['status'] == 'sending';
     final ts = parseTime(msg['created_at']);
@@ -846,7 +898,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
                 ),
               ),
               const SizedBox(height: 3),
-              Text(
+              SelectableText(
                 msg['content'] as String,
                 style: GoogleFonts.inter(fontSize: 13, color: textColor, height: 1.5),
               ),

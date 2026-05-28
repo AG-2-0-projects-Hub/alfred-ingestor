@@ -1,6 +1,7 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1` — Vercel deploys green; Phase 4.5 build fix bundled into Phase 5A so deploys are now landing clean)
+**Last Session:** 2026-05-28 (Commit 4 — Live system + escalation lifecycle colors; analyze clean; **uncommitted, awaiting approval**)
+**Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
 
 ---
 
@@ -187,6 +188,49 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
 - `pubspec.yaml`: `web: ^1.1.0` added
 
 **Status:** RESOLVED 2026-05-15. The `dart:js_interop_unsafe` import fix shipped bundled with Phase 5A (`d432f22`); subsequent Phase 5 commits all deployed green.
+
+### Commit 4 — Live System + Escalation Lifecycle Colors (2026-05-28, uncommitted)
+
+Plan derived inline during session (no `.claude/plans/` file). Prior commits 1–3 in this session series (bug fixes, visual identity redesign, mobile optimization) all shipped earlier in `the-ingestor` history.
+
+**Files changed:**
+- `frontend/lib/screens/dashboard_screen.dart`
+- `frontend/lib/screens/chat_screen.dart`
+- `frontend/lib/widgets/chat_live_dialog.dart`
+- `frontend/lib/screens/chat_live_screen.dart`
+- `frontend/lib/utils/chat_system_messages.dart` (new)
+
+**1. Dashboard real-time (no more 30s blank-screen reload):**
+- Removed the `Timer.periodic(30s)` belt-and-suspenders fallback that called `_loadProperties()` and toggled `_loading = true` → caused full-screen spinner every 30s.
+- Added `WidgetsBindingObserver` mixin to `_DashboardScreenState`. On `AppLifecycleState.resumed`, the dashboard cancels all three stream subscriptions (`_propertyStreamSub`, `_convStreamSub`, `_guestStreamSub`) and re-calls `_subscribeRealtime()` so dropped WebSockets reconnect instantly when the tab regains focus. Updates now flow truly real-time via streams alone; no polling.
+
+**2. Guest chat — mode piggyback on messages stream:**
+- Created `utils/chat_system_messages.dart` with `ChatSystemMessages.resume`, `intervene(hostName)`, `resumeAfterResolve` constants + `inferModeFromSystemMessage()` matcher. Single source of truth so changing wording doesn't silently break detection.
+- `chat_screen.dart`: `_subscribeToMessages()` now calls `_syncModeFromSystemMessages()` after every stream tick — scans the most recent system message and updates `_mode` if it implies a state transition. Closes the failure mode where the conversations stream dropped but the messages stream didn't, leaving the intervention banner stuck on the guest side.
+- `_modeSubscription` / `_watchConversation()` stays as the primary path; piggyback is insurance.
+
+**3. Host chat — escalation lifecycle colors + emergency-red fix (both `chat_live_dialog.dart` AND `chat_live_screen.dart`):**
+- Replaced `bool inEscalationWindow` with `enum _EscalationState { none, active, resolved }`.
+- `_computeEscalationWindow()` now tracks `windowStart` index alongside `inWindow`. When a `resolution_status == 'resolved'` marker arrives, retroactively flips every message in the open window from `active` → `resolved` so resolved escalations are coloured green.
+- `_buildBubble()` colour logic:
+  - `resolved` → `palette.successContainer` bg + `palette.success` border (both guest + Alfred bubbles)
+  - `active` + `isEmergency` → `dangerContainer` + `danger` border (red)
+  - `active` + non-emergency → `warningContainer` + `warning` border (amber)
+  - Host messages keep their neutral styling regardless of state
+- New sender label `'Alfred — resolved'` for resolved Alfred bubbles.
+- **Emergency-red bug fix:** After resolve, `_escalationReason` is cleared locally; if a new emergency arrives and the conversations stream has dropped, `isEmergency` stays false → orange instead of red. Added `_refreshEscalationReason()` (single-row `SELECT escalation_reason WHERE id = ...`), called from `_subscribeToMessages()` whenever the auto-intervene branch fires. Lightweight, no spinner.
+
+**4. Host chat — "Issue resolved" system message:**
+- `_resolveIssue()` now inserts `ChatSystemMessages.resumeAfterResolve` ("Issue resolved — Alfred has resumed the conversation.") instead of the generic "Alfred has resumed your conversation." used by the mode-toggle path. Neutral phrasing works for both host and guest; gives the host the confirmation message they asked for without duplication.
+
+**5. Selectable chat text:**
+- Replaced `Text(msg['content']...)` → `SelectableText(...)` for all three message bubble types: guest-side `chat_screen.dart`, host-dialog `chat_live_dialog.dart`, host-screen `chat_live_screen.dart`. Applied to both regular bubbles and centered system messages.
+
+**Why both `chat_live_dialog.dart` AND `chat_live_screen.dart`:** They're near-duplicates (the deferred dedupe from Phase 5 lives in this file). Both files house the same `_buildBubble` / `_computeEscalationWindow` / `_resolveIssue` / `_setMode` logic. Both used: dialog from dashboard pills + push notifications; screen from `main.dart` deep-link, `generate_guest_link_dialog`, `ingest_screen`, `host_panel_screen`. Future cleanup: extract a shared `LiveChatPanel` widget (still deferred).
+
+**Verification:** `flutter analyze` clean — 8 pre-existing warnings unchanged (unnecessary casts in `_loadConversation`, deprecated Radio APIs, dead `_refreshProperty`, `dart:html` deprecation in `voice_recorder.dart`). No new diagnostics from this commit.
+
+**Pending:** show diff → await user approval → commit + push (safe-commit-n-push workflow).
 
 ### Phase 5 — UI/UX Audit & Design Token Migration (COMPLETED 2026-05-15)
 Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`

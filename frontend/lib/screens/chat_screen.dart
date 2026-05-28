@@ -11,6 +11,7 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/glass_panel.dart';
+import '../utils/chat_system_messages.dart';
 
 class ChatScreen extends StatefulWidget {
   final String bookingId;
@@ -118,8 +119,26 @@ class _ChatScreenState extends State<ChatScreen>
           if (mounted) {
             setState(() => _messages = data);
             _scrollToBottom();
+            _syncModeFromSystemMessages(data);
           }
         });
+  }
+
+  // Piggyback on the (reliable) messages stream to keep _mode in sync even
+  // when the conversations stream silently drops. We scan the most recent
+  // system message — autopilot/intervene transitions always emit one.
+  void _syncModeFromSystemMessages(List<Map<String, dynamic>> data) {
+    for (int i = data.length - 1; i >= 0; i--) {
+      final m = data[i];
+      if (m['sender_type'] != 'system') continue;
+      final inferred = ChatSystemMessages.inferModeFromSystemMessage(
+        (m['content'] as String?) ?? '',
+      );
+      if (inferred != null && _mode != inferred) {
+        setState(() => _mode = inferred);
+      }
+      break;
+    }
   }
 
   void _scrollToBottom() {
@@ -474,13 +493,14 @@ class _ChatScreenState extends State<ChatScreen>
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
-          child: Text(
+          child: SelectableText(
             msg['content'] as String,
             style: GoogleFonts.inter(
               fontSize: 11,
               color: context.palette.textMuted,
               fontStyle: FontStyle.italic,
             ),
+            textAlign: TextAlign.center,
           ),
         ),
       );
@@ -515,7 +535,7 @@ class _ChatScreenState extends State<ChatScreen>
           border: isGuest ? null : Border.all(color: context.palette.border),
           boxShadow: context.palette.cardShadow,
         ),
-        child: Text(
+        child: SelectableText(
           msg['content'] as String,
           style: GoogleFonts.inter(color: fg, fontSize: 14, height: 1.45),
         ),

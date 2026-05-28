@@ -23,7 +23,8 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
   List<Map<String, dynamic>> _properties = [];
   Map<String, int> _chatCounts = {};
   Map<String, bool> _hasEscalation = {};
@@ -35,7 +36,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
   StreamSubscription? _propertyStreamSub;
-  Timer? _refreshTimer;
 
   // Push-notification edge detection
   final Map<String, bool> _prevRequiresAttention = {};
@@ -45,26 +45,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _notifPermission = PushNotificationService.permissionState;
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
-      // Belt-and-suspenders: Supabase realtime streams can silently drop on
-      // the free tier. Re-fetch every 30s so stale state self-heals without
-      // a manual refresh.
-      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (mounted) _loadProperties();
-      });
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _convStreamSub?.cancel();
     _guestStreamSub?.cancel();
     _propertyStreamSub?.cancel();
-    _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  // Supabase realtime WebSockets can silently drop while a tab is backgrounded.
+  // On resume, tear down and re-subscribe so updates flow again instantly.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _convStreamSub?.cancel();
+      _guestStreamSub?.cancel();
+      _propertyStreamSub?.cancel();
+      _subscribeRealtime();
+    }
   }
 
   Future<void> _loadProperties() async {
