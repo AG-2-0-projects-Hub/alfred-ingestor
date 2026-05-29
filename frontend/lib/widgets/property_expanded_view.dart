@@ -61,28 +61,45 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
         .stream(primaryKey: ['id'])
         .eq('property_id', widget.property['id'] as String)
         .listen((rows) {
-          if (!mounted) return;
-          final merged = <Map<String, dynamic>>[
-            for (final c in rows)
-              <String, dynamic>{
-                ...c,
-                'guestName':
-                    _guestNamesByBooking[c['booking_id'] as String? ?? ''] ??
-                        'Guest',
-              }
-          ];
-          merged.sort((a, b) {
-            int priority(Map<String, dynamic> x) {
-              final reason = x['escalation_reason'] as String?;
-              if (reason != null && reason.startsWith('emergency_')) return 0;
-              if (x['requires_attention'] == true) return 1;
-              if (x['mode'] == 'intervene') return 2;
-              return 3;
-            }
-            return priority(a).compareTo(priority(b));
-          });
-          setState(() => _activeConversations = merged);
+          if (mounted) _applyConversations(rows);
         });
+  }
+
+  // One-shot fetch used after a host action (e.g. resolve) when we can't
+  // afford to wait for the stream to fire. Same merge/sort logic as the
+  // stream listener, so the UI state stays consistent across both paths.
+  Future<void> _refreshLocalConversations() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('conversations')
+          .select()
+          .eq('property_id', widget.property['id'] as String);
+      if (mounted) _applyConversations(List<Map<String, dynamic>>.from(rows));
+    } catch (_) {
+      // Silent — the stream + parent dashboard refresh will fill in eventually.
+    }
+  }
+
+  void _applyConversations(List<Map<String, dynamic>> rows) {
+    final merged = <Map<String, dynamic>>[
+      for (final c in rows)
+        <String, dynamic>{
+          ...c,
+          'guestName':
+              _guestNamesByBooking[c['booking_id'] as String? ?? ''] ?? 'Guest',
+        }
+    ];
+    merged.sort((a, b) {
+      int priority(Map<String, dynamic> x) {
+        final reason = x['escalation_reason'] as String?;
+        if (reason != null && reason.startsWith('emergency_')) return 0;
+        if (x['requires_attention'] == true) return 1;
+        if (x['mode'] == 'intervene') return 2;
+        return 3;
+      }
+      return priority(a).compareTo(priority(b));
+    });
+    setState(() => _activeConversations = merged);
   }
 
   Future<void> _toggleArchived() async {
@@ -137,7 +154,13 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
       bookingId: bookingId,
       propertyId: widget.property['id'] as String,
       propertyName: widget.property['name'] as String? ?? '',
-      onResolved: widget.onChatResolved,
+      onResolved: () {
+        // Refresh the popup's own pill list immediately so the resolved
+        // conversation visibly drops out of the emergency colour band,
+        // then forward to the parent (dashboard) for its own refresh.
+        _refreshLocalConversations();
+        widget.onChatResolved?.call();
+      },
     );
   }
 

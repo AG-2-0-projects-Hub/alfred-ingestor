@@ -72,7 +72,7 @@ class ChatLiveDialog extends StatefulWidget {
 class _ChatLiveDialogState extends State<ChatLiveDialog> {
   String? _conversationId;
   String? _guestChatUrl;
-  String _hostName = 'Your host';
+  String _guestName = 'the guest';
   bool _copiedLink = false;
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
@@ -100,26 +100,20 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   }
 
   Future<void> _loadConversation() async {
-    final results = await Future.wait([
-      Supabase.instance.client
-          .from('guests')
-          .select('guest_chat_url')
-          .eq('booking_id', widget.bookingId)
-          .maybeSingle(),
-      Supabase.instance.client
-          .from('properties')
-          .select("master_json->host_profile->>name")
-          .eq('id', widget.propertyId)
-          .maybeSingle(),
-    ]);
-
-    final guest = results[0] as Map<String, dynamic>?;
-    final prop = results[1] as Map<String, dynamic>?;
+    // Guest row: chat URL + name. Host name isn't loaded — host system
+    // messages are rendered with the guest's name; the host already knows
+    // who they are.
+    final guest = await Supabase.instance.client
+        .from('guests')
+        .select('guest_chat_url, name')
+        .eq('booking_id', widget.bookingId)
+        .maybeSingle();
 
     if (mounted) {
       setState(() {
         _guestChatUrl = guest?['guest_chat_url'] as String?;
-        _hostName = (prop?['name'] as String?) ?? 'Your host';
+        final gn = guest?['name'] as String?;
+        if (gn != null && gn.isNotEmpty) _guestName = gn;
       });
       _watchConversation();
     }
@@ -206,8 +200,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         .from('conversations')
         .update({'mode': mode}).eq('id', _conversationId!);
     if (mounted) setState(() => _mode = mode);
+    // Markers, not formatted text — each viewer renders their own perspective.
     if (mode == 'intervene') {
-      await _insertSystemMessage(ChatSystemMessages.intervene(_hostName));
+      await _insertSystemMessage(ChatSystemMessages.intervene);
     } else {
       await _insertSystemMessage(ChatSystemMessages.resume);
     }
@@ -828,11 +823,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     final senderType = msg['sender_type'] as String;
 
     if (senderType == 'system') {
+      final text = ChatSystemMessages.formatForHost(
+        msg['content'] as String,
+        guestName: _guestName,
+      );
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
           child: SelectableText(
-            msg['content'] as String,
+            text,
             style: GoogleFonts.inter(
               fontSize: 11,
               color: context.palette.textMuted,

@@ -1,26 +1,67 @@
-/// Single source of truth for system message text in the chat thread.
+/// Single source of truth for chat system messages.
 ///
-/// These strings are inserted into the messages table on the host side and
-/// pattern-matched on the guest side to keep `_mode` in sync without relying
-/// solely on the conversations stream (which can drop on Supabase free tier).
-/// If you change the wording, update both ends here — the matchers below
-/// scan for the leading phrase to stay tolerant to minor edits.
+/// What's stored in the DB is now a marker token (e.g. `__SYS_INTERVENE__`),
+/// not the user-facing string. Each viewer (guest or host) renders the marker
+/// with their own context — that's how the same DB row produces:
+///   - guest: "You are now speaking with Eduardo Rafael."
+///   - host:  "You are now speaking with Maria."
+///
+/// Legacy plain-text messages (from before this refactor) still render
+/// verbatim through the fall-through in the formatters and are still
+/// recognised by [inferModeFromSystemMessage].
 class ChatSystemMessages {
-  static const String resume = 'Alfred has resumed your conversation.';
-  static const String resumeAfterResolve =
+  // ── Marker tokens (persisted to messages.content) ─────────────────────────
+  static const String intervene = '__SYS_INTERVENE__';
+  static const String resume = '__SYS_RESUME__';
+  static const String resumeAfterResolve = '__SYS_RESOLVED__';
+
+  // ── Legacy strings (still present in older DB rows) ───────────────────────
+  static const String _legacyIntervenePrefix = 'You are now speaking with';
+  static const String _legacyResume = 'Alfred has resumed your conversation.';
+  static const String _legacyResolvedFull =
       'Issue resolved — Alfred has resumed the conversation.';
-  static String intervene(String hostName) =>
-      'You are now speaking with $hostName.';
 
-  // Substring matchers used by the guest-side piggyback.
-  static const String _resumeMatch = 'Alfred has resumed';
-  static const String _interveneMatch = 'You are now speaking with';
+  /// What the guest sees for a given system message content.
+  static String formatForGuest(String content, {required String hostName}) {
+    switch (content) {
+      case intervene:
+        return 'You are now speaking with $hostName.';
+      case resume:
+      case resumeAfterResolve:
+        return 'Alfred has resumed the conversation.';
+    }
+    // Legacy: strip the host-only "Issue resolved —" prefix so old messages
+    // render the guest-appropriate text without a migration.
+    if (content == _legacyResolvedFull) {
+      return 'Alfred has resumed the conversation.';
+    }
+    return content;
+  }
 
-  /// Returns the implied conversation mode if [content] looks like a known
-  /// system message, otherwise null.
+  /// What the host sees for a given system message content.
+  static String formatForHost(String content, {required String guestName}) {
+    switch (content) {
+      case intervene:
+        return 'You are now speaking with $guestName.';
+      case resume:
+        return 'Alfred has resumed the conversation.';
+      case resumeAfterResolve:
+        return 'Issue resolved — Alfred has resumed the conversation.';
+    }
+    return content;
+  }
+
+  /// Used by the guest-side piggyback to keep `_mode` in sync via the
+  /// messages stream when the conversations stream silently drops.
+  /// Returns the implied mode or null if [content] isn't a recognised marker.
   static String? inferModeFromSystemMessage(String content) {
-    if (content.contains(_resumeMatch)) return 'autopilot';
-    if (content.contains(_interveneMatch)) return 'intervene';
+    if (content == intervene) return 'intervene';
+    if (content == resume || content == resumeAfterResolve) return 'autopilot';
+    // Backward-compat for legacy plain-text rows.
+    if (content.startsWith(_legacyIntervenePrefix)) return 'intervene';
+    if (content == _legacyResume || content == _legacyResolvedFull) {
+      return 'autopilot';
+    }
     return null;
   }
 }

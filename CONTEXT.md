@@ -1,6 +1,7 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-28 (Commit 4 shipped `40453c9`; Commit 5 — three-layer real-time fix, **uncommitted**)
+**Last Session:** 2026-05-29 (Commit 6 — host/guest perspective parity + emergency notice + popup refresh, **uncommitted**)
+**Prior Sessions:** 2026-05-28 Commit 4 `40453c9` + Commit 5 `c80a84c` (three-layer real-time)
 **Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
 
 ---
@@ -189,7 +190,28 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase4-5-push-notifications.md`
 
 **Status:** RESOLVED 2026-05-15. The `dart:js_interop_unsafe` import fix shipped bundled with Phase 5A (`d432f22`); subsequent Phase 5 commits all deployed green.
 
-### Commit 5 — Three-Layer Real-Time Fix (2026-05-28, uncommitted)
+### Commit 6 — Host/Guest Perspective Parity + Emergency Notice + Popup Refresh (2026-05-29, uncommitted)
+
+User exposed four issues by exploring the deployed app: (1) "Issue resolved" prefix bled to guest, (2) host saw "speaking with [host name]" instead of "[guest name]", (3) guest got no banner/system-message on emergency escalation, (4) `PropertyExpandedView` popup stayed stale after resolve.
+
+**Architectural shift:** system messages stored in `messages.content` are now marker tokens (`__SYS_INTERVENE__`, `__SYS_RESUME__`, `__SYS_RESOLVED__`). Each viewer renders the marker through `ChatSystemMessages.formatForGuest(content, hostName: ...)` or `formatForHost(content, guestName: ...)` — so the same DB row produces different text per actor without a schema change. Legacy plain-text messages still render verbatim via fall-through; `inferModeFromSystemMessage` keeps a legacy-string match alongside the marker check so the guest-side piggyback works across both formats.
+
+**Files changed:**
+- `frontend/lib/utils/chat_system_messages.dart` — Rewritten with marker constants, per-viewer formatters, legacy-compat mode inference.
+- `frontend/lib/screens/chat_screen.dart` (guest) — Loads `_hostName` via PostgREST alias query (`name, host_name:master_json->host_profile->>name`). System messages render via `formatForGuest`. Piggyback (`_syncModeFromMessageStream`, renamed) now also detects unresolved escalated AI messages and flips `_mode='intervene'` locally — closes the emergency banner gap when the conversations stream silently drops.
+- `frontend/lib/widgets/chat_live_dialog.dart` + `screens/chat_live_screen.dart` (host) — Load `_guestName` from `guests.name`. `_setMode` and `_resolveIssue` insert markers. System bubbles render via `formatForHost`. Unused `_hostName` field removed (host doesn't render their own name to themselves).
+- `frontend/lib/widgets/property_expanded_view.dart` — Extracted shared merge/sort logic into `_applyConversations`. New `_refreshLocalConversations()` does a one-shot fetch. `_openChat` wraps `onResolved`: refresh popup first, then forward to dashboard.
+- `backend/routers/messages.py` — On auto-escalation, after `update_conversation` sets mode=intervene, insert a `__SYS_INTERVENE__` system message. Makes emergency parity work regardless of whether the host has the chat open. Marker kept in sync with the frontend constant (comment notes this).
+
+**Acceptance behavior:**
+- Host resolves → host sees "Issue resolved — Alfred has resumed the conversation.", guest sees only "Alfred has resumed the conversation."
+- Host clicks Intervene → host sees "You are now speaking with [guest name].", guest sees "You are now speaking with [host name]."
+- Guest sends emergency message → backend escalates → guest sees orange banner + intervention system message in ≤2s, regardless of host presence
+- Host resolves from inside `PropertyExpandedView` → popup pill switches from red → neutral immediately (no waiting for stream)
+
+**Verification:** `flutter analyze` on all 5 changed frontend files → no issues. `python3 ast.parse` on `messages.py` → parses OK.
+
+### Commit 5 — Three-Layer Real-Time Fix (2026-05-28, shipped `c80a84c`)
 
 Commit 4's "streams-only + resume-resubscribe" architecture assumed Supabase free-tier realtime is reliable for `conversations` and `properties` table UPDATEs. It isn't — low-traffic tables get throttled, and updates can lag 5–15s or drop entirely. User reported: after marking an issue as resolved in the chat dialog, the dashboard's "needs attention" badge stayed until manual reload. Same symptom for new escalations arriving on the dashboard.
 
@@ -213,7 +235,7 @@ Commit 4's "streams-only + resume-resubscribe" architecture assumed Supabase fre
 
 **Verification:** `flutter analyze` clean on the 3 changed files — 2 pre-existing `unnecessary_cast` warnings unchanged.
 
-### Commit 4 — Live System + Escalation Lifecycle Colors (2026-05-28, shipped `40453c9`)
+### Commit 4 — Live System + Escalation Lifecycle Colors (2026-05-28, shipped `40453c9`, see also Commit 5)
 
 Plan derived inline during session (no `.claude/plans/` file). Prior commits 1–3 in this session series (bug fixes, visual identity redesign, mobile optimization) all shipped earlier in `the-ingestor` history.
 

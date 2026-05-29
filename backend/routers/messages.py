@@ -138,6 +138,19 @@ async def web_incoming(req: WebIncomingRequest):
         **update_fields,
     )
 
+    # On auto-escalation, insert a system marker so the guest sees
+    # "You are now speaking with [host name]." even when the host hasn't
+    # opened the chat dialog yet. Frontend renderers expand the marker
+    # per-viewer (guest vs host). Marker kept in sync with
+    # frontend/lib/utils/chat_system_messages.dart.
+    if requires_escalation:
+        await asyncio.to_thread(
+            supabase_client.insert_message,
+            conversation["id"],
+            "system",
+            "__SYS_INTERVENE__",
+        )
+
     return {
         "reply": reply,
         "requires_escalation": requires_escalation,

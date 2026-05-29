@@ -25,6 +25,7 @@ class _ChatScreenState extends State<ChatScreen>
     with SingleTickerProviderStateMixin {
   String? _conversationId;
   String? _propertyName;
+  String _hostName = 'the host';
   String _mode = 'autopilot';
   List<Map<String, dynamic>> _messages = [];
   bool _isWaiting = false;
@@ -68,15 +69,21 @@ class _ChatScreenState extends State<ChatScreen>
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
+      // Load property name + host name in one query. PostgREST aliasing
+      // avoids the column-name collision (both are 'name' otherwise).
+      // host_name is needed so the guest-side system-message renderer can fill
+      // "You are now speaking with [host name]" without an extra round-trip.
       final propResult = await Supabase.instance.client
           .from('properties')
-          .select('name')
+          .select('name, host_name:master_json->host_profile->>name')
           .eq('id', result['property_id'] as String)
           .maybeSingle();
       if (mounted) {
         setState(() {
           _conversationId = result['id'] as String;
           _propertyName = propResult?['name'] as String?;
+          final hn = propResult?['host_name'] as String?;
+          if (hn != null && hn.isNotEmpty) _hostName = hn;
           _mode = (result['mode'] as String?) ?? 'autopilot';
         });
         _subscribeToMessages(result['id'] as String);
@@ -119,25 +126,35 @@ class _ChatScreenState extends State<ChatScreen>
           if (mounted) {
             setState(() => _messages = data);
             _scrollToBottom();
-            _syncModeFromSystemMessages(data);
+            _syncModeFromMessageStream(data);
           }
         });
   }
 
   // Piggyback on the (reliable) messages stream to keep _mode in sync even
-  // when the conversations stream silently drops. We scan the most recent
-  // system message — autopilot/intervene transitions always emit one.
-  void _syncModeFromSystemMessages(List<Map<String, dynamic>> data) {
+  // when the conversations stream silently drops. Walks backwards from the
+  // most recent message; the first "mode-defining" event wins:
+  //   - system marker → use its implied mode
+  //   - escalated AI message that hasn't been resolved → 'intervene'
+  //     (covers the emergency case before the host has interacted at all)
+  void _syncModeFromMessageStream(List<Map<String, dynamic>> data) {
     for (int i = data.length - 1; i >= 0; i--) {
       final m = data[i];
-      if (m['sender_type'] != 'system') continue;
-      final inferred = ChatSystemMessages.inferModeFromSystemMessage(
-        (m['content'] as String?) ?? '',
-      );
-      if (inferred != null && _mode != inferred) {
-        setState(() => _mode = inferred);
+      if (m['sender_type'] == 'system') {
+        final inferred = ChatSystemMessages.inferModeFromSystemMessage(
+          (m['content'] as String?) ?? '',
+        );
+        if (inferred != null) {
+          if (_mode != inferred) setState(() => _mode = inferred);
+          return;
+        }
+        continue;
       }
-      break;
+      if (m['is_escalated_interaction'] == true &&
+          m['resolution_status'] != 'resolved') {
+        if (_mode != 'intervene') setState(() => _mode = 'intervene');
+        return;
+      }
     }
   }
 
@@ -490,11 +507,15 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _buildBubble(Map<String, dynamic> msg) {
     if (msg['sender_type'] == 'system') {
+      final text = ChatSystemMessages.formatForGuest(
+        msg['content'] as String,
+        hostName: _hostName,
+      );
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
           child: SelectableText(
-            msg['content'] as String,
+            text,
             style: GoogleFonts.inter(
               fontSize: 11,
               color: context.palette.textMuted,
