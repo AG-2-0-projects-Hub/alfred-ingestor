@@ -1,0 +1,26 @@
+{
+  "name": "alfred-qa-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Alfred QA scenario runner — Playwright + Gemini Vision judge + Supabase MCP",
+  "scripts": {
+    "smoke": "tsx run.ts smoke",
+    "full": "tsx run.ts full",
+    "install-browsers": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^0.7.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.48.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
