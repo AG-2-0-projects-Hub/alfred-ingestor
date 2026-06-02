@@ -177,6 +177,18 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **host_expected:** voice note appears in the "Files to Ingest" list before "Ingest Now" is clicked
 - **status:** pending
 
+### B0. Scraper /scrape returns 200 + structured markdown for known URL
+- **id:** scraper-base-01
+- **touches:**
+  - `scraper/main.py`
+- **layer:** 1
+- **runs_on:** [smart, full]
+- **setup:** known stable test Airbnb URL (e.g. an existing Dos Rios listing URL); FIRECRAWL_API_KEY + GEMINI_API_KEY configured on the scraper service
+- **action:** `POST https://scraper-staging-bn7w.onrender.com/scrape` with body `{"url": "<test_url>"}`
+- **db_expected:** HTTP 200, response body has `{"status": "success", "data": "<non-empty structured markdown>"}`
+- **why this is in the matrix:** regression guardrail for the 2026-06-02 incident (BUG-006: Gemini preview model `gemini-3-flash-preview` was retired, scraper crashed on every call). Any future preview-model retirement or model name change shows up here before it breaks the whole ingest flow.
+- **status:** pending
+
 ### B9. Generate guest link creates a new guest record
 - **id:** ingest-guest-link-01
 - **touches:**
@@ -422,14 +434,14 @@ This section is populated by the Gemini Exploration Agent when it finds anomalie
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
 |---|---|---|---|---|
 | A. Auth | 4 | — | 4 | — |
-| B. Ingestor | 9 | 3 | 6 | — |
+| B. Ingestor | 10 | 4 | 6 | — |
 | C. Chat | 7 | 1 | 6 | — |
 | D. Dashboard | 4 | — | 4 | — |
 | E. Multi-property | 2 | — | 2 | — |
 | F. Theme | 1 | — | 1 | — |
 | G. RLS | 3 | 3 | — | — |
 | H. Push | 1 | — | 1 | — |
-| **Total** | **31** | **7** | **24** | **0** |
+| **Total** | **32** | **8** | **24** | **0** |
 
 ---
 

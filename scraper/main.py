@@ -102,10 +102,14 @@ async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
         fc = get_firecrawl_client()
         scrape_result = fc.scrape(url, formats=["markdown"])
     except Exception as e:
+        # Surface the actual error in Render logs (HTTPException details
+        # don't end up in stdout — they only go in the response body).
+        print(f"ERROR: Firecrawl extraction failed: {e}")
         raise HTTPException(status_code=500, detail=f"Firecrawl extraction failed: {str(e)}")
 
     extracted_markdown = getattr(scrape_result, "markdown", "")
     if not extracted_markdown:
+        print("ERROR: Firecrawl returned empty markdown content")
         raise HTTPException(status_code=500, detail="Firecrawl returned empty markdown content")
 
     # 2. Gemini structuring
@@ -113,7 +117,7 @@ async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
         client = get_gemini_client()
         final_prompt = get_gemini_prompt(extracted_markdown)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             contents=final_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=(
@@ -125,6 +129,7 @@ async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
         )
         structured_output = response.text
     except Exception as e:
+        print(f"ERROR: Gemini API processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Gemini API processing failed: {str(e)}")
 
     # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged

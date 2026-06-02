@@ -64,6 +64,17 @@ Each promoted scenario must include the same fields as other scenarios: `id`, `t
   - `backend/routers/ingest.py` (where canonical lookup happens)
   - RLS policies on `properties`, `conversations`, `messages`, `guests` (most are disabled — see memory `project_rls_pending`)
 
+### BUG-006: Scraper crashes calling retired Gemini preview model
+- **Reported:** 2026-06-02
+- **Severity:** functional — blocking all ingests
+- **Symptoms:** scraper-staging `/scrape` returns 500. Render logs show only "Starting scrape for URL: ..." then 500 with no traceback (HTTPException detail goes to response body, not stdout).
+- **Root cause:** `scraper/main.py` line 116 called `model="gemini-3-flash-preview"`. Google retired or renamed the preview, causing every Gemini call from the scraper to raise. Exception caught at line 127 and rethrown as HTTPException 500 — opaque to callers.
+- **Why prod appeared fine:** prod was last successfully ingested before the retirement; user assumed prod still worked without retesting. Prod is/was actually broken too.
+- **Fixed in commit:** *(commit hash filled in when this lands)*
+  - Scraper model changed to `gemini-2.5-flash` (stable, GA, free-tier accessible, accurate enough for one-shot structured markdown generation)
+  - Added `print(f"ERROR: ...")` lines before the HTTPException raises so future scraper failures appear in stdout / Render logs immediately
+- **Regression scenario:** B0 (scraper-base-01) added to `scenarios.md` — runs as Layer 1 against `scraper-staging-bn7w.onrender.com/scrape`. Any future model retirement / scraper crash shows up here before it breaks the whole ingest flow.
+
 ### BUG-005: Staging deployment renders differently from prod
 - **Reported:** 2026-06-02
 - **Severity:** UI / unknown
