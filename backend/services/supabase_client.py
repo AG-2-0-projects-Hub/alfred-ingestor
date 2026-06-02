@@ -29,14 +29,32 @@ def insert_property(
     airbnb_url: str = "",
     owner_id: str | None = None,
 ) -> None:
-    """Upsert a row in the properties table, preserving existing fields."""
+    """Upsert a row in the properties table, preserving existing fields.
+
+    owner_id is set ONLY when the row is being created for the first time.
+    On subsequent upserts (re-ingest, status update, etc.) the existing
+    owner_id is preserved — never silently overwritten. Prevents accidental
+    cross-tenant property transfer when two users ingest the same nickname
+    (see BUG-004 / bug-backlog).
+    """
     client = get_client()
+
+    # Check if row already exists. If yes, never touch owner_id.
+    existing = (
+        client.table("properties")
+        .select("id, owner_id")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    is_new_row = existing is None or existing.data is None
+
     row: dict = {"id": property_id, "updated_at": _now()}
     if name:
         row["name"] = name
     if airbnb_url:
         row["airbnb_url"] = airbnb_url
-    if owner_id:
+    if owner_id and is_new_row:
         row["owner_id"] = owner_id
     client.table("properties").upsert(row).execute()
 
@@ -54,13 +72,24 @@ def get_canonical_property(airbnb_url: str) -> dict | None:
     return result.data if result else None
 
 
-def get_canonical_property_by_name(name: str) -> dict | None:
-    """Find an existing property by nickname. Returns the row or None."""
+def get_canonical_property_by_name(name: str, owner_id: str | None = None) -> dict | None:
+    """Find an existing property by nickname, scoped to a specific owner.
+
+    Returns None unless an owner_id is provided — prevents cross-tenant
+    name collisions where User B's "Bungalowww" ingest hijacks User A's
+    property. (BUG-004 / bug-backlog)
+
+    Anonymous / unauthenticated ingests (owner_id=None) deliberately get
+    no canonical match — they will create a fresh property row.
+    """
+    if not owner_id:
+        return None
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, status, name")
+        .select("id, status, name, owner_id")
         .eq("name", name)
+        .eq("owner_id", owner_id)
         .maybe_single()
         .execute()
     )

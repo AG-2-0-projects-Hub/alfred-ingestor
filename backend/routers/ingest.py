@@ -68,13 +68,16 @@ async def ingest(req: IngestRequest, request: Request):
     temp_id = req.property_id
     owner_id = await asyncio.to_thread(_get_owner_id, request)
 
-    # Resolve canonical property by nickname (not URL — same URL can now create multiple entries).
+    # Resolve canonical property by nickname, scoped to the current owner so
+    # two users naming a property "Bungalowww" get separate rows.
     # 409 lock still applies if the named property is currently ingesting.
+    # If owner_id is None (unauthenticated), canonical lookup returns None
+    # and the request will create a brand-new row at temp_id.
     property_id = temp_id
     property_name_clean = req.property_name.strip()
-    if property_name_clean:
+    if property_name_clean and owner_id:
         canonical = await asyncio.to_thread(
-            supabase_client.get_canonical_property_by_name, property_name_clean
+            supabase_client.get_canonical_property_by_name, property_name_clean, owner_id
         )
         if canonical:
             property_id = canonical["id"]
