@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
 import '../widgets/drop_zone.dart';
@@ -233,22 +234,21 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   }
 
   Future<void> _runMerge() async {
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     setState(() => _isMerging = true);
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/merge/$_propertyId'),
-        headers: {'Content-Type': 'application/json'},
+      final data = await ApiClient.postJson(
+        '/api/merge/$_propertyId',
+        const {},
+        // Merge runs Gemini conflict detection over all sources — can take >60s
+        // on Render free tier first-hit, especially with multiple uploaded files.
+        timeout: const Duration(seconds: 120),
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _propertyStatus = data['status'] as String?;
-          _masterJson = data['master_json'] as Map<String, dynamic>?;
-        });
-      } else {
-        _showError('Merge failed (${response.statusCode})');
-      }
+      setState(() {
+        _propertyStatus = data['status'] as String?;
+        _masterJson = data['master_json'] as Map<String, dynamic>?;
+      });
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       _showError('Merge failed: $e');
     } finally {
@@ -617,6 +617,25 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                           : const Text('MERGE NOW'),
                     ),
                   ],
+                  // Conflict resolution first — the action — then the JSON below.
+                  if (_propertyStatus == 'Conflict_Pending' &&
+                      conflictReport != null &&
+                      conflictReport.isNotEmpty) ...[
+                    const SizedBox(height: 28),
+                    Text('Resolve Conflicts',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 12),
+                    ConflictQuestionnaireWidget(
+                      key: ValueKey(conflictReport.length),
+                      propertyId: _propertyId,
+                      conflictReport: conflictReport,
+                      backendUrl: dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
+                      onResolved: _onResolved,
+                    ),
+                  ],
                   if (_postMergeStatuses.contains(_propertyStatus)) ...[
                     const SizedBox(height: 24),
                     if (_masterJson != null) ...[
@@ -664,24 +683,6 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                         ),
                       ),
                     ],
-                  ],
-                  if (_propertyStatus == 'Conflict_Pending' &&
-                      conflictReport != null &&
-                      conflictReport.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    Text('Resolve Conflicts',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 12),
-                    ConflictQuestionnaireWidget(
-                      key: ValueKey(conflictReport.length),
-                      propertyId: _propertyId,
-                      conflictReport: conflictReport,
-                      backendUrl: dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
-                      onResolved: _onResolved,
-                    ),
                   ],
                 ],
                 const SizedBox(height: 48),

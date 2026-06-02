@@ -37,6 +37,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   String? _heroImageUrl;
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
+  // True once the host submitted conflict resolutions but hasn't yet clicked
+  // "Update Knowledge" — used to retitle the status badge.
+  bool _resolutionsSubmitted = false;
 
   static const _postMergeStatuses = {
     'Merged',
@@ -269,7 +272,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final id = _resolvedPropertyId ?? _propertyId;
     setState(() => _isMerging = true);
     try {
-      final data = await ApiClient.postJson('/api/merge/$id', const {});
+      final data = await ApiClient.postJson(
+        '/api/merge/$id',
+        const {},
+        // Merge runs Gemini conflict detection over all sources — can take >60s
+        // on Render free tier first-hit, especially with multiple uploaded files.
+        timeout: const Duration(seconds: 120),
+      );
       setState(() {
         _propertyStatus = data['status'] as String?;
         _masterJson = data['master_json'] as Map<String, dynamic>?;
@@ -287,6 +296,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     setState(() {
       _propertyStatus = status;
       _masterJson = masterJson;
+      _resolutionsSubmitted = false;
     });
   }
 
@@ -352,7 +362,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'The property is now registered and Alfred is ready to take over.',
+                  'Files ingested successfully.',
                   style: GoogleFonts.inter(
                       fontSize: 15,
                       height: 1.5,
@@ -361,7 +371,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
+                  'Next, run Merge to build Alfred’s master knowledge base. If conflicts are detected between your listing and uploaded documents, you’ll be asked to resolve them before training.',
                   style: GoogleFonts.inter(
                       fontSize: 13,
                       color: context.palette.textSecondary,
@@ -398,7 +408,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
       'Merged' => 'Merged',
-      'Conflict_Pending' => 'Conflicts Pending Review',
+      'Conflict_Pending' => _resolutionsSubmitted
+          ? 'Conflicts Resolved — Pending Update'
+          : 'Conflicts Pending Review',
       'Trained' => 'Trained',
       'Fully_Trained' => 'Fully Trained',
       _ => status,
@@ -730,22 +742,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                           : const Text('MERGE NOW'),
                     ),
                   ],
-                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    _buildMasterJsonViewer(),
-                    const SizedBox(height: 24),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.dashboard_outlined, size: 18),
-                      label: const Text('Back to Dashboard'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        foregroundColor: context.palette.primary,
-                        side: BorderSide(
-                            color: context.palette.primaryContainer, width: 1.5),
-                      ),
-                    ),
-                  ],
+                  // Conflict resolution comes first — it's the action the host
+                  // needs to take before the JSON below it becomes meaningful.
                   if (_propertyStatus == 'Conflict_Pending' &&
                       conflictReport != null &&
                       conflictReport.isNotEmpty) ...[
@@ -762,6 +760,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       conflictReport: conflictReport,
                       backendUrl: ApiClient.backendUrl,
                       onResolved: _onResolved,
+                      onAnswersSubmitted: () =>
+                          setState(() => _resolutionsSubmitted = true),
+                    ),
+                  ],
+                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                    const SizedBox(height: 24),
+                    _buildMasterJsonViewer(),
+                    const SizedBox(height: 24),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.dashboard_outlined, size: 18),
+                      label: const Text('Back to Dashboard'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        foregroundColor: context.palette.primary,
+                        side: BorderSide(
+                            color: context.palette.primaryContainer, width: 1.5),
+                      ),
                     ),
                   ],
                 ],

@@ -9,12 +9,17 @@ class ConflictQuestionnaireWidget extends StatefulWidget {
     required this.conflictReport,
     required this.backendUrl,
     required this.onResolved,
+    this.onAnswersSubmitted,
   });
 
   final String propertyId;
   final List<dynamic> conflictReport;
   final String backendUrl;
   final void Function(String status, Map<String, dynamic> masterJson) onResolved;
+  // Fires once the resolutions are saved server-side (before the host clicks
+  // "Update Knowledge"). Lets the parent retitle its status badge to reflect
+  // that conflicts are answered but the knowledge update is still pending.
+  final VoidCallback? onAnswersSubmitted;
 
   @override
   State<ConflictQuestionnaireWidget> createState() =>
@@ -89,6 +94,7 @@ class _ConflictQuestionnaireWidgetState
           _submitSuccess = true;
           _resolveResult = data;
         });
+        widget.onAnswersSubmitted?.call();
       } else {
         _showError('Resolve failed (${response.statusCode}): ${response.body}');
       }
