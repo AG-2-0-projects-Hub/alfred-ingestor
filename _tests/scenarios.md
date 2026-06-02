@@ -55,7 +55,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** open `/auth`, fill email + password, click "Sign Up"
 - **host_expected:** redirected to dashboard, session token set in localStorage
 - **db_expected:** new row in `auth.users` with the email
-- **status:** pending
+- **last_tested:** 2026-06-02 (manual verification by user)
+- **status:** passing
 
 ### A2. Host login with valid credentials
 - **id:** auth-login-01
@@ -64,7 +65,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** existing test account
 - **action:** enter credentials, click "Log In"
 - **host_expected:** dashboard loads with this account's properties only
-- **status:** pending
+- **last_tested:** 2026-06-02 (automated via smoke test + manual verification)
+- **status:** passing
 
 ### A3. Host login with invalid credentials
 - **id:** auth-login-02
@@ -73,7 +75,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** anonymous session
 - **action:** wrong password
 - **host_expected:** error message shown, no redirect, no session set
-- **status:** pending
+- **last_tested:** 2026-06-02 (manual verification by user)
+- **status:** passing
 
 ### A4. Host logout clears session
 - **id:** auth-logout-01
@@ -82,7 +85,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** logged-in host on dashboard
 - **action:** click logout
 - **host_expected:** redirected to auth screen, localStorage cleared, refresh does not restore session
-- **status:** pending
+- **last_tested:** 2026-06-02 (manual verification by user)
+- **status:** passing
 
 ---
 
@@ -356,7 +360,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** host logged in, app in light mode
 - **action:** click theme toggle
 - **host_expected:** all surfaces switch to dark within 1s — dashboard, chat live dialog, property expanded view, popups, system message rendering. No mixed-mode flicker.
-- **status:** pending
+- **last_tested:** 2026-06-02 (manual verification by user)
+- **status:** passing
 
 ---
 

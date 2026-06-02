@@ -152,22 +152,49 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           .eq('id', effectiveId)
           .maybeSingle();
 
+      bool succeeded = false;
       if (result != null) {
         final ingested = result['ingested_markdown'] as String?;
         final scraped = result['scraped_markdown'] as String?;
         final name = _parseOfficialName(scraped);
         final heroUrl = await _getHeroImageUrl(effectiveId);
+        final isSuccess = ingested != null && ingested.isNotEmpty;
         setState(() {
           _ingestedMarkdown = ingested;
           _officialPropertyName = name;
           _heroImageUrl = heroUrl;
           _propertyStatus = result['status'] as String?;
           _masterJson = result['master_json'] as Map<String, dynamic>?;
-          _filesToIngest.clear();
+          // Only clear the pre-ingest queue on success. On failure, leave
+          // the files in their queued state so the user can retry without
+          // re-uploading.
+          if (isSuccess) _filesToIngest.clear();
         });
-        if (ingested != null && ingested.isNotEmpty) {
-          await _showSuccessDialog(
-              name ?? _nicknameController.text.trim());
+        if (isSuccess) {
+          succeeded = true;
+          await _showSuccessDialog(name ?? _nicknameController.text.trim());
+        }
+      }
+
+      // Surface a visible error if the ingest didn't succeed. Picks the most
+      // recent backend error event when one was emitted (e.g. "(setup)" /
+      // "(unhandled)" / "(scrape)" / per-file errors). Falls back to a
+      // generic message if the stream closed without emitting any error.
+      if (!succeeded) {
+        final errorEvents =
+            _fileStatuses.where((s) => s['status'] == 'error').toList();
+        if (errorEvents.isNotEmpty) {
+          final last = errorEvents.last;
+          final where = last['file'] ?? '';
+          final msg = last['message'] ?? '';
+          _showError(
+            where.toString().isNotEmpty
+                ? 'Ingest failed at $where: $msg'
+                : 'Ingest failed: $msg',
+          );
+        } else {
+          _showError(
+              'Ingest could not complete. Please try again, or contact support if it persists.');
         }
       }
     } on ApiException catch (e) {

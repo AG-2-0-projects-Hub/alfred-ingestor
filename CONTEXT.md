@@ -38,6 +38,21 @@
 
 ---
 
+## Upcoming Phases (sequenced, as of 2026-06-02)
+
+Phase 6 QA system is shipped. Next sequence:
+
+1. **Scenario triage** — walk through `_tests/scenarios.md` (31 rows), mark each known-passing / known-failing / not-yet-built. Cuts the matrix down to what actually needs implementation work.
+2. **Foundation migration** — apply `test_run_id` columns + partial indexes on `properties`, `conversations`, `messages` (SQL in `_Context/plans/alfred-phase6-perspective-parity-and-testing.md` §3.2). Required before data-creating scenarios.
+3. **Add bug-derived scenarios** — user has a list of bugs they've identified manually; each becomes a regression scenario in `_tests/scenarios.md` *before* fixing.
+4. **Run the kept scenarios** — implement runners for everything that survived triage + the bug regressions, get a clean baseline.
+5. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. Tenant key is `properties.owner_id`; child tables join via `property_id` / `booking_id` FKs. Must complete before any real-user data lands.
+6. **Mobile UI optimization** — current focus is desktop; mobile has known UI issues (overlapping text, layout breakage, etc.). Functionality works, presentation doesn't. Out of scope for Phase 6, scheduled here so it's not forgotten.
+
+After step 6: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
+
+---
+
 ## Current App State (as of 2026-05-15)
 
 ### What is fully working
