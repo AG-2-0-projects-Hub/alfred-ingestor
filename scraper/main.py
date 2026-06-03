@@ -142,6 +142,6 @@ async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
     return {"status": "success", "data": structured_output}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok"}
