@@ -175,7 +175,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         });
         if (isSuccess) {
           succeeded = true;
-          await _showSuccessDialog(name ?? _nicknameController.text.trim());
+          // No popup here — the inline extracted-knowledge panel + MERGE NOW
+          // button below act as the success indicator. The completion popup
+          // fires only when status reaches Trained (end of the flow).
         }
       }
 
@@ -270,6 +272,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   Future<void> _runMerge() async {
     final id = _resolvedPropertyId ?? _propertyId;
+    final prevStatus = _propertyStatus;
     setState(() => _isMerging = true);
     try {
       final data = await ApiClient.postJson(
@@ -279,10 +282,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         // on Render free tier first-hit, especially with multiple uploaded files.
         timeout: const Duration(seconds: 120),
       );
+      final newStatus = data['status'] as String?;
       setState(() {
-        _propertyStatus = data['status'] as String?;
+        _propertyStatus = newStatus;
         _masterJson = data['master_json'] as Map<String, dynamic>?;
       });
+      await _maybeShowTrainedDialog(prevStatus, newStatus);
     } on ApiException catch (e) {
       _showError(e.userMessage);
     } catch (e) {
@@ -293,11 +298,21 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   }
 
   void _onResolved(String status, Map<String, dynamic> masterJson) {
+    final prevStatus = _propertyStatus;
     setState(() {
       _propertyStatus = status;
       _masterJson = masterJson;
       _resolutionsSubmitted = false;
     });
+    _maybeShowTrainedDialog(prevStatus, status);
+  }
+
+  Future<void> _maybeShowTrainedDialog(
+      String? prevStatus, String? newStatus) async {
+    if (newStatus != 'Trained' || prevStatus == 'Trained') return;
+    final name =
+        _officialPropertyName ?? _nicknameController.text.trim();
+    await _showTrainedDialog(name);
   }
 
   void _showError(String msg) {
@@ -310,7 +325,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     ));
   }
 
-  Future<void> _showSuccessDialog(String propertyName) async {
+  Future<void> _showTrainedDialog(String propertyName) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -353,7 +368,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 Text(
                   propertyName.isNotEmpty
                       ? propertyName
-                      : 'Property Registered',
+                      : 'Property Ready',
                   style: GoogleFonts.plusJakartaSans(
                       fontSize: 20,
                       fontWeight: FontWeight.w300,
@@ -362,7 +377,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Files ingested successfully.',
+                  'Alfred is now trained and ready to take over conversations.',
                   style: GoogleFonts.inter(
                       fontSize: 15,
                       height: 1.5,
@@ -371,7 +386,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Next, run Merge to build Alfred’s master knowledge base. If conflicts are detected between your listing and uploaded documents, you’ll be asked to resolve them before training.',
+                  'He’ll respond on autopilot to incoming guest messages. You can review or intervene anytime from the Dashboard.',
                   style: GoogleFonts.inter(
                       fontSize: 13,
                       color: context.palette.textSecondary,
@@ -379,22 +394,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Review Details'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text('Back to Dashboard'),
-                    ),
-                  ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      Navigator.of(context).pop();
+                    },
+                    child: const Text('Back to Dashboard'),
+                  ),
                 ),
               ],
             ),
