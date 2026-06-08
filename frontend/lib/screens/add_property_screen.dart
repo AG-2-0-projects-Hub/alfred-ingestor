@@ -37,6 +37,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   String? _heroImageUrl;
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
+  // True once the host submitted conflict resolutions but hasn't yet clicked
+  // "Update Knowledge" — used to retitle the status badge.
+  bool _resolutionsSubmitted = false;
 
   static const _postMergeStatuses = {
     'Merged',
@@ -152,22 +155,49 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           .eq('id', effectiveId)
           .maybeSingle();
 
+      bool succeeded = false;
       if (result != null) {
         final ingested = result['ingested_markdown'] as String?;
         final scraped = result['scraped_markdown'] as String?;
         final name = _parseOfficialName(scraped);
         final heroUrl = await _getHeroImageUrl(effectiveId);
+        final isSuccess = ingested != null && ingested.isNotEmpty;
         setState(() {
           _ingestedMarkdown = ingested;
           _officialPropertyName = name;
           _heroImageUrl = heroUrl;
           _propertyStatus = result['status'] as String?;
           _masterJson = result['master_json'] as Map<String, dynamic>?;
-          _filesToIngest.clear();
+          // Only clear the pre-ingest queue on success. On failure, leave
+          // the files in their queued state so the user can retry without
+          // re-uploading.
+          if (isSuccess) _filesToIngest.clear();
         });
-        if (ingested != null && ingested.isNotEmpty) {
-          await _showSuccessDialog(
-              name ?? _nicknameController.text.trim());
+        if (isSuccess) {
+          succeeded = true;
+          await _showIngestedDialog(name ?? _nicknameController.text.trim());
+        }
+      }
+
+      // Surface a visible error if the ingest didn't succeed. Picks the most
+      // recent backend error event when one was emitted (e.g. "(setup)" /
+      // "(unhandled)" / "(scrape)" / per-file errors). Falls back to a
+      // generic message if the stream closed without emitting any error.
+      if (!succeeded) {
+        final errorEvents =
+            _fileStatuses.where((s) => s['status'] == 'error').toList();
+        if (errorEvents.isNotEmpty) {
+          final last = errorEvents.last;
+          final where = last['file'] ?? '';
+          final msg = last['message'] ?? '';
+          _showError(
+            where.toString().isNotEmpty
+                ? 'Ingest failed at $where: $msg'
+                : 'Ingest failed: $msg',
+          );
+        } else {
+          _showError(
+              'Ingest could not complete. Please try again, or contact support if it persists.');
         }
       }
     } on ApiException catch (e) {
@@ -240,13 +270,28 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   Future<void> _runMerge() async {
     final id = _resolvedPropertyId ?? _propertyId;
+    final prevStatus = _propertyStatus;
     setState(() => _isMerging = true);
     try {
-      final data = await ApiClient.postJson('/api/merge/$id', const {});
+      final data = await ApiClient.postJson(
+        '/api/merge/$id',
+        const {},
+        // Merge runs Gemini conflict detection over all sources — can take >60s
+        // on Render free tier first-hit, especially with multiple uploaded files.
+        timeout: const Duration(seconds: 120),
+      );
+      final newStatus = data['status'] as String?;
+      final newMasterJson = data['master_json'] as Map<String, dynamic>?;
       setState(() {
-        _propertyStatus = data['status'] as String?;
-        _masterJson = data['master_json'] as Map<String, dynamic>?;
+        _propertyStatus = newStatus;
+        _masterJson = newMasterJson;
       });
+      if (newStatus == 'Conflict_Pending') {
+        final report = (newMasterJson?['conflict_report'] as List<dynamic>?) ?? [];
+        await _showConflictDialog(report.length);
+      } else {
+        await _maybeShowTrainedDialog(prevStatus, newStatus);
+      }
     } on ApiException catch (e) {
       _showError(e.userMessage);
     } catch (e) {
@@ -257,10 +302,25 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   }
 
   void _onResolved(String status, Map<String, dynamic> masterJson) {
+    final prevStatus = _propertyStatus;
     setState(() {
       _propertyStatus = status;
       _masterJson = masterJson;
+      _resolutionsSubmitted = false;
     });
+    _maybeShowTrainedDialog(prevStatus, status);
+  }
+
+  Future<void> _maybeShowTrainedDialog(
+      String? prevStatus, String? newStatus) async {
+    // Fire on Trained (conflict-resolved path) OR Merged with no conflicts
+    // (no-conflict path — terminal state on this screen).
+    const triggerStatuses = {'Trained', 'Merged'};
+    if (!triggerStatuses.contains(newStatus)) return;
+    if (prevStatus == newStatus) return;
+    final name =
+        _officialPropertyName ?? _nicknameController.text.trim();
+    await _showTrainedDialog(name);
   }
 
   void _showError(String msg) {
@@ -273,12 +333,163 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     ));
   }
 
-  Future<void> _showSuccessDialog(String propertyName) async {
+  Future<void> _showIngestedDialog(String propertyName) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: GlassPanel(
+            radius: 24,
+            blurSigma: AppTheme.glassBlurSigmaHeavy,
+            tint: context.palette.glassTintHeavy,
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [context.palette.primary, context.palette.accent],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.palette.primary.withValues(alpha: 0.35),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 34),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  propertyName.isNotEmpty ? propertyName : 'Files Ingested',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w300,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Files ingested successfully.',
+                  style: GoogleFonts.inter(
+                      fontSize: 15,
+                      height: 1.5,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Next, run Merge to build Alfred’s master knowledge base. If conflicts are detected between your listing and uploaded documents, you’ll be asked to resolve them before training.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: context.palette.textSecondary,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Center(
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Review Details'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showConflictDialog(int conflictCount) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: GlassPanel(
+            radius: 24,
+            blurSigma: AppTheme.glassBlurSigmaHeavy,
+            tint: context.palette.glassTintHeavy,
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: context.palette.warningContainer,
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.palette.warning.withValues(alpha: 0.25),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.tune_rounded,
+                      color: context.palette.warning, size: 32),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Almost there — $conflictCount ${conflictCount == 1 ? 'conflict' : 'conflicts'} found',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w300,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Alfred merged your information but found $conflictCount ${conflictCount == 1 ? 'point' : 'points'} where your listing and uploaded documents disagree. Review each one and choose the version Alfred should use.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: context.palette.textSecondary,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Center(
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Resolve Conflicts'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTrainedDialog(String propertyName) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -316,7 +527,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 Text(
                   propertyName.isNotEmpty
                       ? propertyName
-                      : 'Property Registered',
+                      : 'Property Ready',
                   style: GoogleFonts.plusJakartaSans(
                       fontSize: 20,
                       fontWeight: FontWeight.w300,
@@ -325,7 +536,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'The property is now registered and Alfred is ready to take over.',
+                  'Alfred is now trained and ready to take over conversations.',
                   style: GoogleFonts.inter(
                       fontSize: 15,
                       height: 1.5,
@@ -334,7 +545,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'We\'ve imported your listing. If you\'d like, please take a moment to review and fill in any open details so Alfred can provide the most precise service.',
+                  'He’ll respond on autopilot to incoming guest messages. You can review or intervene anytime from the Dashboard.',
                   style: GoogleFonts.inter(
                       fontSize: 13,
                       color: context.palette.textSecondary,
@@ -342,22 +553,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Review Details'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text('Back to Dashboard'),
-                    ),
-                  ],
+                Center(
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      Navigator.of(context).pop();
+                    },
+                    child: const Text('Back to Dashboard'),
+                  ),
                 ),
               ],
             ),
@@ -371,7 +574,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
       'Merged' => 'Merged',
-      'Conflict_Pending' => 'Conflicts Pending Review',
+      'Conflict_Pending' => _resolutionsSubmitted
+          ? 'Conflicts Resolved — Pending Update'
+          : 'Conflicts Pending Review',
       'Trained' => 'Trained',
       'Fully_Trained' => 'Fully Trained',
       _ => status,
@@ -703,22 +908,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                           : const Text('MERGE NOW'),
                     ),
                   ],
-                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    _buildMasterJsonViewer(),
-                    const SizedBox(height: 24),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.dashboard_outlined, size: 18),
-                      label: const Text('Back to Dashboard'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        foregroundColor: context.palette.primary,
-                        side: BorderSide(
-                            color: context.palette.primaryContainer, width: 1.5),
-                      ),
-                    ),
-                  ],
+                  // Conflict resolution comes first — it's the action the host
+                  // needs to take before the JSON below it becomes meaningful.
                   if (_propertyStatus == 'Conflict_Pending' &&
                       conflictReport != null &&
                       conflictReport.isNotEmpty) ...[
@@ -735,6 +926,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       conflictReport: conflictReport,
                       backendUrl: ApiClient.backendUrl,
                       onResolved: _onResolved,
+                      onAnswersSubmitted: () =>
+                          setState(() => _resolutionsSubmitted = true),
+                    ),
+                  ],
+                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                    const SizedBox(height: 24),
+                    _buildMasterJsonViewer(),
+                    const SizedBox(height: 24),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.dashboard_outlined, size: 18),
+                      label: const Text('Back to Dashboard'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        foregroundColor: context.palette.primary,
+                        side: BorderSide(
+                            color: context.palette.primaryContainer, width: 1.5),
+                      ),
                     ),
                   ],
                 ],

@@ -79,3 +79,11 @@ Context/
 _Context/
 Test_files/
 test_api.py
+
+# QA system — secrets and runtime artifacts (not committed; runner code IS committed)
+_tests/fixtures/.env.test
+_tests/reports/
+_tests/runner/node_modules/
+_tests/runner/test-results/
+_tests/runner/playwright-report/
+_tests/runner/.playwright/

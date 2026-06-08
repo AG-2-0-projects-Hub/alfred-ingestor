@@ -29,3 +29,21 @@ bash ~/AG_master_files/_scripts/ag-switch.sh the-ingestor
 ```
 git add . && git commit -m "Session: [description]" && git push
 ```
+
+## QA System
+
+The Alfred QA system tests scenarios end-to-end against staging. Three commands, all invoked in Claude Code:
+
+| When | Command | What it does |
+|---|---|---|
+| After making code changes | `/qa-changed-since` | Runs only scenarios affected by your changes (fast, ~$1) |
+| Before merging staging → main | `/qa-full` | Runs the entire scenario matrix (~$6–20, 10–30 min) |
+| Weekly | `/qa-explore` | Gemini wanders the app as a confused guest, logs anomalies |
+
+All runs target the staging URL only. Reports land in `_tests/reports/`.
+
+**New-feature flow (PRD-driven):** describe the feature → Claude drafts scenario rows in `_tests/scenarios.md` → implement → `/qa-changed-since` until clean → `/qa-full` before merging to main.
+
+**Bug-driven regressions:** when a bug surfaces, Claude adds a regression scenario to `_tests/scenarios.md` *before* fixing. Each bug becomes a permanent guardrail.
+
+See `_Context/plans/alfred-phase6-perspective-parity-and-testing.md` for the full architecture.

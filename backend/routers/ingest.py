@@ -68,13 +68,16 @@ async def ingest(req: IngestRequest, request: Request):
     temp_id = req.property_id
     owner_id = await asyncio.to_thread(_get_owner_id, request)
 
-    # Resolve canonical property by nickname (not URL — same URL can now create multiple entries).
+    # Resolve canonical property by nickname, scoped to the current owner so
+    # two users naming a property "Bungalowww" get separate rows.
     # 409 lock still applies if the named property is currently ingesting.
+    # If owner_id is None (unauthenticated), canonical lookup returns None
+    # and the request will create a brand-new row at temp_id.
     property_id = temp_id
     property_name_clean = req.property_name.strip()
-    if property_name_clean:
+    if property_name_clean and owner_id:
         canonical = await asyncio.to_thread(
-            supabase_client.get_canonical_property_by_name, property_name_clean
+            supabase_client.get_canonical_property_by_name, property_name_clean, owner_id
         )
         if canonical:
             property_id = canonical["id"]
@@ -90,17 +93,31 @@ async def ingest(req: IngestRequest, request: Request):
             # Emit resolved canonical ID so frontend knows which row to poll (REQ-19)
             yield _event("(system)", "property_id", property_id)
 
-            # Move uploads from temp folder to canonical folder when IDs differ (REQ-19)
-            if property_id != temp_id:
-                await asyncio.to_thread(
-                    supabase_client.move_files_in_storage, temp_id, property_id
-                )
+            # Setup phase — move files, upsert row, transition to Ingesting.
+            # Wrapped so any failure here surfaces a visible error event to
+            # the frontend instead of silently killing the SSE stream.
+            try:
+                if property_id != temp_id:
+                    await asyncio.to_thread(
+                        supabase_client.move_files_in_storage, temp_id, property_id
+                    )
 
-            # Upsert property row then set Ingesting (REQ-20)
-            await asyncio.to_thread(
-                supabase_client.insert_property, property_id, req.property_name, airbnb_url, owner_id
-            )
-            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
+                await asyncio.to_thread(
+                    supabase_client.insert_property, property_id, req.property_name, airbnb_url, owner_id
+                )
+                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
+            except Exception as setup_exc:
+                yield _event(
+                    "(setup)", "error",
+                    f"Could not start ingestion: {type(setup_exc).__name__}: {setup_exc}"
+                )
+                try:
+                    await asyncio.to_thread(
+                        supabase_client.update_status, property_id, "Ingest_Error"
+                    )
+                except Exception:
+                    pass
+                return
 
             # Call scraper before any file processing (REQ-26)
             scraped_markdown = ""
@@ -218,6 +235,19 @@ async def ingest(req: IngestRequest, request: Request):
                 await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
                 yield _event("(fatal)", "error", str(fatal))
 
+        except Exception as unhandled_exc:
+            # Safety net — any exception that escaped the specific handlers
+            # above gets surfaced to the frontend rather than dying silently.
+            try:
+                yield _event(
+                    "(unhandled)", "error",
+                    f"Unexpected failure: {type(unhandled_exc).__name__}: {unhandled_exc}"
+                )
+                await asyncio.to_thread(
+                    supabase_client.update_status, property_id, "Ingest_Error"
+                )
+            except Exception:
+                pass
         except BaseException:
             if current_task and not current_task.done():
                 current_task.cancel()

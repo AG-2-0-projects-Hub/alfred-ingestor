@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
+import '../services/api_client.dart';
 import '../widgets/drop_zone.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
@@ -32,6 +33,7 @@ class _IngestScreenState extends State<IngestScreen> {
   String? _heroImageUrl; // signed URL for hero image (REQ-18)
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
+  bool _resolutionsSubmitted = false;
 
   static const _postMergeStatuses = {
     'Merged',
@@ -221,26 +223,25 @@ class _IngestScreenState extends State<IngestScreen> {
 
   Future<void> _runMerge() async {
     final id = _resolvedPropertyId ?? _propertyId;
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     setState(() => _isMerging = true);
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/merge/$id'),
-        headers: {'Content-Type': 'application/json'},
+      final data = await ApiClient.postJson(
+        '/api/merge/$id',
+        const {},
+        // Merge runs Gemini conflict detection over all sources — can take >60s
+        // on Render free tier first-hit, especially with multiple uploaded files.
+        timeout: const Duration(seconds: 120),
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _propertyStatus = data['status'] as String?;
-          _masterJson = data['master_json'] as Map<String, dynamic>?;
-        });
-      } else {
-        _showError('Merge failed (${response.statusCode})');
-      }
+      setState(() {
+        _propertyStatus = data['status'] as String?;
+        _masterJson = data['master_json'] as Map<String, dynamic>?;
+      });
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       _showError('Merge failed: $e');
     } finally {
-      setState(() => _isMerging = false);
+      if (mounted) setState(() => _isMerging = false);
     }
   }
 
@@ -248,6 +249,7 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _propertyStatus = status;
       _masterJson = masterJson;
+      _resolutionsSubmitted = false;
     });
   }
 
@@ -261,7 +263,9 @@ class _IngestScreenState extends State<IngestScreen> {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
       'Merged' => 'Merged',
-      'Conflict_Pending' => 'Conflicts Pending Review',
+      'Conflict_Pending' => _resolutionsSubmitted
+          ? 'Conflicts Resolved — Pending Update'
+          : 'Conflicts Pending Review',
       'Trained' => 'Trained',
       'Fully_Trained' => 'Fully Trained',
       _ => status,
@@ -633,13 +637,7 @@ class _IngestScreenState extends State<IngestScreen> {
                     ),
                   ],
 
-                  // Master JSON Viewer
-                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    _buildMasterJsonViewer(),
-                  ],
-
-                  // Conflict Questionnaire
+                  // Conflict resolution first — the action — then the JSON below.
                   if (_propertyStatus == 'Conflict_Pending' &&
                       conflictReport != null &&
                       conflictReport.isNotEmpty) ...[
@@ -659,7 +657,14 @@ class _IngestScreenState extends State<IngestScreen> {
                       backendUrl:
                           dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
                       onResolved: _onResolved,
+                      onAnswersSubmitted: () =>
+                          setState(() => _resolutionsSubmitted = true),
                     ),
+                  ],
+
+                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                    const SizedBox(height: 24),
+                    _buildMasterJsonViewer(),
                   ],
                 ],
 
