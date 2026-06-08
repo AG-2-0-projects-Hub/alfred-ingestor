@@ -338,7 +338,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -400,8 +400,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
+                Center(
                   child: FilledButton(
                     onPressed: () => Navigator.of(ctx).pop(),
                     child: const Text('Review Details'),
@@ -420,7 +419,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -471,8 +470,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
+                Center(
                   child: FilledButton(
                     onPressed: () => Navigator.of(ctx).pop(),
                     child: const Text('Resolve Conflicts'),
@@ -491,7 +489,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -555,8 +553,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
+                Center(
                   child: FilledButton(
                     onPressed: () {
                       Navigator.of(ctx).pop();
