@@ -175,9 +175,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         });
         if (isSuccess) {
           succeeded = true;
-          // No popup here — the inline extracted-knowledge panel + MERGE NOW
-          // button below act as the success indicator. The completion popup
-          // fires only when status reaches Trained (end of the flow).
+          await _showIngestedDialog(name ?? _nicknameController.text.trim());
         }
       }
 
@@ -283,11 +281,17 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         timeout: const Duration(seconds: 120),
       );
       final newStatus = data['status'] as String?;
+      final newMasterJson = data['master_json'] as Map<String, dynamic>?;
       setState(() {
         _propertyStatus = newStatus;
-        _masterJson = data['master_json'] as Map<String, dynamic>?;
+        _masterJson = newMasterJson;
       });
-      await _maybeShowTrainedDialog(prevStatus, newStatus);
+      if (newStatus == 'Conflict_Pending') {
+        final report = (newMasterJson?['conflict_report'] as List<dynamic>?) ?? [];
+        await _showConflictDialog(report.length);
+      } else {
+        await _maybeShowTrainedDialog(prevStatus, newStatus);
+      }
     } on ApiException catch (e) {
       _showError(e.userMessage);
     } catch (e) {
@@ -309,7 +313,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   Future<void> _maybeShowTrainedDialog(
       String? prevStatus, String? newStatus) async {
-    if (newStatus != 'Trained' || prevStatus == 'Trained') return;
+    // Fire on Trained (conflict-resolved path) OR Merged with no conflicts
+    // (no-conflict path — terminal state on this screen).
+    const triggerStatuses = {'Trained', 'Merged'};
+    if (!triggerStatuses.contains(newStatus)) return;
+    if (prevStatus == newStatus) return;
     final name =
         _officialPropertyName ?? _nicknameController.text.trim();
     await _showTrainedDialog(name);
@@ -323,6 +331,159 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       backgroundColor: context.palette.danger,
       duration: const Duration(seconds: 8),
     ));
+  }
+
+  Future<void> _showIngestedDialog(String propertyName) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: GlassPanel(
+            radius: 24,
+            blurSigma: AppTheme.glassBlurSigmaHeavy,
+            tint: context.palette.glassTintHeavy,
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [context.palette.primary, context.palette.accent],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.palette.primary.withValues(alpha: 0.35),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 34),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  propertyName.isNotEmpty ? propertyName : 'Files Ingested',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w300,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Files ingested successfully.',
+                  style: GoogleFonts.inter(
+                      fontSize: 15,
+                      height: 1.5,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Next, run Merge to build Alfred’s master knowledge base. If conflicts are detected between your listing and uploaded documents, you’ll be asked to resolve them before training.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: context.palette.textSecondary,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Review Details'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showConflictDialog(int conflictCount) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: GlassPanel(
+            radius: 24,
+            blurSigma: AppTheme.glassBlurSigmaHeavy,
+            tint: context.palette.glassTintHeavy,
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: context.palette.warningContainer,
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.palette.warning.withValues(alpha: 0.25),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.tune_rounded,
+                      color: context.palette.warning, size: 32),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Almost there — $conflictCount ${conflictCount == 1 ? 'conflict' : 'conflicts'} found',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w300,
+                      color: context.palette.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Alfred merged your information but found $conflictCount ${conflictCount == 1 ? 'point' : 'points'} where your listing and uploaded documents disagree. Review each one and choose the version Alfred should use.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: context.palette.textSecondary,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Resolve Conflicts'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showTrainedDialog(String propertyName) async {
