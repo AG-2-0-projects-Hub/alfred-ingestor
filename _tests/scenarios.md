@@ -475,6 +475,10 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 | 2026-06-09 | `1dded18` | Add-property — duplicate file in queue | Dropping/selecting a file whose name is already in the ingest queue is rejected with an inline "— already in the queue" message and is NOT re-uploaded (previously left a duplicate row stuck on "processing" forever). | — |
 | 2026-06-09 | `1dded18` | Add-property — completion popup contrast | Ingested / conflict / trained completion popups use an opaque surface so text stays readable over the dimmed barrier (no dark bleed-through). | Add-property — completion popup lifecycle |
 | 2026-06-09 | `1dded18` | Conflict resolution — auto-apply | Submitting conflict resolutions applies the knowledge update automatically and shows the completion popup directly; the intermediate "Update Knowledge" button is removed. | — |
+| 2026-06-09 | `55c7efa` | Add-property — completion popup contrast (real fix) | Completion dialogs (ingested / conflict / trained) render with an opaque surface backing so text is readable; the `1dded18` tint-only attempt was overridden by GlassPanel's highlight gradient and didn't take. Assert dialog text contrast is legible in both light and dark mode. | Add-property — completion popup contrast |
+| 2026-06-09 | `55c7efa` | Dashboard — property card image | Every ready property card shows an image: stored hero image if present, else fallback to `master_json.media.thumbnail_url` (Airbnb CDN). Assert a re-ingested property with no stored hero still shows its Airbnb photo (not the gradient placeholder). | — |
+| 2026-06-09 | `55c7efa` | Guest chat — header on open | Property-name header appears as soon as the guest opens the chat link (resolved via `guests.booking_id → property_id`), before any message is sent. | Guest chat — display & system messages |
+| 2026-06-09 | `55c7efa` | Guest chat — instant message echo | The guest's own message appears immediately on send (optimistic), before Alfred's reply / typing dots; the realtime stream reconciles and de-dupes it. Covers the first-message case where no subscription exists yet. | Guest chat — display & system messages |
 
 ---
 
