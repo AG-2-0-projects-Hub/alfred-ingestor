@@ -69,26 +69,67 @@ class _ChatScreenState extends State<ChatScreen>
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
-      // Load property name + host name in one query. PostgREST aliasing
-      // avoids the column-name collision (both are 'name' otherwise).
-      // host_name is needed so the guest-side system-message renderer can fill
-      // "You are now speaking with [host name]" without an extra round-trip.
+      // Load the official listing name + host name from Master JSON. The merge
+      // step builds property_identity with a "dynamic" structure, so the
+      // official-name key varies by row (listing_name / property_name / name /
+      // property_complex_name). Pull each candidate via PostgREST aliasing and
+      // fall back through them, then to the host-chosen nickname (`name`).
+      // host_name feeds the guest-side "You are now speaking with [host]" marker.
       final propResult = await Supabase.instance.client
           .from('properties')
-          .select('name, host_name:master_json->host_profile->>name')
+          .select(
+            'name,'
+            'host_name:master_json->host_profile->>name,'
+            'pi_listing_name:master_json->property_identity->>listing_name,'
+            'pi_property_name:master_json->property_identity->>property_name,'
+            'pi_name:master_json->property_identity->>name,'
+            'pi_complex_name:master_json->property_identity->>property_complex_name',
+          )
           .eq('id', result['property_id'] as String)
           .maybeSingle();
       if (mounted) {
         setState(() {
           _conversationId = result['id'] as String;
-          _propertyName = propResult?['name'] as String?;
-          final hn = propResult?['host_name'] as String?;
-          if (hn != null && hn.isNotEmpty) _hostName = hn;
+          _propertyName = _firstNonEmpty([
+            propResult?['pi_listing_name'] as String?,
+            propResult?['pi_property_name'] as String?,
+            propResult?['pi_name'] as String?,
+            propResult?['pi_complex_name'] as String?,
+            propResult?['name'] as String?,
+          ]);
+          final hn = _sanitizeHostName(propResult?['host_name'] as String?);
+          if (hn != null) _hostName = hn;
           _mode = (result['mode'] as String?) ?? 'autopilot';
         });
         _subscribeToMessages(result['id'] as String);
       }
     }
+  }
+
+  // Returns the first non-empty, trimmed value, or null if none qualify.
+  String? _firstNonEmpty(List<String?> candidates) {
+    for (final c in candidates) {
+      final v = c?.trim();
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  // Guards against extraction noise leaking into the chat. The merge step can
+  // occasionally stuff a whole instruction sentence into host_profile.name
+  // (e.g. "Host is Ilse, mention Rogelio at the entrance"). A real host display
+  // name is short and rarely sentence-like, so reject overly long values or
+  // ones that read like a phrase, falling back to the generic "the host".
+  String? _sanitizeHostName(String? raw) {
+    final name = raw?.trim();
+    if (name == null || name.isEmpty) return null;
+    if (name.length > 40) return null;
+    // Multiple words plus a comma/sentence punctuation → almost certainly a
+    // note, not a name. Allow short multi-word names like "Eduardo Rafael".
+    final wordCount = name.split(RegExp(r'\s+')).length;
+    if (wordCount > 3) return null;
+    if (RegExp(r'[,;:.!?]').hasMatch(name) && wordCount > 1) return null;
+    return name;
   }
 
   void _watchConversation() {
@@ -313,20 +354,23 @@ class _ChatScreenState extends State<ChatScreen>
               const SizedBox(height: kToolbarHeight + 24),
               if (_mode == 'intervene') _buildInterventionBanner(),
               Expanded(
-                child: _messages.isEmpty && !_isWaiting
-                    ? _buildEmptyState()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        itemCount: _messages.length + (_isWaiting ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index == _messages.length) {
-                            return _buildTypingIndicator();
-                          }
-                          return _buildBubble(_messages[index]);
-                        },
-                      ),
+                child: () {
+                  final visible = _dedupeSystemMarkers(_messages);
+                  return visible.isEmpty && !_isWaiting
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          itemCount: visible.length + (_isWaiting ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (index == visible.length) {
+                              return _buildTypingIndicator();
+                            }
+                            return _buildBubble(visible[index]);
+                          },
+                        );
+                }(),
               ),
               _buildInputBar(),
             ],
@@ -362,22 +406,41 @@ class _ChatScreenState extends State<ChatScreen>
                       color: Colors.white, size: 18),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Alfred',
-                        style: GoogleFonts.plusJakartaSans(
-                            fontWeight: FontWeight.w300,
-                            fontSize: 18,
-                            color: context.palette.primary)),
-                    if (_propertyName != null)
-                      Text(
-                        _propertyName!,
-                        style: GoogleFonts.inter(
-                            fontSize: 11, color: context.palette.textMuted),
-                      ),
-                  ],
+                // When the official listing name is known, lead with it as the
+                // header and keep the Alfred identity as a small concierge tag.
+                // Falls back to plain "Alfred" branding when no name is loaded.
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: _propertyName != null
+                        ? [
+                            Text(
+                              _propertyName!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 16,
+                                  height: 1.1,
+                                  color: context.palette.textPrimary),
+                            ),
+                            Text(
+                              'Alfred · Concierge',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: context.palette.primary),
+                            ),
+                          ]
+                        : [
+                            Text('Alfred',
+                                style: GoogleFonts.plusJakartaSans(
+                                    fontWeight: FontWeight.w300,
+                                    fontSize: 18,
+                                    color: context.palette.primary)),
+                          ],
+                  ),
                 ),
               ],
             ),
@@ -503,6 +566,26 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
     );
+  }
+
+  // Collapses runs of consecutive identical system markers into one. A
+  // double-submit/retry race (or legacy data) can insert two back-to-back
+  // "__SYS_INTERVENE__" rows, which would otherwise render as two identical
+  // "You are now speaking with …" lines. Non-system messages always break a run.
+  List<Map<String, dynamic>> _dedupeSystemMarkers(
+      List<Map<String, dynamic>> messages) {
+    final out = <Map<String, dynamic>>[];
+    for (final m in messages) {
+      if (m['sender_type'] == 'system' && out.isNotEmpty) {
+        final prev = out.last;
+        if (prev['sender_type'] == 'system' &&
+            prev['content'] == m['content']) {
+          continue;
+        }
+      }
+      out.add(m);
+    }
+    return out;
   }
 
   Widget _buildBubble(Map<String, dynamic> msg) {

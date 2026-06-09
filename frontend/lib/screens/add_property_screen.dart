@@ -348,7 +348,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Opaque surface (not the translucent heavy glass tint) so dialog
+            // text stays readable over the dimmed barrier instead of letting
+            // the dark backdrop bleed through and crush contrast.
+            tint: context.palette.surface,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -429,7 +432,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Opaque surface (not the translucent heavy glass tint) so dialog
+            // text stays readable over the dimmed barrier instead of letting
+            // the dark backdrop bleed through and crush contrast.
+            tint: context.palette.surface,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -499,7 +505,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Opaque surface (not the translucent heavy glass tint) so dialog
+            // text stays readable over the dimmed barrier instead of letting
+            // the dark backdrop bleed through and crush contrast.
+            tint: context.palette.surface,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -774,6 +783,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   propertyId: _propertyId,
                   onFileAdded: _onFileAdded,
                   onFileResult: _onFileResult,
+                  isDuplicate: (filename) =>
+                      _filesToIngest.any((e) => e['file'] == filename),
                 ),
                 const SizedBox(height: 16),
                 VoiceRecorderWidget(
