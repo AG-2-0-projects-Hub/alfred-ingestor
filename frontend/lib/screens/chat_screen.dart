@@ -28,6 +28,9 @@ class _ChatScreenState extends State<ChatScreen>
   String _hostName = 'the host';
   String _mode = 'autopilot';
   List<Map<String, dynamic>> _messages = [];
+  // Guest messages shown instantly on send, before the realtime stream
+  // delivers the persisted row (which then prunes them).
+  final List<Map<String, dynamic>> _optimistic = [];
   bool _isWaiting = false;
   bool _isRecording = false;
   AudioRecorder? _recorder;
@@ -63,47 +66,70 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadConversation() async {
+    // Resolve the property straight from the guest link first, so the header
+    // (property name) renders immediately on open — even before any
+    // conversation exists (a brand-new guest hasn't sent a message yet).
+    final guest = await Supabase.instance.client
+        .from('guests')
+        .select('property_id')
+        .eq('booking_id', widget.bookingId)
+        .maybeSingle();
+    final guestPropertyId = guest?['property_id'] as String?;
+    if (guestPropertyId != null) {
+      await _loadPropertyIdentity(guestPropertyId);
+    }
+
     final result = await Supabase.instance.client
         .from('conversations')
         .select('id, property_id, mode')
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
-      // Load the official listing name + host name from Master JSON. The merge
-      // step builds property_identity with a "dynamic" structure, so the
-      // official-name key varies by row (listing_name / property_name / name /
-      // property_complex_name). Pull each candidate via PostgREST aliasing and
-      // fall back through them, then to the host-chosen nickname (`name`).
-      // host_name feeds the guest-side "You are now speaking with [host]" marker.
-      final propResult = await Supabase.instance.client
-          .from('properties')
-          .select(
-            'name,'
-            'host_name:master_json->host_profile->>name,'
-            'pi_listing_name:master_json->property_identity->>listing_name,'
-            'pi_property_name:master_json->property_identity->>property_name,'
-            'pi_name:master_json->property_identity->>name,'
-            'pi_complex_name:master_json->property_identity->>property_complex_name',
-          )
-          .eq('id', result['property_id'] as String)
-          .maybeSingle();
-      if (mounted) {
-        setState(() {
-          _conversationId = result['id'] as String;
-          _propertyName = _firstNonEmpty([
-            propResult?['pi_listing_name'] as String?,
-            propResult?['pi_property_name'] as String?,
-            propResult?['pi_name'] as String?,
-            propResult?['pi_complex_name'] as String?,
-            propResult?['name'] as String?,
-          ]);
-          final hn = _sanitizeHostName(propResult?['host_name'] as String?);
-          if (hn != null) _hostName = hn;
-          _mode = (result['mode'] as String?) ?? 'autopilot';
-        });
-        _subscribeToMessages(result['id'] as String);
+      // Fallback: if the guest lookup didn't resolve the property, use the
+      // conversation's property_id so the header still fills in.
+      if (guestPropertyId == null) {
+        await _loadPropertyIdentity(result['property_id'] as String);
       }
+      if (!mounted) return;
+      setState(() {
+        _conversationId = result['id'] as String;
+        _mode = (result['mode'] as String?) ?? 'autopilot';
+      });
+      _subscribeToMessages(result['id'] as String);
     }
+  }
+
+  // Loads the official listing name + host display name from Master JSON. The
+  // merge step builds property_identity with a "dynamic" structure, so the
+  // official-name key varies by row (listing_name / property_name / name /
+  // property_complex_name). Pull each candidate via PostgREST aliasing and fall
+  // back through them, then to the host-chosen nickname (`name`). host_name
+  // feeds the guest-side "You are now speaking with [host]" marker.
+  Future<void> _loadPropertyIdentity(String propertyId) async {
+    final propResult = await Supabase.instance.client
+        .from('properties')
+        .select(
+          'name,'
+          'host_name:master_json->host_profile->>name,'
+          'pi_listing_name:master_json->property_identity->>listing_name,'
+          'pi_property_name:master_json->property_identity->>property_name,'
+          'pi_name:master_json->property_identity->>name,'
+          'pi_complex_name:master_json->property_identity->>property_complex_name',
+        )
+        .eq('id', propertyId)
+        .maybeSingle();
+    if (!mounted) return;
+    setState(() {
+      _propertyName = _firstNonEmpty([
+        propResult?['pi_listing_name'] as String?,
+        propResult?['pi_property_name'] as String?,
+        propResult?['pi_name'] as String?,
+        propResult?['pi_complex_name'] as String?,
+        propResult?['name'] as String?,
+      ]);
+      final hn = _sanitizeHostName(propResult?['host_name'] as String?);
+      if (hn != null) _hostName = hn;
+    });
   }
 
   // Returns the first non-empty, trimmed value, or null if none qualify.
@@ -165,7 +191,10 @@ class _ChatScreenState extends State<ChatScreen>
         .order('created_at', ascending: true)
         .listen((data) {
           if (mounted) {
-            setState(() => _messages = data);
+            setState(() {
+              _messages = data;
+              _pruneOptimistic(data);
+            });
             _scrollToBottom();
             _syncModeFromMessageStream(data);
           }
@@ -215,7 +244,19 @@ class _ChatScreenState extends State<ChatScreen>
     final text = overrideText ?? _controller.text.trim();
     if (text.isEmpty || _isWaiting) return;
     if (overrideText == null) _controller.clear();
-    setState(() => _isWaiting = true);
+    // Optimistically render the guest's own bubble immediately so it never
+    // looks like the message was dropped while Alfred is thinking. The realtime
+    // messages stream later delivers the persisted row and prunes this entry.
+    final optimistic = <String, dynamic>{
+      'sender_type': 'guest',
+      'content': text,
+      'message_type': 'text',
+      '_optimistic': true,
+    };
+    setState(() {
+      _isWaiting = true;
+      _optimistic.add(optimistic);
+    });
 
     try {
       await ApiClient.postJson(
@@ -226,8 +267,10 @@ class _ChatScreenState extends State<ChatScreen>
         await _loadConversation();
       }
     } on ApiException catch (e) {
+      if (mounted) setState(() => _optimistic.remove(optimistic));
       _showApiError(e, retryWith: text);
     } catch (e) {
+      if (mounted) setState(() => _optimistic.remove(optimistic));
       _showApiError(
         NetworkException(),
         retryWith: text,
@@ -235,6 +278,17 @@ class _ChatScreenState extends State<ChatScreen>
     } finally {
       if (mounted) setState(() => _isWaiting = false);
     }
+  }
+
+  // Drops optimistic guest bubbles once the persisted row arrives via the
+  // stream, matching on (sender_type=guest, content) to avoid a brief double.
+  void _pruneOptimistic(List<Map<String, dynamic>> data) {
+    if (_optimistic.isEmpty) return;
+    final delivered = data
+        .where((m) => m['sender_type'] == 'guest')
+        .map((m) => m['content'])
+        .toSet();
+    _optimistic.removeWhere((o) => delivered.contains(o['content']));
   }
 
   void _showApiError(ApiException e, {required String retryWith}) {
@@ -355,7 +409,10 @@ class _ChatScreenState extends State<ChatScreen>
               if (_mode == 'intervene') _buildInterventionBanner(),
               Expanded(
                 child: () {
-                  final visible = _dedupeSystemMarkers(_messages);
+                  final visible = [
+                    ..._dedupeSystemMarkers(_messages),
+                    ..._optimistic,
+                  ];
                   return visible.isEmpty && !_isWaiting
                       ? _buildEmptyState()
                       : ListView.builder(

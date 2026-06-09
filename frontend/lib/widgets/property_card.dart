@@ -223,6 +223,12 @@ class _PropertyCardState extends State<_PropertyCard> {
     final status = widget.property['status'] as String? ?? '';
     final name = widget.property['name'] as String? ?? 'Unnamed';
     final propertyId = widget.property['id'] as String;
+    // Airbnb CDN thumbnail from Master JSON — used as a fallback when the
+    // stored hero image is missing (the hero upload step is best-effort and
+    // can be skipped if the scrape lacked a thumbnail marker).
+    final masterJson = widget.property['master_json'] as Map<String, dynamic>?;
+    final media = masterJson?['media'] as Map<String, dynamic>?;
+    final thumbnailUrl = media?['thumbnail_url'] as String?;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -263,7 +269,10 @@ class _PropertyCardState extends State<_PropertyCard> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      _HeroImage(propertyId: propertyId, status: status),
+                      _HeroImage(
+                          propertyId: propertyId,
+                          status: status,
+                          fallbackUrl: thumbnailUrl),
                       Positioned(
                         left: 0, right: 0, bottom: 0,
                         height: 56,
@@ -692,7 +701,12 @@ class _ChatBadge extends StatelessWidget {
 class _HeroImage extends StatefulWidget {
   final String propertyId;
   final String status;
-  const _HeroImage({required this.propertyId, required this.status});
+  final String? fallbackUrl;
+  const _HeroImage({
+    required this.propertyId,
+    required this.status,
+    this.fallbackUrl,
+  });
 
   @override
   State<_HeroImage> createState() => _HeroImageState();
@@ -725,16 +739,31 @@ class _HeroImageState extends State<_HeroImage> {
     if (!_loaded) {
       return ColoredBox(color: palette.primaryContainer);
     }
-    if (_url != null) {
-      return Image.network(
-        _url!,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        errorBuilder: (_, __, ___) => _placeholder(palette),
-      );
+    // Prefer the stored hero image; fall back to the Airbnb CDN thumbnail.
+    final primary = _url ?? widget.fallbackUrl;
+    if (primary == null) {
+      return _placeholder(palette);
     }
-    return _placeholder(palette);
+    return Image.network(
+      primary,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      errorBuilder: (_, __, ___) {
+        // Stored hero failed to load — try the Airbnb thumbnail before the
+        // gradient placeholder.
+        if (primary != widget.fallbackUrl && widget.fallbackUrl != null) {
+          return Image.network(
+            widget.fallbackUrl!,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            errorBuilder: (_, __, ___) => _placeholder(palette),
+          );
+        }
+        return _placeholder(palette);
+      },
+    );
   }
 
   Widget _placeholder(AppPalette palette) {
