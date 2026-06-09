@@ -1,18 +1,20 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-29 (Commit 6 — host/guest perspective parity + emergency notice + popup refresh, **uncommitted**)
+**Last Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
+**Prior Session:** 2026-06-02 (Phase 6 QA + multi-tenancy fixes + merge-flow UX — staging only, 6 commits ahead of `main`)
 **Prior Sessions:** 2026-05-28 Commit 4 `40453c9` + Commit 5 `c80a84c` (three-layer real-time)
 **Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
 
 ---
 
 ## Live URLs
-| Service | URL |
-|---|---|
-| Backend | https://the-ingestor.onrender.com |
-| Frontend | https://alfred-ingestor.vercel.app |
-| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor |
-| Auto-deploy | Yes — both Render + Vercel on push to `main` |
+| Service | Prod | Staging |
+|---|---|---|
+| Backend | https://the-ingestor.onrender.com | https://the-ingestor-staging.onrender.com |
+| Scraper | https://scraper-ojux.onrender.com | https://scraper-staging-bn7w.onrender.com |
+| Frontend | https://alfred-ingestor.vercel.app | https://alfred-ingestor-git-staging-sanslighthouse-6079s-projects.vercel.app |
+| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor | (branch `staging`) |
+| Auto-deploy | Render + Vercel on push to `main` | Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed) |
 
 ## Supabase Project
 | Key | Value |
@@ -25,8 +27,10 @@
 | Bucket | `Property_assets` (private) |
 
 ## Render Monitoring
-- UptimeRobot pings `https://the-ingestor.onrender.com/health` every 5 minutes (keeps free-tier instance warm)
-- Render free tier spins down after 15 min inactivity; UptimeRobot prevents this
+- UptimeRobot pings every 5 minutes (keeps Render free-tier instances warm — 15-min spin-down otherwise):
+  - `https://the-ingestor.onrender.com/health` (prod backend)
+  - `https://scraper-staging-bn7w.onrender.com/health` (staging scraper — added 2026-06-02)
+  - Prod scraper covered by its own existing monitor
 
 ---
 
@@ -38,18 +42,40 @@
 
 ---
 
-## Upcoming Phases (sequenced, as of 2026-06-02)
+## Session 2026-06-02 — Phase 6 rollout + multi-tenancy + merge UX (staging, 6 commits ahead of `main`)
 
-Phase 6 QA system is shipped. Next sequence:
+Full handoff lives in `_Context/session-digest-2026-06-02.md` (gitignored). One-line per commit:
 
-1. **Scenario triage** — walk through `_tests/scenarios.md` (31 rows), mark each known-passing / known-failing / not-yet-built. Cuts the matrix down to what actually needs implementation work.
-2. **Foundation migration** — apply `test_run_id` columns + partial indexes on `properties`, `conversations`, `messages` (SQL in `_Context/plans/alfred-phase6-perspective-parity-and-testing.md` §3.2). Required before data-creating scenarios.
-3. **Add bug-derived scenarios** — user has a list of bugs they've identified manually; each becomes a regression scenario in `_tests/scenarios.md` *before* fixing.
-4. **Run the kept scenarios** — implement runners for everything that survived triage + the bug regressions, get a clean baseline.
-5. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. Tenant key is `properties.owner_id`; child tables join via `property_id` / `booking_id` FKs. Must complete before any real-user data lands.
-6. **Mobile UI optimization** — current focus is desktop; mobile has known UI issues (overlapping text, layout breakage, etc.). Functionality works, presentation doesn't. Out of scope for Phase 6, scheduled here so it's not forgotten.
+| Commit | Subject |
+|---|---|
+| `67a633b` | docs: add QA system usage section to QUICKSTART |
+| `fbda872` | feat(qa): Phase 6 QA system foundation (scenarios.md, TS runner, smoke tests) |
+| `1f266ea` | fix(security): scope property dedup to owner + freeze owner_id on upsert |
+| `0f019f2` | fix(ingest): surface backend errors to user + preserve queue on failure |
+| `2a75a4e` | fix(scraper): switch from retired gemini-3-flash-preview to gemini-2.5-flash |
+| `feaf8fd` | fix(merge-flow): bump timeout to 120s, surface resolved status, reorder UI |
 
-After step 6: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
+DB migration (applied via Supabase MCP, not in git, shared prod+staging DB): `properties.airbnb_url` global UNIQUE → compound `UNIQUE (airbnb_url, owner_id)` — enables multi-tenancy. Safe (only loosens).
+
+Two infra fixes today (no code): paid the overdue GCP bill on the scraper-staging Gemini project; added scraper-staging to UptimeRobot.
+
+**Pending on `main`:** all 6 commits above. Open staging→main PR once user verifies the merge-flow UX on the staging Vercel rebuild.
+
+---
+
+## Upcoming Phases (sequenced, as of 2026-06-08)
+
+Phase 6 QA system operational. Layer 1 done. Layer 2 runners written. Next sequence:
+
+1. **Run Layer 2 full suite** — `cd _tests/runner && npm run full` — verify A3/A4/B6/B7 pass; tune coordinates if needed (Flutter CanvasKit clicks are coordinate-based).
+2. **Promote pending-intake entries** — `_tests/scenarios.md` has 4 entries in the pending-intake table that become proper scenarios before staging→main merge.
+3. **Merge staging → main** — 10 commits ready. Open PR, self-merge. Triggers prod deploy.
+4. **ISSUE-B (Delete FK)** — `ON DELETE CASCADE` on `guests.property_id`, `conversations.property_id`, `messages.conversation_id` — apply via Supabase MCP.
+5. **ISSUE-C (Vercel auto-deploy)** — investigate Vercel webhook delivery; for now manually trigger staging redeployment after every frontend push.
+6. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. G2/G3 are the failing-expected guardrails that enforce this gets done before beta.
+7. **Mobile UI optimization** — functionality works, presentation has known issues on small screens.
+
+After step 7: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
 
 ---
 
