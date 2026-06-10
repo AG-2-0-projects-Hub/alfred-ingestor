@@ -405,8 +405,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** conversations C1 (booking B1) and C2 (booking B2), each with messages
 - **action:** as B1's anon session, attempt `SELECT * FROM messages WHERE conversation_id = '<C2.id>'`
 - **db_expected:** zero rows returned
-- **last_tested:** 2026-06-09 (automated Supabase query — FAIL: anon read 50 rows, RLS not enforced — intentional pre-beta blocker)
-- **status:** failing
+- **last_tested:** 2026-06-10 (automated Supabase query — PASS: bare anon key now reads 0 rows after RLS + booking-scoped guest JWT policies applied)
+- **status:** passing
 
 ### G3. Anon key cannot escalate writes to system messages
 - **id:** rls-write-isolation-01
@@ -415,8 +415,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** valid guest session for booking B1
 - **action:** attempt to INSERT a message with sender_type='system' or sender_type='host' (impersonation)
 - **db_expected:** insert denied by RLS policy
-- **last_tested:** 2026-06-08
-- **status:** failing
+- **last_tested:** 2026-06-10 (automated Supabase query — PASS: anon insert of sender_type='host' denied by "new row violates row-level security policy")
+- **status:** passing
 
 ---
 
@@ -479,6 +479,8 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 | 2026-06-09 | `55c7efa` | Dashboard — property card image | Every ready property card shows an image: stored hero image if present, else fallback to `master_json.media.thumbnail_url` (Airbnb CDN). Assert a re-ingested property with no stored hero still shows its Airbnb photo (not the gradient placeholder). | — |
 | 2026-06-09 | `55c7efa` | Guest chat — header on open | Property-name header appears as soon as the guest opens the chat link (resolved via `guests.booking_id → property_id`), before any message is sent. | Guest chat — display & system messages |
 | 2026-06-09 | `55c7efa` | Guest chat — instant message echo | The guest's own message appears immediately on send (optimistic), before Alfred's reply / typing dots; the realtime stream reconciles and de-dupes it. Covers the first-message case where no subscription exists yet. | Guest chat — display & system messages |
+| 2026-06-10 | RLS migration + `<pending>` | RLS + guest JWT — isolation (promote into G2/G3/C7) | (1) Bare anon key reads 0 rows from guests/conversations/messages (G2 verified PASS). (2) Anon insert with sender_type≠'guest' or wrong booking is denied (G3 verified PASS). (3) Guest with a valid booking JWT sees ONLY their booking's conversation + messages, never another booking's (C7). (4) Host dashboard still reads its own properties' guests/conversations/messages and can take over / resolve (host write policies). Assert guest chat works end-to-end via `/api/guest-token` JWT (header, send, AI reply, image/voice, realtime). | — |
+| 2026-06-10 | RLS migration + `<pending>` | Guest token lifecycle | `/api/guest-token` returns a signed JWT for a valid booking_id and 404 for unknown bookings. Token auto-refreshes near expiry without interrupting the chat. Requires `SUPABASE_JWT_SECRET` env var on the backend. | RLS + guest JWT — isolation |
 
 ---
 

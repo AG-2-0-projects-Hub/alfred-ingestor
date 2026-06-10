@@ -26,6 +26,14 @@
 | Service role key | in `backend/.env` |
 | Bucket | `Property_assets` (private) |
 
+### RLS (enabled 2026-06-10 — shared prod+staging DB)
+- `properties`: `owner_only` (ALL, `owner_id = auth.uid()`) — pre-existing.
+- `guests` / `conversations` / `messages`: RLS ON. Host SELECT via property ownership; host INSERT messages + UPDATE conversations (take-over/resolve markers + mode) via ownership; guest SELECT + guest-only INSERT scoped to `auth.jwt()->>'booking_id'`.
+- `scrape_jobs`: RLS ON, no policies (service-role only).
+- **Guest auth = booking-scoped JWT.** Backend `POST /api/guest-token` mints a short-lived (24h) JWT with `role=anon` + `booking_id` claim, signed with the Supabase JWT secret. Guest Flutter client uses it via a dedicated `SupabaseClient(accessToken: …)` (chat_screen.dart). Bare anon key (no claim) now gets 0 rows.
+- **⚠️ REQUIRED env var:** `SUPABASE_JWT_SECRET` must be set on every backend deploy (Render staging `the-ingestor-staging` AND prod `the-ingestor`). Value = Supabase dashboard → Settings → API → JWT Secret. Without it `/api/guest-token` 500s and guest chat breaks.
+- Backend uses the service-role key (bypasses RLS), so ingest/merge/host-send/resolve are unaffected.
+
 ## Render Monitoring
 - UptimeRobot pings every 5 minutes (keeps Render free-tier instances warm — 15-min spin-down otherwise):
   - `https://the-ingestor.onrender.com/health` (prod backend)
@@ -341,6 +349,8 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
 - `ingest_screen.dart` cleanup — dead code, no router references; either delete or wire in
 
 ### Future Backend Work (deferred — needs SQL migrations)
+- **Per-guest separate chat threads (decided 2026-06-09 to defer).** Today a booking link = ONE shared conversation (everyone who opens it shares the thread). Desired down-the-line: each guest gets their *own* thread under the booking so they can't read each other's messages. **Caveat to solve first:** identity is the booking_id in the URL, so the same person opening on phone + browser would otherwise spawn two threads — need a per-guest identity (device/session token or a "who are you" step) before splitting threads. Until then: shared thread is intentional.
+- **Property delete = soft-delete + guest anonymization (decided 2026-06-09).** Do NOT hard-delete or cascade-delete chats/messages — keep them for history + future re-training / data-annotation rounds. On delete: soft-delete the property (`properties.deleted_at`), retain conversations + messages, and anonymize guests in place (rename to `Guest <FirstLetterOfName><first3ofBookingId>`) for privacy. Replaces the original ISSUE-B ON-DELETE-CASCADE idea.
 - `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
 - `conversations.checked_out_at` or `is_archived` flag — true "guest checked out" detection for Archived section in expanded view
 - `ai_status` + active chat count filtering by recency (currently counts all guests)
