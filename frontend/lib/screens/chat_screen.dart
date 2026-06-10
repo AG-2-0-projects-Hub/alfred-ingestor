@@ -7,11 +7,13 @@ import 'package:record/record.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/glass_panel.dart';
 import '../utils/chat_system_messages.dart';
+
 
 class ChatScreen extends StatefulWidget {
   final String bookingId;
@@ -33,6 +35,12 @@ class _ChatScreenState extends State<ChatScreen>
   final List<Map<String, dynamic>> _optimistic = [];
   bool _isWaiting = false;
   bool _isRecording = false;
+  // Guest Supabase client — scoped to this booking's JWT; separate from the
+  // global singleton so the host's auth session is never affected.
+  SupabaseClient? _guestClient;
+  // JWT state — fetched from /api/guest-token on init and re-fetched on expiry.
+  String? _guestToken;
+  int _guestTokenExpiry = 0; // unix seconds
   AudioRecorder? _recorder;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
@@ -40,6 +48,42 @@ class _ChatScreenState extends State<ChatScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _modeSubscription;
   late final AnimationController _pulseCtrl;
+
+  // Returns the current guest JWT, refreshing it if it has expired or is
+  // within 5 minutes of expiry. Called by the SupabaseClient accessToken getter.
+  Future<String> _getOrRefreshToken() async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (_guestToken != null && _guestTokenExpiry - now > 300) {
+      return _guestToken!;
+    }
+    try {
+      final data = await ApiClient.postJson(
+        '/api/guest-token',
+        {'booking_id': widget.bookingId},
+      );
+      _guestToken = data['access_token'] as String;
+      _guestTokenExpiry = now + (data['expires_in'] as int? ?? 86400);
+    } catch (_) {
+      // If the refresh fails (no network, server down), return the stale
+      // token if we have one so the UI stays functional. If we have no token
+      // at all, fall through — Supabase calls will get 401s and the chat
+      // shows empty state rather than crashing.
+      if (_guestToken != null) return _guestToken!;
+      rethrow;
+    }
+    return _guestToken!;
+  }
+
+  // Returns the dedicated guest SupabaseClient, creating it on first call.
+  // Using a separate client keeps the host's global auth session untouched.
+  SupabaseClient get _db {
+    _guestClient ??= SupabaseClient(
+      dotenv.env['SUPABASE_URL']!,
+      dotenv.env['SUPABASE_ANON_KEY']!,
+      accessToken: _getOrRefreshToken,
+    );
+    return _guestClient!;
+  }
 
   @override
   void initState() {
@@ -49,8 +93,18 @@ class _ChatScreenState extends State<ChatScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _loadConversation();
-    _watchConversation();
+    // Fetch the guest JWT first so _db is ready before any DB call.
+    _getOrRefreshToken().then((_) {
+      if (!mounted) return;
+      _loadConversation();
+      _watchConversation();
+    }).catchError((_) {
+      // Token fetch failed (e.g. server cold-starting). Load anyway —
+      // _loadConversation is safe to run with no token (just gets 0 rows).
+      if (!mounted) return;
+      _loadConversation();
+      _watchConversation();
+    });
   }
 
   @override
@@ -62,6 +116,8 @@ class _ChatScreenState extends State<ChatScreen>
     _recorder?.dispose();
     _controller.dispose();
     _scrollController.dispose();
+    _guestClient?.dispose();
+    _guestClient = null;
     super.dispose();
   }
 
@@ -69,7 +125,7 @@ class _ChatScreenState extends State<ChatScreen>
     // Resolve the property straight from the guest link first, so the header
     // (property name) renders immediately on open — even before any
     // conversation exists (a brand-new guest hasn't sent a message yet).
-    final guest = await Supabase.instance.client
+    final guest = await _db
         .from('guests')
         .select('property_id')
         .eq('booking_id', widget.bookingId)
@@ -79,7 +135,7 @@ class _ChatScreenState extends State<ChatScreen>
       await _loadPropertyIdentity(guestPropertyId);
     }
 
-    final result = await Supabase.instance.client
+    final result = await _db
         .from('conversations')
         .select('id, property_id, mode')
         .eq('booking_id', widget.bookingId)
@@ -106,7 +162,7 @@ class _ChatScreenState extends State<ChatScreen>
   // back through them, then to the host-chosen nickname (`name`). host_name
   // feeds the guest-side "You are now speaking with [host]" marker.
   Future<void> _loadPropertyIdentity(String propertyId) async {
-    final propResult = await Supabase.instance.client
+    final propResult = await _db
         .from('properties')
         .select(
           'name,'
@@ -165,7 +221,7 @@ class _ChatScreenState extends State<ChatScreen>
     // incoming rows (do NOT early-return once a conversation exists — the
     // host taking over flips mode from 'autopilot' to 'intervene' and the
     // guest must see the banner appear without a refresh).
-    _modeSubscription = Supabase.instance.client
+    _modeSubscription = _db
         .from('conversations')
         .stream(primaryKey: ['id'])
         .eq('booking_id', widget.bookingId)
@@ -184,7 +240,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _subscribeToMessages(String conversationId) {
     _subscription?.cancel();
-    _subscription = Supabase.instance.client
+    _subscription = _db
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
@@ -328,14 +384,14 @@ class _ChatScreenState extends State<ChatScreen>
     final filename = 'img_${DateTime.now().millisecondsSinceEpoch}.$ext';
     final storagePath = '$_conversationId/chat_media/$filename';
     try {
-      await Supabase.instance.client.storage
+      await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
             fileOptions: FileOptions(contentType: contentType, upsert: false),
           );
-      await Supabase.instance.client.from('messages').insert({
+      await _db.from('messages').insert({
         'conversation_id': _conversationId,
         'sender_type': 'guest',
         'content': '[image]',
@@ -368,14 +424,14 @@ class _ChatScreenState extends State<ChatScreen>
       final bytes = response.bodyBytes;
       final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
       final storagePath = '$_conversationId/chat_media/$filename';
-      await Supabase.instance.client.storage
+      await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
             fileOptions: const FileOptions(contentType: 'audio/wav', upsert: false),
           );
-      await Supabase.instance.client.from('messages').insert({
+      await _db.from('messages').insert({
         'conversation_id': _conversationId,
         'sender_type': 'guest',
         'content': '[voice message]',
