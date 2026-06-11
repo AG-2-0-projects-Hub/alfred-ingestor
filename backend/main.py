@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from routers import ingest, merge_resolve, messages, guest_auth
+from routers import ingest, merge_resolve, messages, guest_auth, properties
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ app.include_router(ingest.router, prefix="/api")
 app.include_router(merge_resolve.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
 app.include_router(guest_auth.router, prefix="/api")
+app.include_router(properties.router, prefix="/api")
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

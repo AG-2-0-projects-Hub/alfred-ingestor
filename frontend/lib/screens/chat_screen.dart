@@ -63,6 +63,20 @@ class _ChatScreenState extends State<ChatScreen>
       );
       _guestToken = data['access_token'] as String;
       _guestTokenExpiry = now + (data['expires_in'] as int? ?? 86400);
+      // Header identity is resolved server-side — RLS blocks the anon guest
+      // from reading the properties table, so it comes back with the token.
+      final pn = (data['property_name'] as String?)?.trim();
+      final hn = (data['host_name'] as String?)?.trim();
+      if (mounted &&
+          ((pn != null && pn.isNotEmpty) || (hn != null && hn.isNotEmpty))) {
+        setState(() {
+          if (pn != null && pn.isNotEmpty) _propertyName = pn;
+          if (hn != null && hn.isNotEmpty) _hostName = hn;
+        });
+      }
+      // Keep the realtime socket's auth in sync on refresh so RLS keeps
+      // letting the live messages stream through (first authed in bootstrap).
+      _guestClient?.realtime.setAuth(_guestToken);
     } catch (_) {
       // If the refresh fails (no network, server down), return the stale
       // token if we have one so the UI stays functional. If we have no token
@@ -93,18 +107,26 @@ class _ChatScreenState extends State<ChatScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    // Fetch the guest JWT first so _db is ready before any DB call.
-    _getOrRefreshToken().then((_) {
-      if (!mounted) return;
-      _loadConversation();
-      _watchConversation();
-    }).catchError((_) {
-      // Token fetch failed (e.g. server cold-starting). Load anyway —
-      // _loadConversation is safe to run with no token (just gets 0 rows).
-      if (!mounted) return;
-      _loadConversation();
-      _watchConversation();
-    });
+    _bootstrapGuestSession();
+  }
+
+  // Fetches the guest JWT, authenticates the realtime socket with it (so RLS
+  // lets the live messages stream through — the bare anon key carries no
+  // booking_id claim), then loads and watches the conversation.
+  Future<void> _bootstrapGuestSession() async {
+    try {
+      await _getOrRefreshToken();
+    } catch (_) {
+      // Token fetch failed (e.g. server cold-starting). Continue anyway —
+      // REST reads just return 0 rows under RLS rather than crashing.
+    }
+    if (!mounted) return;
+    if (_guestToken != null) {
+      await _db.realtime.setAuth(_guestToken);
+    }
+    if (!mounted) return;
+    _loadConversation();
+    _watchConversation();
   }
 
   @override
@@ -122,96 +144,20 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadConversation() async {
-    // Resolve the property straight from the guest link first, so the header
-    // (property name) renders immediately on open — even before any
-    // conversation exists (a brand-new guest hasn't sent a message yet).
-    final guest = await _db
-        .from('guests')
-        .select('property_id')
-        .eq('booking_id', widget.bookingId)
-        .maybeSingle();
-    final guestPropertyId = guest?['property_id'] as String?;
-    if (guestPropertyId != null) {
-      await _loadPropertyIdentity(guestPropertyId);
-    }
-
+    // The header (property + host name) is already populated from the
+    // guest-token response, so we only need the conversation row here.
     final result = await _db
         .from('conversations')
-        .select('id, property_id, mode')
+        .select('id, mode')
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
-      // Fallback: if the guest lookup didn't resolve the property, use the
-      // conversation's property_id so the header still fills in.
-      if (guestPropertyId == null) {
-        await _loadPropertyIdentity(result['property_id'] as String);
-      }
-      if (!mounted) return;
       setState(() {
         _conversationId = result['id'] as String;
         _mode = (result['mode'] as String?) ?? 'autopilot';
       });
       _subscribeToMessages(result['id'] as String);
     }
-  }
-
-  // Loads the official listing name + host display name from Master JSON. The
-  // merge step builds property_identity with a "dynamic" structure, so the
-  // official-name key varies by row (listing_name / property_name / name /
-  // property_complex_name). Pull each candidate via PostgREST aliasing and fall
-  // back through them, then to the host-chosen nickname (`name`). host_name
-  // feeds the guest-side "You are now speaking with [host]" marker.
-  Future<void> _loadPropertyIdentity(String propertyId) async {
-    final propResult = await _db
-        .from('properties')
-        .select(
-          'name,'
-          'host_name:master_json->host_profile->>name,'
-          'pi_listing_name:master_json->property_identity->>listing_name,'
-          'pi_property_name:master_json->property_identity->>property_name,'
-          'pi_name:master_json->property_identity->>name,'
-          'pi_complex_name:master_json->property_identity->>property_complex_name',
-        )
-        .eq('id', propertyId)
-        .maybeSingle();
-    if (!mounted) return;
-    setState(() {
-      _propertyName = _firstNonEmpty([
-        propResult?['pi_listing_name'] as String?,
-        propResult?['pi_property_name'] as String?,
-        propResult?['pi_name'] as String?,
-        propResult?['pi_complex_name'] as String?,
-        propResult?['name'] as String?,
-      ]);
-      final hn = _sanitizeHostName(propResult?['host_name'] as String?);
-      if (hn != null) _hostName = hn;
-    });
-  }
-
-  // Returns the first non-empty, trimmed value, or null if none qualify.
-  String? _firstNonEmpty(List<String?> candidates) {
-    for (final c in candidates) {
-      final v = c?.trim();
-      if (v != null && v.isNotEmpty) return v;
-    }
-    return null;
-  }
-
-  // Guards against extraction noise leaking into the chat. The merge step can
-  // occasionally stuff a whole instruction sentence into host_profile.name
-  // (e.g. "Host is Ilse, mention Rogelio at the entrance"). A real host display
-  // name is short and rarely sentence-like, so reject overly long values or
-  // ones that read like a phrase, falling back to the generic "the host".
-  String? _sanitizeHostName(String? raw) {
-    final name = raw?.trim();
-    if (name == null || name.isEmpty) return null;
-    if (name.length > 40) return null;
-    // Multiple words plus a comma/sentence punctuation → almost certainly a
-    // note, not a name. Allow short multi-word names like "Eduardo Rafael".
-    final wordCount = name.split(RegExp(r'\s+')).length;
-    if (wordCount > 3) return null;
-    if (RegExp(r'[,;:.!?]').hasMatch(name) && wordCount > 1) return null;
-    return name;
   }
 
   void _watchConversation() {

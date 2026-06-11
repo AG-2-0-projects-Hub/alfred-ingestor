@@ -12,6 +12,7 @@ import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
 import '../screens/edit_property_screen.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
 import 'setup_status_banner.dart';
@@ -1186,19 +1187,27 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     if (confirmed != true || !mounted) return;
 
     try {
-      await Supabase.instance.client
-          .from('properties')
-          .delete()
-          .eq('id', _property['id'] as String);
+      // Soft-delete via the backend: it blanks the property data, drops the
+      // storage files, and anonymizes guests under the service role, while
+      // keeping conversations/messages for training. Hard-deleting the row
+      // here would violate the FK from those retained chats. The host's access
+      // token proves ownership server-side.
+      final token = Supabase.instance.client.auth.currentSession?.accessToken;
+      await ApiClient.postJson(
+        '/api/property/${_property['id']}/soft-delete',
+        const {},
+        bearer: token,
+      );
       if (mounted) {
         Navigator.of(context).pop();
         widget.onRefresh();
       }
     } catch (e) {
       if (mounted) {
+        final msg = e is ApiException ? e.userMessage : '$e';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Delete failed: $e'),
+              content: Text('Delete failed: $msg'),
               backgroundColor: Colors.red),
         );
       }

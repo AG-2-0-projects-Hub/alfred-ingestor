@@ -93,6 +93,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           .from('properties')
           .select(
               'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
+          .isFilter('deleted_at', null)
           .order('created_at', ascending: false);
 
       final properties = List<Map<String, dynamic>>.from(data);
