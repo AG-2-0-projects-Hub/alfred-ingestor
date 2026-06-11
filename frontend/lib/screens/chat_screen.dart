@@ -35,6 +35,13 @@ class _ChatScreenState extends State<ChatScreen>
   final List<Map<String, dynamic>> _optimistic = [];
   bool _isWaiting = false;
   bool _isRecording = false;
+  // Set when the booking's property has been deleted (guest-token → 410). The
+  // chat UI is replaced by a terminal "conversation closed" message.
+  bool _conversationClosed = false;
+  String _closedMessage =
+      'This conversation is no longer active. If you still need help, '
+      'please contact your host directly through the platform where you '
+      'made your booking.';
   // Guest Supabase client — scoped to this booking's JWT; separate from the
   // global singleton so the host's auth session is never affected.
   SupabaseClient? _guestClient;
@@ -77,6 +84,10 @@ class _ChatScreenState extends State<ChatScreen>
       // Keep the realtime socket's auth in sync on refresh so RLS keeps
       // letting the live messages stream through (first authed in bootstrap).
       _guestClient?.realtime.setAuth(_guestToken);
+    } on ConversationClosedException {
+      // Property deleted — never fall back to a stale token; let the caller
+      // flip the UI into the terminal closed state.
+      rethrow;
     } catch (_) {
       // If the refresh fails (no network, server down), return the stale
       // token if we have one so the UI stays functional. If we have no token
@@ -116,6 +127,12 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _bootstrapGuestSession() async {
     try {
       await _getOrRefreshToken();
+    } on ConversationClosedException {
+      // The property was deleted — show the terminal closed state instead of
+      // an empty chat the guest can type into and watch fail. We keep the
+      // friendlier frontend copy rather than the terse server detail.
+      if (mounted) setState(() => _conversationClosed = true);
+      return;
     } catch (_) {
       // Token fetch failed (e.g. server cold-starting). Continue anyway —
       // REST reads just return 0 rows under RLS rather than crashing.
@@ -410,7 +427,9 @@ class _ChatScreenState extends State<ChatScreen>
               const SizedBox(height: kToolbarHeight + 24),
               if (_mode == 'intervene') _buildInterventionBanner(),
               Expanded(
-                child: () {
+                child: _conversationClosed
+                    ? _buildClosedState()
+                    : () {
                   final visible = [
                     ..._dedupeSystemMarkers(_messages),
                     ..._optimistic,
@@ -431,7 +450,7 @@ class _ChatScreenState extends State<ChatScreen>
                         );
                 }(),
               ),
-              _buildInputBar(),
+              if (!_conversationClosed) _buildInputBar(),
             ],
           ),
         ),
@@ -583,6 +602,50 @@ class _ChatScreenState extends State<ChatScreen>
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(
               color: context.palette.textSecondary, fontSize: 14, height: 1.5),
+        ),
+      ),
+    );
+  }
+
+  // Terminal state shown when the booking's property has been deleted. Replaces
+  // the message list + input bar so the guest gets clear guidance instead of a
+  // chat that silently fails on send.
+  Widget _buildClosedState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: GlassPanel(
+          radius: 20,
+          blurSigma: 18,
+          tint: context.palette.glassTint,
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline_rounded,
+                  size: 40, color: context.palette.textSecondary),
+              const SizedBox(height: 16),
+              Text(
+                'This conversation has ended',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: context.palette.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _closedMessage,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: context.palette.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
