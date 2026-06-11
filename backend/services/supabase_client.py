@@ -526,6 +526,23 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
     if existing.data.get("owner_id") != owner_id:
         return "forbidden"
 
+    # Blank the property data columns + stamp the tombstone FIRST, so the
+    # delete the host sees is durable even if a later best-effort step fails.
+    # NOTE: learned_knowledge is NOT NULL — clear it to [] (an empty array),
+    # never None, or the whole update is rejected and nothing gets deleted.
+    client.table("properties").update({
+        "master_json": None,
+        "ingested_markdown": None,
+        "scraped_markdown": None,
+        "file_fingerprints": None,
+        "learned_knowledge": [],
+        "resolution_history": None,
+        "resolution_history_json": None,
+        "status": "deleted",
+        "deleted_at": _now(),
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
+
     # Anonymize guests — keep the rows (FK + chat linkage) but strip the
     # personal name down to a non-identifying label derived from the booking.
     guests = (
@@ -539,22 +556,8 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
         suffix = bid[-5:] if len(bid) >= 5 else bid
         client.table("guests").update({"name": f"Guest {suffix}"}).eq("id", g["id"]).execute()
 
-    # Remove all stored files for the property.
+    # Remove all stored files for the property (best-effort).
     _delete_property_storage(property_id)
-
-    # Blank the property data columns, keep the row as a tombstone.
-    client.table("properties").update({
-        "master_json": None,
-        "ingested_markdown": None,
-        "scraped_markdown": None,
-        "file_fingerprints": None,
-        "learned_knowledge": None,
-        "resolution_history": None,
-        "resolution_history_json": None,
-        "status": "deleted",
-        "deleted_at": _now(),
-        "updated_at": _now(),
-    }).eq("id", property_id).execute()
     return "ok"
 
 
