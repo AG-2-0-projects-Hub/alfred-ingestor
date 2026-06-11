@@ -88,6 +88,13 @@ async def guest_token(req: GuestTokenRequest):
     prop = await asyncio.to_thread(
         supabase_client.get_property_for_chat, guest["property_id"]
     )
+    # B4: a guest holding an old link to a soft-deleted property must not be able
+    # to keep chatting (Alfred would run with wiped knowledge and write new
+    # messages onto a tombstone). Refuse the token once the property is deleted.
+    if prop and prop.get("deleted_at"):
+        raise HTTPException(
+            status_code=410, detail="This conversation is no longer available."
+        )
     property_name, host_name = _resolve_identity(prop)
 
     now = int(time.time())

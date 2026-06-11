@@ -90,8 +90,9 @@ def get_canonical_property_by_name(name: str, owner_id: str | None = None) -> di
         .select("id, status, name, owner_id")
         .eq("name", name)
         .eq("owner_id", owner_id)
-        .maybe_single()
-        .execute()
+        .is_("deleted_at", "null")  # B2: never treat a soft-deleted tombstone as
+        .maybe_single()             # canonical — re-adding must create a fresh row,
+        .execute()                  # not silently revive (and re-hide) the tombstone.
     )
     return result.data if result else None
 
@@ -279,7 +280,7 @@ def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name, learned_knowledge")
+        .select("id, master_json, name, learned_knowledge, deleted_at")
         .eq("id", property_id)
         .maybe_single()
         .execute()

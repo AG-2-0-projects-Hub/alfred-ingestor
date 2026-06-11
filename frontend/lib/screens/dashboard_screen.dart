@@ -250,10 +250,16 @@ class _DashboardScreenState extends State<DashboardScreen>
         .listen((rows) {
           if (!mounted) return;
           final byId = {for (final p in rows) p['id'] as String: p};
-          final updated = _properties.map((p) {
-            final fresh = byId[p['id'] as String];
-            return fresh != null ? {...p, ...fresh} : p;
-          }).toList();
+          final updated = _properties
+              .map((p) {
+                final fresh = byId[p['id'] as String];
+                return fresh != null ? {...p, ...fresh} : p;
+              })
+              // B5: if a property is soft-deleted in another session, the stream
+              // pushes the row with deleted_at set — drop it so it disappears
+              // immediately instead of lingering with status "deleted".
+              .where((p) => p['deleted_at'] == null)
+              .toList();
           setState(() => _properties = updated);
         });
 
