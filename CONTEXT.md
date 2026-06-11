@@ -31,8 +31,16 @@
 - `guests` / `conversations` / `messages`: RLS ON. Host SELECT via property ownership; host INSERT messages + UPDATE conversations (take-over/resolve markers + mode) via ownership; guest SELECT + guest-only INSERT scoped to `auth.jwt()->>'booking_id'`.
 - `scrape_jobs`: RLS ON, no policies (service-role only).
 - **Guest auth = booking-scoped JWT.** Backend `POST /api/guest-token` mints a short-lived (24h) JWT with `role=anon` + `booking_id` claim, signed with the Supabase JWT secret. Guest Flutter client uses it via a dedicated `SupabaseClient(accessToken: …)` (chat_screen.dart). Bare anon key (no claim) now gets 0 rows.
-- **⚠️ REQUIRED env var:** `SUPABASE_JWT_SECRET` must be set on every backend deploy (Render staging `the-ingestor-staging` AND prod `the-ingestor`). Value = Supabase dashboard → Settings → API → JWT Secret. Without it `/api/guest-token` 500s and guest chat breaks.
+- **⚠️ REQUIRED env var:** `SUPABASE_JWT_SECRET` (the **Legacy JWT Secret** at Supabase → Settings → API → JWT Keys → Legacy JWT Secret — NOT the service_role key) must be set on every backend deploy (Render staging `the-ingestor-staging` AND prod `the-ingestor`). Without it `/api/guest-token` 500s and guest chat breaks.
+- **⚠️ Render `PYTHON_VERSION=3.12.10`** must also be set — Render's default Python 3.14 has no `pydantic-core` wheel and fails the Rust build.
 - Backend uses the service-role key (bypasses RLS), so ingest/merge/host-send/resolve are unaffected.
+
+#### RLS integration fixes (2026-06-11, commit `f527e11`)
+Enabling RLS broke three guest-facing reads that previously rode the bare anon key. All fixed:
+- **Property/host name in header**: anon can't read `properties`, so `/api/guest-token` now returns `property_name` + `host_name` (resolved server-side from `master_json`); `chat_screen.dart` uses them directly (no `properties` query).
+- **Realtime**: the guest realtime socket is authed with the booking JWT via `realtime.setAuth(token)` (on open + each refresh) — otherwise RLS delivers 0 rows over the live `messages` stream.
+- **Duplicate system markers**: DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding one (3 racing writers: backend auto-escalation + both host chat-live views). `insert_message` guards against the skipped-insert (0-row) return.
+- **Host-token verification (⚠️ project quirk)**: the project migrated to **asymmetric JWT Signing Keys**, so host *session* tokens are NOT signed with the legacy HS256 secret. Backend endpoints that need to trust a host token (e.g. `/api/property/{id}/soft-delete`) must validate via `supabase.auth.get_user(token)` (algorithm-agnostic), **not** local `jwt.decode(..., HS256)` — the latter 401s on every host token. (The guest token is the exception: we mint it ourselves with HS256, and the legacy secret still verifies it.)
 
 ## Render Monitoring
 - UptimeRobot pings every 5 minutes (keeps Render free-tier instances warm — 15-min spin-down otherwise):
@@ -350,7 +358,7 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
 
 ### Future Backend Work (deferred — needs SQL migrations)
 - **Per-guest separate chat threads (decided 2026-06-09 to defer).** Today a booking link = ONE shared conversation (everyone who opens it shares the thread). Desired down-the-line: each guest gets their *own* thread under the booking so they can't read each other's messages. **Caveat to solve first:** identity is the booking_id in the URL, so the same person opening on phone + browser would otherwise spawn two threads — need a per-guest identity (device/session token or a "who are you" step) before splitting threads. Until then: shared thread is intentional.
-- **Property delete = soft-delete + guest anonymization (decided 2026-06-09).** Do NOT hard-delete or cascade-delete chats/messages — keep them for history + future re-training / data-annotation rounds. On delete: soft-delete the property (`properties.deleted_at`), retain conversations + messages, and anonymize guests in place (rename to `Guest <FirstLetterOfName><first3ofBookingId>`) for privacy. Replaces the original ISSUE-B ON-DELETE-CASCADE idea.
+- ~~**Property delete = soft-delete + guest anonymization.**~~ ✅ DONE 2026-06-11 (`f527e11`). `POST /api/property/{id}/soft-delete` (owner-verified via host JWT) blanks the property data columns + drops storage files, anonymizes guests to `Guest <last5 of booking_id>`, stamps `properties.deleted_at`, and KEEPS conversations + messages for training. Dashboard filters `deleted_at IS NULL`. The property row is retained as a tombstone (FK integrity for the kept chats). Replaced the original ISSUE-B ON-DELETE-CASCADE idea. **Future GDPR add-on:** a guest-erasure endpoint (`DELETE /api/guest/:booking_id/data`) before EU users.
 - `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
 - `conversations.checked_out_at` or `is_archived` flag — true "guest checked out" detection for Archived section in expanded view
 - `ai_status` + active chat count filtering by recency (currently counts all guests)

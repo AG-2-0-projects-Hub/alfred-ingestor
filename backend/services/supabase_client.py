@@ -488,6 +488,22 @@ def get_guests_for_property(property_id: str) -> list[dict]:
 
 # ── Soft delete ─────────────────────────────────────────────────────────────
 
+def get_user_id_from_token(access_token: str) -> str | None:
+    """Validate a host access token against Supabase Auth and return the user
+    id (sub). Uses GoTrue's /user endpoint (algorithm-agnostic) rather than
+    local HS256 verification, because the project migrated to asymmetric JWT
+    signing keys — host session tokens are no longer signed with the legacy
+    HS256 secret, so local jwt.decode(..., HS256) would reject them."""
+    client = get_client()
+    try:
+        resp = client.auth.get_user(access_token)
+    except Exception:
+        return None
+    if resp and getattr(resp, "user", None):
+        return resp.user.id
+    return None
+
+
 def soft_delete_property(property_id: str, owner_id: str) -> str:
     """Soft-delete a property: blank its ingested/scraped/master data, drop its
     storage files, anonymize its guests' names, and stamp deleted_at — while

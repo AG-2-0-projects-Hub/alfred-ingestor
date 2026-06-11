@@ -1164,9 +1164,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const TextSpan(
-                text: '?\n\n⚠️ ALL PROPERTY DATA WILL BE LOST — '
-                    'including the master JSON, ingested files, and scraper data.\n\n'
-                    'Chat history with guests will be preserved.',
+                text: '?\n\n⚠️ ALL PROPERTY DATA WILL BE LOST.',
               ),
             ],
           ),
