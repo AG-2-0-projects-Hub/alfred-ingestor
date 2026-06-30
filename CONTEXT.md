@@ -1,6 +1,7 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
+**Last Session:** 2026-06-30 (soft-delete re-add fixes B1/B2/B4/B5 — tombstones no longer block re-adding a property; guest links to deleted properties show a terminal closed state — staging only, commits `bd13deb` + `fdf965c`; see "Session 2026-06-30" below)
+**Prior Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
 **Prior Session:** 2026-06-02 (Phase 6 QA + multi-tenancy fixes + merge-flow UX — staging only, 6 commits ahead of `main`)
 **Prior Sessions:** 2026-05-28 Commit 4 `40453c9` + Commit 5 `c80a84c` (three-layer real-time)
 **Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
@@ -41,6 +42,32 @@ Enabling RLS broke three guest-facing reads that previously rode the bare anon k
 - **Realtime**: the guest realtime socket is authed with the booking JWT via `realtime.setAuth(token)` (on open + each refresh) — otherwise RLS delivers 0 rows over the live `messages` stream.
 - **Duplicate system markers**: DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding one (3 racing writers: backend auto-escalation + both host chat-live views). `insert_message` guards against the skipped-insert (0-row) return.
 - **Host-token verification (⚠️ project quirk)**: the project migrated to **asymmetric JWT Signing Keys**, so host *session* tokens are NOT signed with the legacy HS256 secret. Backend endpoints that need to trust a host token (e.g. `/api/property/{id}/soft-delete`) must validate via `supabase.auth.get_user(token)` (algorithm-agnostic), **not** local `jwt.decode(..., HS256)` — the latter 401s on every host token. (The guest token is the exception: we mint it ourselves with HS256, and the legacy secret still verifies it.)
+
+---
+
+## Session 2026-06-30 — Soft-delete re-add + guest-link hardening (staging, ahead of `main`)
+
+After soft-delete shipped (`f527e11`), re-adding a previously-deleted property failed with `duplicate key … properties_airbnb_url_owner_unique`. Root-cause swept the whole soft-delete / re-add / canonical / guest-chat surface and fixed four related bugs (B1–B5; B3/B6 confirmed non-issues).
+
+| Bug | Fix | Where |
+|---|---|---|
+| **B1** Tombstone blocks re-add | Unique constraint on `(airbnb_url, owner_id)` was a plain constraint counting soft-deleted rows. Dropped it; replaced with a **partial unique index** `WHERE deleted_at IS NULL`. (A partial predicate can't live on a constraint, so it's now an index — same enforcement.) | migration `fix_unique_airbnb_url_ignore_soft_deleted` (shared DB) |
+| **B2** Same-nickname re-add silently revives tombstone (ingests but stays hidden) | `get_canonical_property_by_name` now filters `.is_("deleted_at","null")` — a tombstone is never canonical, so re-add always makes a fresh row. Live-property idempotency unchanged. | `backend/services/supabase_client.py` |
+| **B4** Guest with old link to deleted property can still chat | `get_property_for_chat` selects `deleted_at`; `POST /api/guest-token` returns **410** when the property is soft-deleted. Frontend maps 410 → `ConversationClosedException`, caught at bootstrap → terminal "This conversation has ended" card, no input bar. | `supabase_client.py`, `routers/guest_auth.py`, `services/api_client.dart`, `screens/chat_screen.dart` |
+| **B5** Dashboard keeps a property visible after it's deleted elsewhere | Realtime listener drops rows where `deleted_at != null`. | `screens/dashboard_screen.dart` |
+
+**Commits (staging, NOT on `main`):**
+- `bd13deb` — fix(delete): B1 (migration) + B2 + B4 backend + B5
+- `fdf965c` — fix(guest-chat): B4 frontend terminal closed state (410)
+
+**Verification:** migration verified via `pg_indexes` (predicate present), pre-flighted (0 duplicate/empty-url live rows); `python -m py_compile` on backend files OK; `flutter analyze` clean on all changed Dart files; user verified re-add works live on staging.
+
+**Pending:**
+- ⏳ **Vercel staging redeploy** (ISSUE-C, manual) to test B4 frontend + B5 live.
+- 4 pending-intake rows added to `_tests/scenarios.md` (grouped under ISSUE-B soft-delete) — promote before staging→main.
+- Set prod Render env vars (`SUPABASE_JWT_SECRET` + `PYTHON_VERSION=3.12.10`), then staging→main PR.
+
+---
 
 ## Render Monitoring
 - UptimeRobot pings every 5 minutes (keeps Render free-tier instances warm — 15-min spin-down otherwise):
