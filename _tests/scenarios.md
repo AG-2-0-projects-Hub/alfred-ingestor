@@ -210,6 +210,28 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **db_expected:** new row in `guests` with property_id=X, unique booking_id, guest_chat_url + host_chat_url populated
 - **status:** pending
 
+### B10. Soft-delete a property, then re-add it
+- **id:** ingest-delete-readd-01
+- **touches:**
+  - `backend/routers/properties.py`
+  - `backend/routers/ingest.py`
+  - `backend/services/supabase_client.py`
+  - `frontend/lib/screens/dashboard_screen.dart`
+  - migration `fix_unique_airbnb_url_ignore_soft_deleted`
+- **layer:** 1
+- **runs_on:** [smart, full]
+- **setup:** logged-in host with property X (URL U) that has conversations + guests
+- **action:** (1) `POST /api/property/{X}/soft-delete`; (2) re-add URL U with a **different** nickname; (3) delete again; (4) re-add URL U with the **same** nickname as the just-deleted row
+- **host_expected:** delete succeeds (no FK error) and X leaves the dashboard; both re-adds succeed with **no** `duplicate key … properties_airbnb_url_owner_unique` error and produce a fresh card that ingests to completion
+- **db_expected:**
+  - tombstone row: `deleted_at` set, `status='deleted'`, data columns blanked (`master_json`/`ingested_markdown`/`scraped_markdown`/`file_fingerprints` null, `learned_knowledge=[]`), storage files removed
+  - conversations + messages **retained**; guests renamed to `Guest <suffix>`
+  - each re-add creates a **new** `id` (never revives a tombstone); multiple tombstones for `(U, owner)` may coexist with exactly one live row (partial unique index `WHERE deleted_at IS NULL`)
+  - same-nickname re-add resolves via `get_canonical_property_by_name` to a fresh row (tombstones excluded), so it is visible on the dashboard (not silently hidden)
+  - live-property re-ingest idempotency unchanged: re-ingesting a non-deleted property by its nickname still updates the existing row
+- **last_tested:** 2026-07-01 (manual by user + Supabase MCP verification — PASS: 4 Bungalow-URL tombstones coexist with 1 live `Trained` row; same-nickname re-add `bb59126c`→`7dabad81` created a fresh row; all tombstones retained chats with 100% anonymized guests)
+- **status:** passing
+
 ---
 
 ## C. Chat lifecycle (host + guest perspectives)
@@ -304,6 +326,21 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **guest_expected:** only G1's conversation visible; attempting to query G2's conversation_id via Supabase REST returns no rows
 - **status:** pending — **will fail until RLS policies are added (see project_rls_pending memory)**
 
+### C8. Guest link to a deleted property shows a terminal closed state
+- **id:** chat-deleted-property-01
+- **touches:**
+  - `backend/routers/guest_auth.py`
+  - `backend/services/supabase_client.py`
+  - `frontend/lib/services/api_client.dart`
+  - `frontend/lib/screens/chat_screen.dart`
+- **layer:** 2
+- **setup:** guest holds a chat link for a booking whose property has since been soft-deleted
+- **action:** open the old guest chat URL
+- **guest_expected:** the chat is replaced by a "This conversation has ended" card (lock icon + "contact your host through the platform where you made your booking"), with **no input bar** — no empty chat, no typing indicator, no dark "Failed to fetch" toast on send
+- **db_expected:** `POST /api/guest-token` returns `410` when the booking's property has `deleted_at` set; no new messages are written to the tombstone's conversation
+- **last_tested:** 2026-07-01 (manual by user — PASS: closed-state card shown, input bar hidden)
+- **status:** passing
+
 ---
 
 ## D. Dashboard real-time
@@ -346,6 +383,16 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** seed an update via Supabase MCP that would normally arrive via stream
 - **host_expected:** dashboard catches the update via safety-net timer within 10s, even with realtime stream broken
 - **status:** pending
+
+### D5. Soft-deleted property drops off an open dashboard live
+- **id:** dash-delete-drop-01
+- **touches:** `frontend/lib/screens/dashboard_screen.dart`
+- **layer:** 2
+- **setup:** host has the dashboard open showing property X; a second session/tab is available
+- **action:** soft-delete property X from the second session (or via `/api/property/{X}/soft-delete`)
+- **host_expected:** X disappears from the already-open dashboard immediately via the realtime stream (row arrives with `deleted_at` set and is filtered out) — no manual reload, and it never lingers showing `status: deleted`
+- **last_tested:** 2026-07-01 (manual by user — PASS)
+- **status:** passing
 
 ---
 
@@ -446,14 +493,14 @@ This section is populated by the Gemini Exploration Agent when it finds anomalie
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
 |---|---|---|---|---|
 | A. Auth | 4 | — | 4 | — |
-| B. Ingestor | 10 | 4 | 6 | — |
-| C. Chat | 7 | 1 | 6 | — |
-| D. Dashboard | 4 | — | 4 | — |
+| B. Ingestor | 11 | 5 | 6 | — |
+| C. Chat | 8 | 1 | 7 | — |
+| D. Dashboard | 5 | — | 5 | — |
 | E. Multi-property | 2 | — | 2 | — |
 | F. Theme | 1 | — | 1 | — |
 | G. RLS | 3 | 3 | — | — |
 | H. Push | 1 | — | 1 | — |
-| **Total** | **32** | **8** | **24** | **0** |
+| **Total** | **35** | **9** | **26** | **0** |
 
 ---
 
@@ -484,11 +531,8 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 | 2026-06-10 | `<pending>` | Guest chat — header under RLS | Property name + host name come from the `/api/guest-token` response (server-resolved from `master_json`, since RLS blocks the anon guest reading `properties`). Header shows on open before any message, with no direct `properties` read. | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | Guest chat — realtime under RLS | Guest realtime socket is authed with the booking JWT (`realtime.setAuth`), so live AI/host replies appear without refresh. Assert: guest sees Alfred's reply and a host take-over message arrive live (previously the stream delivered 0 rows once RLS was on). | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | System markers — no DB-level duplicates | DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding system marker in the same conversation. Assert: AI auto-escalation + host chat-live both firing produce ONE `__SYS_INTERVENE__` row (not two), on both host and guest views. Non-identical sequences (intervene→resume→intervene) are preserved. | Guest chat — display & system messages |
-| 2026-06-10 | `<pending>` | Property soft-delete + anonymization (ISSUE-B) | Deleting a property with existing chats succeeds (no FK error): row kept as tombstone with `deleted_at` set + data columns blanked, storage files removed, guests' names anonymized to `Guest <suffix>`, conversations/messages retained. Dashboard hides `deleted_at` rows. Endpoint `/api/property/{id}/soft-delete` enforces ownership via host JWT (403 for non-owner, 404 for missing). | — |
-| 2026-06-30 | `bd13deb` + migration `fix_unique_airbnb_url_ignore_soft_deleted` | Re-add a deleted property (tombstone no longer blocks) | Unique index on `(airbnb_url, owner_id)` is now partial (`WHERE deleted_at IS NULL`). Assert: after soft-deleting a property, re-adding the same Airbnb URL under the same owner with a **different** nickname succeeds (no `duplicate key … properties_airbnb_url_owner_unique` error) and creates a fresh row. Different owners adding the same URL still each get their own live row. | Property soft-delete + anonymization (ISSUE-B) |
-| 2026-06-30 | `bd13deb` | Re-add a deleted property — same nickname | `get_canonical_property_by_name` ignores soft-deleted rows (`deleted_at IS NULL`). Assert: re-adding with the **same** nickname as a deleted property creates a fresh row that ingests and appears on the dashboard (previously it silently revived the tombstone, set status=Ingesting but left `deleted_at`, so it stayed hidden). Live-property re-ingest idempotency (same nickname, not deleted) still resolves to the existing row. | Property soft-delete + anonymization (ISSUE-B) |
-| 2026-06-30 | `bd13deb` (backend) + `fdf965c` (frontend) | Guest chat on a deleted property — terminal closed state | `/api/guest-token` returns `410` once the booking's property is soft-deleted. Assert: opening an old guest link to a deleted property shows the "This conversation has ended" card (lock icon + contact-host guidance) with NO input bar — not an empty chat that fails on send with a dark error toast. | Property soft-delete + anonymization (ISSUE-B) |
-| 2026-06-30 | `bd13deb` | Dashboard — live drop on soft-delete | The dashboard properties realtime stream drops a row the moment `deleted_at` becomes non-null. Assert: soft-deleting a property (in another session/tab) makes it disappear from an already-open dashboard immediately, instead of lingering with `status: deleted` until reload. | Property soft-delete + anonymization (ISSUE-B) |
+
+> **Promoted 2026-07-01 → B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
 
 ---
 
