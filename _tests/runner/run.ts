@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { warmup } from './lib/warmup.ts';
 import { generateReport } from './lib/report.ts';
+// Layer 1
 import { runC6 } from './scenarios/c6.ts';
-import { runA2 } from './scenarios/a2.ts';
 import { runG2 } from './scenarios/g2.ts';
+// Layer 2
+import { runA2 } from './scenarios/a2.ts';
+import { runA3 } from './scenarios/a3.ts';
+import { runA4 } from './scenarios/a4.ts';
+import { runB6 } from './scenarios/b6.ts';
+import { runB7 } from './scenarios/b7.ts';
 
 export type ScenarioResult = {
   id: string;
@@ -64,12 +70,25 @@ async function main() {
 }
 
 function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
+  // smoke: fast Layer 1 checks + the core login scenario. No Playwright UI flows
+  // that need Render warmup beyond what warmup() already covers.
   if (mode === 'smoke') {
-    return [runC6, runA2, runG2];
+    return [runC6, runG2, runA2];
   }
-  // For now, 'full' is the same as 'smoke'. We expand this once the runner
-  // is proven and we start parsing scenarios.md.
-  return [runC6, runA2, runG2];
+  // full: all implemented scenarios — Layer 1 first, then Layer 2 auth suite,
+  // then Layer 2 ingest error scenarios.
+  return [
+    // Layer 1
+    runC6,
+    runG2,
+    // Layer 2 — auth
+    runA2,
+    runA3,
+    runA4,
+    // Layer 2 — ingest error paths
+    runB6,
+    runB7,
+  ];
 }
 
 main().catch(err => {

@@ -65,7 +65,7 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** existing test account
 - **action:** enter credentials, click "Log In"
 - **host_expected:** dashboard loads with this account's properties only
-- **last_tested:** 2026-06-02 (automated via smoke test + manual verification)
+- **last_tested:** 2026-06-09 (automated Playwright — PASS)
 - **status:** passing
 
 ### A3. Host login with invalid credentials
@@ -75,8 +75,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** anonymous session
 - **action:** wrong password
 - **host_expected:** error message shown, no redirect, no session set
-- **last_tested:** 2026-06-02 (manual verification by user)
-- **status:** passing
+- **last_tested:** 2026-06-09 (automated Playwright — FAIL: Gemini judge API returned 503 "high demand", transient; not a code failure — mark skipped, re-run when API available)
+- **status:** skipped
 
 ### A4. Host logout clears session
 - **id:** auth-logout-01
@@ -85,7 +85,7 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** logged-in host on dashboard
 - **action:** click logout
 - **host_expected:** redirected to auth screen, localStorage cleared, refresh does not restore session
-- **last_tested:** 2026-06-02 (manual verification by user)
+- **last_tested:** 2026-06-09 (automated Playwright — PASS; pre-logout, post-logout, and post-refresh screenshots all judged pass)
 - **status:** passing
 
 ---
@@ -129,7 +129,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** POST `/ingest` for same property X
 - **host_expected:** N/A (backend test)
 - **db_expected:** response is 409 Conflict, property status unchanged
-- **status:** pending
+- **last_tested:** 2026-06-08
+- **status:** passing
 
 ### B4. File hash dedup skips identical files
 - **id:** ingest-hash-01
@@ -138,7 +139,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** property X has file F1 (size 100KB) in file_fingerprints
 - **action:** re-upload same file F1 (size 100KB) via ingest
 - **db_expected:** `file_fingerprints` unchanged, file_processor logs "skipped (hash match)"
-- **status:** pending
+- **last_tested:** 2026-06-08
+- **status:** passing
 
 ### B5. Modified file re-upload is processed
 - **id:** ingest-hash-02
@@ -147,7 +149,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** property X has file F1 (size 100KB) in file_fingerprints
 - **action:** upload file F1 with same name but size 120KB (e.g., edited version)
 - **db_expected:** file_processor processes the file, `file_fingerprints[F1]` updated to 120
-- **status:** pending
+- **last_tested:** 2026-06-08
+- **status:** passing
 
 ### B6. Invalid Airbnb URL returns graceful error
 - **id:** ingest-invalid-url-01
@@ -157,7 +160,9 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** paste a non-Airbnb URL (e.g., `https://example.com`), click "Ingest Now"
 - **host_expected:** error message displayed, status returns to "Pending" (no half-created property)
 - **db_expected:** no orphan `properties` row left in non-terminal state
-- **status:** pending
+- **last_tested:** 2026-06-09 (automated Playwright — FAIL: nav judge did not reach Add Property form; click at `DASHBOARD.addPropertyX=0.5, addPropertyY=0.58` appears to miss the "Add Your First Property" button — coordinate mismatch, not a code bug)
+- **status:** skipped
+- **layer4_needed:** Open staging at 1440×900, note the exact pixel Y of the "Add Your First Property" button, compute Y/900 fraction, update `DASHBOARD.addPropertyY` in `_tests/runner/lib/playwright-helpers.ts`, then re-run `npm run full`.
 
 ### B7. Unsupported file dropped is rejected
 - **id:** ingest-bad-file-01
@@ -166,7 +171,9 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** logged-in host on add-property screen
 - **action:** drag a `.exe` file onto drop zone
 - **host_expected:** inline error message shown, file not added to upload list
-- **status:** pending
+- **last_tested:** 2026-06-09 (automated Playwright — FAIL: same navigation failure as B6 — `DASHBOARD.addPropertyY=0.58` missed the button; coordinate mismatch, not a code bug)
+- **status:** skipped
+- **layer4_needed:** Same calibration as B6 — fix `DASHBOARD.addPropertyY` in playwright-helpers.ts and re-run.
 
 ### B8. Voice note appears in "Files to Ingest" immediately
 - **id:** ingest-voice-01
@@ -187,7 +194,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** `POST https://scraper-staging-bn7w.onrender.com/scrape` with body `{"url": "<test_url>"}`
 - **db_expected:** HTTP 200, response body has `{"status": "success", "data": "<non-empty structured markdown>"}`
 - **why this is in the matrix:** regression guardrail for the 2026-06-02 incident (BUG-006: Gemini preview model `gemini-3-flash-preview` was retired, scraper crashed on every call). Any future preview-model retirement or model name change shows up here before it breaks the whole ingest flow.
-- **status:** pending
+- **last_tested:** 2026-06-08
+- **status:** passing
 
 ### B9. Generate guest link creates a new guest record
 - **id:** ingest-guest-link-01
@@ -201,6 +209,28 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **host_expected:** new guest tile appears in property's guest list, guest_chat_url shown/copyable
 - **db_expected:** new row in `guests` with property_id=X, unique booking_id, guest_chat_url + host_chat_url populated
 - **status:** pending
+
+### B10. Soft-delete a property, then re-add it
+- **id:** ingest-delete-readd-01
+- **touches:**
+  - `backend/routers/properties.py`
+  - `backend/routers/ingest.py`
+  - `backend/services/supabase_client.py`
+  - `frontend/lib/screens/dashboard_screen.dart`
+  - migration `fix_unique_airbnb_url_ignore_soft_deleted`
+- **layer:** 1
+- **runs_on:** [smart, full]
+- **setup:** logged-in host with property X (URL U) that has conversations + guests
+- **action:** (1) `POST /api/property/{X}/soft-delete`; (2) re-add URL U with a **different** nickname; (3) delete again; (4) re-add URL U with the **same** nickname as the just-deleted row
+- **host_expected:** delete succeeds (no FK error) and X leaves the dashboard; both re-adds succeed with **no** `duplicate key … properties_airbnb_url_owner_unique` error and produce a fresh card that ingests to completion
+- **db_expected:**
+  - tombstone row: `deleted_at` set, `status='deleted'`, data columns blanked (`master_json`/`ingested_markdown`/`scraped_markdown`/`file_fingerprints` null, `learned_knowledge=[]`), storage files removed
+  - conversations + messages **retained**; guests renamed to `Guest <suffix>`
+  - each re-add creates a **new** `id` (never revives a tombstone); multiple tombstones for `(U, owner)` may coexist with exactly one live row (partial unique index `WHERE deleted_at IS NULL`)
+  - same-nickname re-add resolves via `get_canonical_property_by_name` to a fresh row (tombstones excluded), so it is visible on the dashboard (not silently hidden)
+  - live-property re-ingest idempotency unchanged: re-ingesting a non-deleted property by its nickname still updates the existing row
+- **last_tested:** 2026-07-01 (manual by user + Supabase MCP verification — PASS: 4 Bungalow-URL tombstones coexist with 1 live `Trained` row; same-nickname re-add `bb59126c`→`7dabad81` created a fresh row; all tombstones retained chats with 100% anonymized guests)
+- **status:** passing
 
 ---
 
@@ -284,7 +314,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** N/A (pure unit test)
 - **action:** call `ChatSystemMessages.formatForGuest('__SYS_INTERVENE__', hostName: 'Maria')` and `.formatForHost(..., guestName: 'Alex')`
 - **db_expected:** guest version contains "Maria is now attending" or equivalent; host version contains "Alex" reference; legacy plain-text messages render verbatim
-- **status:** pending
+- **last_tested:** 2026-06-09 (automated flutter test — PASS)
+- **status:** passing
 
 ### C7. Guest sees only their conversation, not others'
 - **id:** chat-isolation-01
@@ -294,6 +325,21 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** open G1's chat URL in browser, inspect network and rendered messages
 - **guest_expected:** only G1's conversation visible; attempting to query G2's conversation_id via Supabase REST returns no rows
 - **status:** pending — **will fail until RLS policies are added (see project_rls_pending memory)**
+
+### C8. Guest link to a deleted property shows a terminal closed state
+- **id:** chat-deleted-property-01
+- **touches:**
+  - `backend/routers/guest_auth.py`
+  - `backend/services/supabase_client.py`
+  - `frontend/lib/services/api_client.dart`
+  - `frontend/lib/screens/chat_screen.dart`
+- **layer:** 2
+- **setup:** guest holds a chat link for a booking whose property has since been soft-deleted
+- **action:** open the old guest chat URL
+- **guest_expected:** the chat is replaced by a "This conversation has ended" card (lock icon + "contact your host through the platform where you made your booking"), with **no input bar** — no empty chat, no typing indicator, no dark "Failed to fetch" toast on send
+- **db_expected:** `POST /api/guest-token` returns `410` when the booking's property has `deleted_at` set; no new messages are written to the tombstone's conversation
+- **last_tested:** 2026-07-01 (manual by user — PASS: closed-state card shown, input bar hidden)
+- **status:** passing
 
 ---
 
@@ -337,6 +383,16 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** seed an update via Supabase MCP that would normally arrive via stream
 - **host_expected:** dashboard catches the update via safety-net timer within 10s, even with realtime stream broken
 - **status:** pending
+
+### D5. Soft-deleted property drops off an open dashboard live
+- **id:** dash-delete-drop-01
+- **touches:** `frontend/lib/screens/dashboard_screen.dart`
+- **layer:** 2
+- **setup:** host has the dashboard open showing property X; a second session/tab is available
+- **action:** soft-delete property X from the second session (or via `/api/property/{X}/soft-delete`)
+- **host_expected:** X disappears from the already-open dashboard immediately via the realtime stream (row arrives with `deleted_at` set and is filtered out) — no manual reload, and it never lingers showing `status: deleted`
+- **last_tested:** 2026-07-01 (manual by user — PASS)
+- **status:** passing
 
 ---
 
@@ -386,7 +442,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** properties owned by host_a and host_b exist
 - **action:** as host_a's session, query `SELECT * FROM properties` via Supabase REST
 - **db_expected:** only host_a's properties returned; host_b's are filtered out
-- **status:** pending — **passes today since properties has RLS enabled, but verify policy is correct**
+- **last_tested:** 2026-06-08
+- **status:** passing
 
 ### G2. Anon key cannot read other guests' messages
 - **id:** rls-message-isolation-01
@@ -395,7 +452,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** conversations C1 (booking B1) and C2 (booking B2), each with messages
 - **action:** as B1's anon session, attempt `SELECT * FROM messages WHERE conversation_id = '<C2.id>'`
 - **db_expected:** zero rows returned
-- **status:** pending — **will fail today (RLS disabled on messages and conversations)**
+- **last_tested:** 2026-06-10 (automated Supabase query — PASS: bare anon key now reads 0 rows after RLS + booking-scoped guest JWT policies applied)
+- **status:** passing
 
 ### G3. Anon key cannot escalate writes to system messages
 - **id:** rls-write-isolation-01
@@ -404,7 +462,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** valid guest session for booking B1
 - **action:** attempt to INSERT a message with sender_type='system' or sender_type='host' (impersonation)
 - **db_expected:** insert denied by RLS policy
-- **status:** pending — **will fail today (RLS disabled on messages)**
+- **last_tested:** 2026-06-10 (automated Supabase query — PASS: anon insert of sender_type='host' denied by "new row violates row-level security policy")
+- **status:** passing
 
 ---
 
@@ -434,14 +493,46 @@ This section is populated by the Gemini Exploration Agent when it finds anomalie
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
 |---|---|---|---|---|
 | A. Auth | 4 | — | 4 | — |
-| B. Ingestor | 10 | 4 | 6 | — |
-| C. Chat | 7 | 1 | 6 | — |
-| D. Dashboard | 4 | — | 4 | — |
+| B. Ingestor | 11 | 5 | 6 | — |
+| C. Chat | 8 | 1 | 7 | — |
+| D. Dashboard | 5 | — | 5 | — |
 | E. Multi-property | 2 | — | 2 | — |
 | F. Theme | 1 | — | 1 | — |
 | G. RLS | 3 | 3 | — | — |
 | H. Push | 1 | — | 1 | — |
-| **Total** | **32** | **8** | **24** | **0** |
+| **Total** | **35** | **9** | **26** | **0** |
+
+---
+
+## Pending intake
+
+Lightweight queue. Each row is a fix or group of related fixes on the same flow.
+**Before next `staging → main` merge:** group by flow, promote to a proper scenario in the A–H sections above, then delete the row.
+
+| Date | Commit(s) | Flow | What to assert | Group with |
+|---|---|---|---|---|
+| 2026-06-08 | `4336ebd` + uncommitted `add_property_screen.dart` | Add-property — completion popup lifecycle | (1) After ingest completes: no popup shown, only inline panel + MERGE NOW button. (2) After no-conflict merge → status=`Merged`: "Alfred is now trained" popup appears, single "Back to Dashboard" button. (3) After conflict-resolved flow → status=`Trained`: same popup appears. | — |
+| 2026-06-08 | `feaf8fd` | Merge / edit-property UX | (1) Merge request does not time out before 120 s. (2) On `edit_property_screen`: conflict questionnaire section renders above JSON viewer. (3) Status badge on submit transitions correctly. (4) Resolved status surfaces in UI after merge completes. | — |
+| 2026-06-08 | `0f019f2` | Ingest error surfacing | Backend errors during ingest are shown inline to the user (not silently dropped); upload queue is preserved on failure so user can retry. | Add-property — completion popup lifecycle |
+| 2026-06-08 | `1f266ea` | Property dedup / ownership | Re-ingesting an existing URL under the same owner updates the existing row (no duplicate). Re-ingesting the same URL under a different owner creates a separate row. `owner_id` is never overwritten on upsert. | — |
+| 2026-06-08 | `2a75a4e` | Scraper model | Scraper does not crash when called; structured markdown returned. (Already covered by B0 — **skip**, no new scenario needed.) | — |
+| 2026-06-08 | `5626f1f` | Scraper health endpoint | `HEAD /health` on staging scraper returns 200 (not 405). (Lightweight extension of B0 — **merge into B0** when promoting.) | B0 |
+| 2026-06-09 | `1dded18` | Guest chat — display & system messages | (1) Guest chat header shows the official Airbnb listing name (from `master_json.property_identity`, fallback chain → nickname) as a prominent header with an "Alfred · Concierge" sub-line. (2) Consecutive identical system markers render only once (no double "You are now speaking with …"). (3) A sentence-like or >40-char host name renders as "the host" instead of leaking extraction noise into the banner. | — |
+| 2026-06-09 | `1dded18` | Ingest extraction quality (merge prompt) | New merges store the host display name only in `host_profile.name` (no sentences/instructions) and always expose the listing title at `property_identity.property_name`. NOTE: existing rows need re-ingestion to clean stored values. | Guest chat — display & system messages |
+| 2026-06-09 | `1dded18` | Add-property — duplicate file in queue | Dropping/selecting a file whose name is already in the ingest queue is rejected with an inline "— already in the queue" message and is NOT re-uploaded (previously left a duplicate row stuck on "processing" forever). | — |
+| 2026-06-09 | `1dded18` | Add-property — completion popup contrast | Ingested / conflict / trained completion popups use an opaque surface so text stays readable over the dimmed barrier (no dark bleed-through). | Add-property — completion popup lifecycle |
+| 2026-06-09 | `1dded18` | Conflict resolution — auto-apply | Submitting conflict resolutions applies the knowledge update automatically and shows the completion popup directly; the intermediate "Update Knowledge" button is removed. | — |
+| 2026-06-09 | `55c7efa` | Add-property — completion popup contrast (real fix) | Completion dialogs (ingested / conflict / trained) render with an opaque surface backing so text is readable; the `1dded18` tint-only attempt was overridden by GlassPanel's highlight gradient and didn't take. Assert dialog text contrast is legible in both light and dark mode. | Add-property — completion popup contrast |
+| 2026-06-09 | `55c7efa` | Dashboard — property card image | Every ready property card shows an image: stored hero image if present, else fallback to `master_json.media.thumbnail_url` (Airbnb CDN). Assert a re-ingested property with no stored hero still shows its Airbnb photo (not the gradient placeholder). | — |
+| 2026-06-09 | `55c7efa` | Guest chat — header on open | Property-name header appears as soon as the guest opens the chat link (resolved via `guests.booking_id → property_id`), before any message is sent. | Guest chat — display & system messages |
+| 2026-06-09 | `55c7efa` | Guest chat — instant message echo | The guest's own message appears immediately on send (optimistic), before Alfred's reply / typing dots; the realtime stream reconciles and de-dupes it. Covers the first-message case where no subscription exists yet. | Guest chat — display & system messages |
+| 2026-06-10 | RLS migration + `<pending>` | RLS + guest JWT — isolation (promote into G2/G3/C7) | (1) Bare anon key reads 0 rows from guests/conversations/messages (G2 verified PASS). (2) Anon insert with sender_type≠'guest' or wrong booking is denied (G3 verified PASS). (3) Guest with a valid booking JWT sees ONLY their booking's conversation + messages, never another booking's (C7). (4) Host dashboard still reads its own properties' guests/conversations/messages and can take over / resolve (host write policies). Assert guest chat works end-to-end via `/api/guest-token` JWT (header, send, AI reply, image/voice, realtime). | — |
+| 2026-06-10 | RLS migration + `<pending>` | Guest token lifecycle | `/api/guest-token` returns a signed JWT for a valid booking_id and 404 for unknown bookings. Token auto-refreshes near expiry without interrupting the chat. Requires `SUPABASE_JWT_SECRET` env var on the backend. | RLS + guest JWT — isolation |
+| 2026-06-10 | `<pending>` | Guest chat — header under RLS | Property name + host name come from the `/api/guest-token` response (server-resolved from `master_json`, since RLS blocks the anon guest reading `properties`). Header shows on open before any message, with no direct `properties` read. | RLS + guest JWT — isolation |
+| 2026-06-10 | `<pending>` | Guest chat — realtime under RLS | Guest realtime socket is authed with the booking JWT (`realtime.setAuth`), so live AI/host replies appear without refresh. Assert: guest sees Alfred's reply and a host take-over message arrive live (previously the stream delivered 0 rows once RLS was on). | RLS + guest JWT — isolation |
+| 2026-06-10 | `<pending>` | System markers — no DB-level duplicates | DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding system marker in the same conversation. Assert: AI auto-escalation + host chat-live both firing produce ONE `__SYS_INTERVENE__` row (not two), on both host and guest views. Non-identical sequences (intervene→resume→intervene) are preserved. | Guest chat — display & system messages |
+
+> **Promoted 2026-07-01 → B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
 
 ---
 

@@ -90,8 +90,9 @@ def get_canonical_property_by_name(name: str, owner_id: str | None = None) -> di
         .select("id, status, name, owner_id")
         .eq("name", name)
         .eq("owner_id", owner_id)
-        .maybe_single()
-        .execute()
+        .is_("deleted_at", "null")  # B2: never treat a soft-deleted tombstone as
+        .maybe_single()             # canonical — re-adding must create a fresh row,
+        .execute()                  # not silently revive (and re-hide) the tombstone.
     )
     return result.data if result else None
 
@@ -279,7 +280,7 @@ def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name, learned_knowledge")
+        .select("id, master_json, name, learned_knowledge, deleted_at")
         .eq("id", property_id)
         .maybe_single()
         .execute()
@@ -345,7 +346,10 @@ def insert_message(
     if media_url:
         row["media_url"] = media_url
     result = client.table("messages").insert(row).execute()
-    return result.data[0]
+    # A BEFORE INSERT trigger (suppress_dup_system_marker) can skip a duplicate
+    # consecutive system marker, in which case no row is returned. Callers of
+    # marker inserts ignore the return; guard so we don't IndexError on skip.
+    return result.data[0] if result.data else {}
 
 
 def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, list[dict]]:
@@ -481,6 +485,101 @@ def get_guests_for_property(property_id: str) -> list[dict]:
         .execute()
     )
     return result.data or []
+
+
+# ── Soft delete ─────────────────────────────────────────────────────────────
+
+def get_user_id_from_token(access_token: str) -> str | None:
+    """Validate a host access token against Supabase Auth and return the user
+    id (sub). Uses GoTrue's /user endpoint (algorithm-agnostic) rather than
+    local HS256 verification, because the project migrated to asymmetric JWT
+    signing keys — host session tokens are no longer signed with the legacy
+    HS256 secret, so local jwt.decode(..., HS256) would reject them."""
+    client = get_client()
+    try:
+        resp = client.auth.get_user(access_token)
+    except Exception:
+        return None
+    if resp and getattr(resp, "user", None):
+        return resp.user.id
+    return None
+
+
+def soft_delete_property(property_id: str, owner_id: str) -> str:
+    """Soft-delete a property: blank its ingested/scraped/master data, drop its
+    storage files, anonymize its guests' names, and stamp deleted_at — while
+    deliberately KEEPING the property row (as a tombstone) plus all
+    conversations and messages, which we retain for internal AI training.
+
+    Ownership is enforced here: returns "not_found" if the row is missing and
+    "forbidden" if owner_id doesn't match. Returns "ok" on success.
+    """
+    client = get_client()
+    existing = (
+        client.table("properties")
+        .select("id, owner_id")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    if existing is None or existing.data is None:
+        return "not_found"
+    if existing.data.get("owner_id") != owner_id:
+        return "forbidden"
+
+    # Blank the property data columns + stamp the tombstone FIRST, so the
+    # delete the host sees is durable even if a later best-effort step fails.
+    # NOTE: learned_knowledge is NOT NULL — clear it to [] (an empty array),
+    # never None, or the whole update is rejected and nothing gets deleted.
+    client.table("properties").update({
+        "master_json": None,
+        "ingested_markdown": None,
+        "scraped_markdown": None,
+        "file_fingerprints": None,
+        "learned_knowledge": [],
+        "resolution_history": None,
+        "resolution_history_json": None,
+        "status": "deleted",
+        "deleted_at": _now(),
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
+
+    # Anonymize guests — keep the rows (FK + chat linkage) but strip the
+    # personal name down to a non-identifying label derived from the booking.
+    guests = (
+        client.table("guests")
+        .select("id, booking_id")
+        .eq("property_id", property_id)
+        .execute()
+    ).data or []
+    for g in guests:
+        bid = (g.get("booking_id") or g["id"]) or ""
+        suffix = bid[-5:] if len(bid) >= 5 else bid
+        client.table("guests").update({"name": f"Guest {suffix}"}).eq("id", g["id"]).execute()
+
+    # Remove all stored files for the property (best-effort).
+    _delete_property_storage(property_id)
+    return "ok"
+
+
+def _delete_property_storage(property_id: str) -> None:
+    """Best-effort removal of all objects under the property's storage prefix."""
+    client = get_client()
+    paths: list[str] = []
+    for sub in ("user_uploads", "hero_image"):
+        try:
+            files = client.storage.from_(BUCKET).list(
+                f"{property_id}/{sub}", {"limit": 1000, "offset": 0}
+            )
+            for f in files or []:
+                paths.append(f"{property_id}/{sub}/{f['name']}")
+        except Exception as exc:
+            print(f"_delete_property_storage: list {sub} failed: {exc}")
+    if paths:
+        try:
+            client.storage.from_(BUCKET).remove(paths)
+        except Exception as exc:
+            print(f"_delete_property_storage: remove failed: {exc}")
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────

@@ -217,9 +217,11 @@ Include complete media section:
 - Property name(s), type, listing ID/URL
 - Full address, coordinates, Google Maps link
 - Neighborhood description, community/gate access
+- **ALWAYS store the official listing title under the key `property_identity.property_name`** (a normalized, consistent key). This is the public Airbnb listing name as it appears in the scraped/ingested source — keep it short and clean (the title only, no descriptions or instructions). You may keep additional variants (e.g. `alternate_names`, `property_complex_name`) but `property_name` must always be present when a title exists.
 
 ### Host Profile (Separate from Listing)
-- Name, ID, phone, bio
+- **`host_profile.name` = the host's display name ONLY** (e.g. "Eduardo Rafael", "Ilse"). It must be a person's or company's name — short, typically 1–3 words. NEVER put sentences, check-in instructions, notes, or directives in this field. If the source contains guidance like "Host is Ilse, mention Rogelio at the entrance", extract only the name ("Ilse") here and store the instruction under a separate field such as `check_in.special_instructions` or `host_profile.notes`.
+- ID, phone, bio
 - Response rate/time, Superhost status
 - Years hosting, **total reviews across ALL properties**
 - Communication style (detailed extraction)

@@ -109,3 +109,23 @@ enforcing `wsl bash -c` prefix for all terminal commands. Added root `CLAUDE.md`
 inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
 
 **Global Candidate:** Yes — applies to every machine and every project.
+
+---
+
+## 2026-05-27 — MCP Config Path Migration & Stale Directory Cleanup
+**Context:** The Antigravity IDE update moved the active App Data Directory, leaving deprecated and legacy configuration directories behind that needed to be cleanly decommissioned.
+
+**Discovery:**
+1. **Active Configuration Path:** The active `mcp_config.json` path is now `/mnt/c/Users/San_8/.gemini/antigravity-ide/mcp_config.json`. All referencing scripts (`ag-switch.sh`, `new-project.sh`, etc.) and system documentation have been successfully updated.
+2. **Active Plugins Trap (Critical Safety Catch):** The legacy `.gemini/config/` directory is **NOT** fully legacy. While its `mcp_config.json` was migrated, the IDE actively loads core plugins (e.g., `android-cli-plugin`, `chrome-devtools-plugin`, `google-antigravity-sdk`, `modern-web-guidance-plugin`) and active project registration files directly from `.gemini/config/plugins/` and `.gemini/config/projects/`.
+   - **Crucial Rule:** Never delete `.gemini/config/` wholesale, as this will immediately destroy active plugins and break IDE tools.
+3. **Safe Cleanup Strategy:**
+   - The deprecated `/mnt/c/Users/San_8/.gemini/antigravity/` folder contains historical logs/brain steps (referenced by utility scripts like `projects/scraper/decode.py`) and was safely **archived** to `/mnt/c/Users/San_8/.gemini/antigravity.archived-2026-05-27/`.
+   - The legacy `mcp_config.json` and `.migrated` files inside `/mnt/c/Users/San_8/.gemini/config/` were safely **deleted**, leaving the active `plugins/`, `projects/`, and `sidecars/` subdirectories untouched.
+
+**Impact:**
+- Safely cleaned up all obsolete configuration files, reducing future developer confusion.
+- Successfully prevented a catastrophic loss of active IDE plugins and project configuration records.
+- Preserved historical brain step executions for past utility scripts like `decode.py`.
+
+**Global Candidate:** Yes — the safety discovery regarding the `.gemini/config/` plugin path and the clean, selective decommissioning process applies directly to the entire AG ecosystem.

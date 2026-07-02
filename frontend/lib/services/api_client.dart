@@ -39,6 +39,13 @@ class NetworkException extends ApiException {
             retry: true);
 }
 
+/// 410 Gone — the booking's property has been removed by the host, so this
+/// conversation is permanently closed. Screens render a terminal state rather
+/// than offering a retry.
+class ConversationClosedException extends ApiException {
+  const ConversationClosedException(super.msg);
+}
+
 /// Thin wrapper around `http` that centralises [BACKEND_URL] resolution,
 /// timeouts, a single retry on transient browser-level fetch failures, and
 /// mapping of raw errors to [ApiException] subclasses.
@@ -112,6 +119,14 @@ class ApiClient {
         (bodyJson['detail'] is String)
             ? bodyJson['detail'] as String
             : 'Not found.',
+      );
+    }
+    if (r.statusCode == 410) {
+      // Property soft-deleted — the conversation is permanently closed.
+      throw ConversationClosedException(
+        (bodyJson['detail'] is String)
+            ? bodyJson['detail'] as String
+            : 'This conversation is no longer available.',
       );
     }
     if (r.statusCode == 504) {

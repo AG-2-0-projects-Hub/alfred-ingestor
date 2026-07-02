@@ -7,11 +7,13 @@ import 'package:record/record.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/glass_panel.dart';
 import '../utils/chat_system_messages.dart';
+
 
 class ChatScreen extends StatefulWidget {
   final String bookingId;
@@ -28,8 +30,24 @@ class _ChatScreenState extends State<ChatScreen>
   String _hostName = 'the host';
   String _mode = 'autopilot';
   List<Map<String, dynamic>> _messages = [];
+  // Guest messages shown instantly on send, before the realtime stream
+  // delivers the persisted row (which then prunes them).
+  final List<Map<String, dynamic>> _optimistic = [];
   bool _isWaiting = false;
   bool _isRecording = false;
+  // Set when the booking's property has been deleted (guest-token → 410). The
+  // chat UI is replaced by a terminal "conversation closed" message.
+  bool _conversationClosed = false;
+  String _closedMessage =
+      'This conversation is no longer active. If you still need help, '
+      'please contact your host directly through the platform where you '
+      'made your booking.';
+  // Guest Supabase client — scoped to this booking's JWT; separate from the
+  // global singleton so the host's auth session is never affected.
+  SupabaseClient? _guestClient;
+  // JWT state — fetched from /api/guest-token on init and re-fetched on expiry.
+  String? _guestToken;
+  int _guestTokenExpiry = 0; // unix seconds
   AudioRecorder? _recorder;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
@@ -37,6 +55,60 @@ class _ChatScreenState extends State<ChatScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _modeSubscription;
   late final AnimationController _pulseCtrl;
+
+  // Returns the current guest JWT, refreshing it if it has expired or is
+  // within 5 minutes of expiry. Called by the SupabaseClient accessToken getter.
+  Future<String> _getOrRefreshToken() async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (_guestToken != null && _guestTokenExpiry - now > 300) {
+      return _guestToken!;
+    }
+    try {
+      final data = await ApiClient.postJson(
+        '/api/guest-token',
+        {'booking_id': widget.bookingId},
+      );
+      _guestToken = data['access_token'] as String;
+      _guestTokenExpiry = now + (data['expires_in'] as int? ?? 86400);
+      // Header identity is resolved server-side — RLS blocks the anon guest
+      // from reading the properties table, so it comes back with the token.
+      final pn = (data['property_name'] as String?)?.trim();
+      final hn = (data['host_name'] as String?)?.trim();
+      if (mounted &&
+          ((pn != null && pn.isNotEmpty) || (hn != null && hn.isNotEmpty))) {
+        setState(() {
+          if (pn != null && pn.isNotEmpty) _propertyName = pn;
+          if (hn != null && hn.isNotEmpty) _hostName = hn;
+        });
+      }
+      // Keep the realtime socket's auth in sync on refresh so RLS keeps
+      // letting the live messages stream through (first authed in bootstrap).
+      _guestClient?.realtime.setAuth(_guestToken);
+    } on ConversationClosedException {
+      // Property deleted — never fall back to a stale token; let the caller
+      // flip the UI into the terminal closed state.
+      rethrow;
+    } catch (_) {
+      // If the refresh fails (no network, server down), return the stale
+      // token if we have one so the UI stays functional. If we have no token
+      // at all, fall through — Supabase calls will get 401s and the chat
+      // shows empty state rather than crashing.
+      if (_guestToken != null) return _guestToken!;
+      rethrow;
+    }
+    return _guestToken!;
+  }
+
+  // Returns the dedicated guest SupabaseClient, creating it on first call.
+  // Using a separate client keeps the host's global auth session untouched.
+  SupabaseClient get _db {
+    _guestClient ??= SupabaseClient(
+      dotenv.env['SUPABASE_URL']!,
+      dotenv.env['SUPABASE_ANON_KEY']!,
+      accessToken: _getOrRefreshToken,
+    );
+    return _guestClient!;
+  }
 
   @override
   void initState() {
@@ -46,6 +118,30 @@ class _ChatScreenState extends State<ChatScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
+    _bootstrapGuestSession();
+  }
+
+  // Fetches the guest JWT, authenticates the realtime socket with it (so RLS
+  // lets the live messages stream through — the bare anon key carries no
+  // booking_id claim), then loads and watches the conversation.
+  Future<void> _bootstrapGuestSession() async {
+    try {
+      await _getOrRefreshToken();
+    } on ConversationClosedException {
+      // The property was deleted — show the terminal closed state instead of
+      // an empty chat the guest can type into and watch fail. We keep the
+      // friendlier frontend copy rather than the terse server detail.
+      if (mounted) setState(() => _conversationClosed = true);
+      return;
+    } catch (_) {
+      // Token fetch failed (e.g. server cold-starting). Continue anyway —
+      // REST reads just return 0 rows under RLS rather than crashing.
+    }
+    if (!mounted) return;
+    if (_guestToken != null) {
+      await _db.realtime.setAuth(_guestToken);
+    }
+    if (!mounted) return;
     _loadConversation();
     _watchConversation();
   }
@@ -59,35 +155,25 @@ class _ChatScreenState extends State<ChatScreen>
     _recorder?.dispose();
     _controller.dispose();
     _scrollController.dispose();
+    _guestClient?.dispose();
+    _guestClient = null;
     super.dispose();
   }
 
   Future<void> _loadConversation() async {
-    final result = await Supabase.instance.client
+    // The header (property + host name) is already populated from the
+    // guest-token response, so we only need the conversation row here.
+    final result = await _db
         .from('conversations')
-        .select('id, property_id, mode')
+        .select('id, mode')
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
     if (result != null && mounted) {
-      // Load property name + host name in one query. PostgREST aliasing
-      // avoids the column-name collision (both are 'name' otherwise).
-      // host_name is needed so the guest-side system-message renderer can fill
-      // "You are now speaking with [host name]" without an extra round-trip.
-      final propResult = await Supabase.instance.client
-          .from('properties')
-          .select('name, host_name:master_json->host_profile->>name')
-          .eq('id', result['property_id'] as String)
-          .maybeSingle();
-      if (mounted) {
-        setState(() {
-          _conversationId = result['id'] as String;
-          _propertyName = propResult?['name'] as String?;
-          final hn = propResult?['host_name'] as String?;
-          if (hn != null && hn.isNotEmpty) _hostName = hn;
-          _mode = (result['mode'] as String?) ?? 'autopilot';
-        });
-        _subscribeToMessages(result['id'] as String);
-      }
+      setState(() {
+        _conversationId = result['id'] as String;
+        _mode = (result['mode'] as String?) ?? 'autopilot';
+      });
+      _subscribeToMessages(result['id'] as String);
     }
   }
 
@@ -98,7 +184,7 @@ class _ChatScreenState extends State<ChatScreen>
     // incoming rows (do NOT early-return once a conversation exists — the
     // host taking over flips mode from 'autopilot' to 'intervene' and the
     // guest must see the banner appear without a refresh).
-    _modeSubscription = Supabase.instance.client
+    _modeSubscription = _db
         .from('conversations')
         .stream(primaryKey: ['id'])
         .eq('booking_id', widget.bookingId)
@@ -117,14 +203,17 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _subscribeToMessages(String conversationId) {
     _subscription?.cancel();
-    _subscription = Supabase.instance.client
+    _subscription = _db
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
         .listen((data) {
           if (mounted) {
-            setState(() => _messages = data);
+            setState(() {
+              _messages = data;
+              _pruneOptimistic(data);
+            });
             _scrollToBottom();
             _syncModeFromMessageStream(data);
           }
@@ -174,7 +263,19 @@ class _ChatScreenState extends State<ChatScreen>
     final text = overrideText ?? _controller.text.trim();
     if (text.isEmpty || _isWaiting) return;
     if (overrideText == null) _controller.clear();
-    setState(() => _isWaiting = true);
+    // Optimistically render the guest's own bubble immediately so it never
+    // looks like the message was dropped while Alfred is thinking. The realtime
+    // messages stream later delivers the persisted row and prunes this entry.
+    final optimistic = <String, dynamic>{
+      'sender_type': 'guest',
+      'content': text,
+      'message_type': 'text',
+      '_optimistic': true,
+    };
+    setState(() {
+      _isWaiting = true;
+      _optimistic.add(optimistic);
+    });
 
     try {
       await ApiClient.postJson(
@@ -185,8 +286,10 @@ class _ChatScreenState extends State<ChatScreen>
         await _loadConversation();
       }
     } on ApiException catch (e) {
+      if (mounted) setState(() => _optimistic.remove(optimistic));
       _showApiError(e, retryWith: text);
     } catch (e) {
+      if (mounted) setState(() => _optimistic.remove(optimistic));
       _showApiError(
         NetworkException(),
         retryWith: text,
@@ -194,6 +297,17 @@ class _ChatScreenState extends State<ChatScreen>
     } finally {
       if (mounted) setState(() => _isWaiting = false);
     }
+  }
+
+  // Drops optimistic guest bubbles once the persisted row arrives via the
+  // stream, matching on (sender_type=guest, content) to avoid a brief double.
+  void _pruneOptimistic(List<Map<String, dynamic>> data) {
+    if (_optimistic.isEmpty) return;
+    final delivered = data
+        .where((m) => m['sender_type'] == 'guest')
+        .map((m) => m['content'])
+        .toSet();
+    _optimistic.removeWhere((o) => delivered.contains(o['content']));
   }
 
   void _showApiError(ApiException e, {required String retryWith}) {
@@ -233,14 +347,14 @@ class _ChatScreenState extends State<ChatScreen>
     final filename = 'img_${DateTime.now().millisecondsSinceEpoch}.$ext';
     final storagePath = '$_conversationId/chat_media/$filename';
     try {
-      await Supabase.instance.client.storage
+      await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
             fileOptions: FileOptions(contentType: contentType, upsert: false),
           );
-      await Supabase.instance.client.from('messages').insert({
+      await _db.from('messages').insert({
         'conversation_id': _conversationId,
         'sender_type': 'guest',
         'content': '[image]',
@@ -273,14 +387,14 @@ class _ChatScreenState extends State<ChatScreen>
       final bytes = response.bodyBytes;
       final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
       final storagePath = '$_conversationId/chat_media/$filename';
-      await Supabase.instance.client.storage
+      await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
             fileOptions: const FileOptions(contentType: 'audio/wav', upsert: false),
           );
-      await Supabase.instance.client.from('messages').insert({
+      await _db.from('messages').insert({
         'conversation_id': _conversationId,
         'sender_type': 'guest',
         'content': '[voice message]',
@@ -313,22 +427,30 @@ class _ChatScreenState extends State<ChatScreen>
               const SizedBox(height: kToolbarHeight + 24),
               if (_mode == 'intervene') _buildInterventionBanner(),
               Expanded(
-                child: _messages.isEmpty && !_isWaiting
-                    ? _buildEmptyState()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        itemCount: _messages.length + (_isWaiting ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index == _messages.length) {
-                            return _buildTypingIndicator();
-                          }
-                          return _buildBubble(_messages[index]);
-                        },
-                      ),
+                child: _conversationClosed
+                    ? _buildClosedState()
+                    : () {
+                  final visible = [
+                    ..._dedupeSystemMarkers(_messages),
+                    ..._optimistic,
+                  ];
+                  return visible.isEmpty && !_isWaiting
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          itemCount: visible.length + (_isWaiting ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (index == visible.length) {
+                              return _buildTypingIndicator();
+                            }
+                            return _buildBubble(visible[index]);
+                          },
+                        );
+                }(),
               ),
-              _buildInputBar(),
+              if (!_conversationClosed) _buildInputBar(),
             ],
           ),
         ),
@@ -362,22 +484,41 @@ class _ChatScreenState extends State<ChatScreen>
                       color: Colors.white, size: 18),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Alfred',
-                        style: GoogleFonts.plusJakartaSans(
-                            fontWeight: FontWeight.w300,
-                            fontSize: 18,
-                            color: context.palette.primary)),
-                    if (_propertyName != null)
-                      Text(
-                        _propertyName!,
-                        style: GoogleFonts.inter(
-                            fontSize: 11, color: context.palette.textMuted),
-                      ),
-                  ],
+                // When the official listing name is known, lead with it as the
+                // header and keep the Alfred identity as a small concierge tag.
+                // Falls back to plain "Alfred" branding when no name is loaded.
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: _propertyName != null
+                        ? [
+                            Text(
+                              _propertyName!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 16,
+                                  height: 1.1,
+                                  color: context.palette.textPrimary),
+                            ),
+                            Text(
+                              'Alfred · Concierge',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: context.palette.primary),
+                            ),
+                          ]
+                        : [
+                            Text('Alfred',
+                                style: GoogleFonts.plusJakartaSans(
+                                    fontWeight: FontWeight.w300,
+                                    fontSize: 18,
+                                    color: context.palette.primary)),
+                          ],
+                  ),
                 ),
               ],
             ),
@@ -466,6 +607,50 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // Terminal state shown when the booking's property has been deleted. Replaces
+  // the message list + input bar so the guest gets clear guidance instead of a
+  // chat that silently fails on send.
+  Widget _buildClosedState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: GlassPanel(
+          radius: 20,
+          blurSigma: 18,
+          tint: context.palette.glassTint,
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline_rounded,
+                  size: 40, color: context.palette.textSecondary),
+              const SizedBox(height: 16),
+              Text(
+                'This conversation has ended',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: context.palette.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _closedMessage,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: context.palette.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildImageBubble(String storagePath, bool isGuest) {
     final publicUrl = Supabase.instance.client.storage
         .from('chat_media')
@@ -503,6 +688,26 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
     );
+  }
+
+  // Collapses runs of consecutive identical system markers into one. A
+  // double-submit/retry race (or legacy data) can insert two back-to-back
+  // "__SYS_INTERVENE__" rows, which would otherwise render as two identical
+  // "You are now speaking with …" lines. Non-system messages always break a run.
+  List<Map<String, dynamic>> _dedupeSystemMarkers(
+      List<Map<String, dynamic>> messages) {
+    final out = <Map<String, dynamic>>[];
+    for (final m in messages) {
+      if (m['sender_type'] == 'system' && out.isNotEmpty) {
+        final prev = out.last;
+        if (prev['sender_type'] == 'system' &&
+            prev['content'] == m['content']) {
+          continue;
+        }
+      }
+      out.add(m);
+    }
+    return out;
   }
 
   Widget _buildBubble(Map<String, dynamic> msg) {

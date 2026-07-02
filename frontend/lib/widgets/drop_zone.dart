@@ -24,11 +24,18 @@ class DropZoneWidget extends StatefulWidget {
   /// Called after the upload attempt completes with success/failure.
   final void Function(String filename, bool success) onFileResult;
 
+  /// Returns true if a file with this (sanitized) name is already in the
+  /// ingest queue. When it does, the drop is rejected with an inline message
+  /// instead of being uploaded again (which would otherwise leave a duplicate
+  /// row stuck on "processing").
+  final bool Function(String filename)? isDuplicate;
+
   const DropZoneWidget({
     super.key,
     required this.propertyId,
     required this.onFileAdded,
     required this.onFileResult,
+    this.isDuplicate,
   });
 
   @override
@@ -37,13 +44,21 @@ class DropZoneWidget extends StatefulWidget {
 
 class _DropZoneWidgetState extends State<DropZoneWidget> {
   bool _isDragging = false;
-  String? _unsupportedError;
+  String? _inlineError;
 
   String _sanitizeFilename(String filename) =>
       filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
 
   Future<void> _uploadBytes(String filename, Uint8List bytes) async {
     final safeFilename = _sanitizeFilename(filename);
+
+    // Reject a file already in the queue rather than re-uploading it (which
+    // would add a second list entry that never leaves the "processing" state).
+    if (widget.isDuplicate?.call(safeFilename) ?? false) {
+      setState(() => _inlineError = '$safeFilename — already in the queue');
+      return;
+    }
+
     widget.onFileAdded(safeFilename); // notify IngestScreen immediately (REQ-15)
 
     try {
@@ -60,7 +75,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
   }
 
   Future<void> _pickFiles() async {
-    setState(() => _unsupportedError = null);
+    setState(() => _inlineError = null);
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: true,
@@ -85,7 +100,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
         DropTarget(
           onDragEntered: (_) => setState(() {
             _isDragging = true;
-            _unsupportedError = null;
+            _inlineError = null;
           }),
           onDragExited: (_) => setState(() => _isDragging = false),
           onDragDone: (details) async {
@@ -95,7 +110,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
               if (!_supportedExtensions.contains(ext)) {
                 // REQ-09: reject unsupported types inline, do NOT upload
                 setState(() =>
-                    _unsupportedError = '${file.name} — unsupported file type');
+                    _inlineError = '${file.name} — unsupported file type');
                 continue;
               }
               final bytes = await file.readAsBytes();
@@ -176,11 +191,11 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
             ),
           ),
         ),
-        if (_unsupportedError != null)
+        if (_inlineError != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              _unsupportedError!,
+              _inlineError!,
               style: GoogleFonts.inter(
                 fontSize: 12,
                 color: palette.danger,

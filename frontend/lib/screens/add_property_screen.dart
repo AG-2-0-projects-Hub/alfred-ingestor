@@ -340,7 +340,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
+        // Opaque surface backing for the dialog. GlassPanel paints a translucent
+        // highlight gradient that overrides its own solid `tint`, so a fully
+        // transparent dialog let the dimmed barrier bleed through and crushed
+        // text contrast. Backing it with the solid surface keeps the soft glass
+        // sheen on top while staying readable.
+        backgroundColor: context.palette.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
         elevation: 0,
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         child: ConstrainedBox(
@@ -348,7 +356,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Light sheen over the opaque dialog backing above (see Dialog).
+            tint: context.palette.glassTintStrong,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -421,7 +430,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
+        // Opaque surface backing for the dialog. GlassPanel paints a translucent
+        // highlight gradient that overrides its own solid `tint`, so a fully
+        // transparent dialog let the dimmed barrier bleed through and crushed
+        // text contrast. Backing it with the solid surface keeps the soft glass
+        // sheen on top while staying readable.
+        backgroundColor: context.palette.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
         elevation: 0,
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         child: ConstrainedBox(
@@ -429,7 +446,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Light sheen over the opaque dialog backing above (see Dialog).
+            tint: context.palette.glassTintStrong,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -491,7 +509,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
+        // Opaque surface backing for the dialog. GlassPanel paints a translucent
+        // highlight gradient that overrides its own solid `tint`, so a fully
+        // transparent dialog let the dimmed barrier bleed through and crushed
+        // text contrast. Backing it with the solid surface keeps the soft glass
+        // sheen on top while staying readable.
+        backgroundColor: context.palette.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
         elevation: 0,
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         child: ConstrainedBox(
@@ -499,7 +525,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           child: GlassPanel(
             radius: 24,
             blurSigma: AppTheme.glassBlurSigmaHeavy,
-            tint: context.palette.glassTintHeavy,
+            // Light sheen over the opaque dialog backing above (see Dialog).
+            tint: context.palette.glassTintStrong,
             padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -774,6 +801,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   propertyId: _propertyId,
                   onFileAdded: _onFileAdded,
                   onFileResult: _onFileResult,
+                  isDuplicate: (filename) =>
+                      _filesToIngest.any((e) => e['file'] == filename),
                 ),
                 const SizedBox(height: 16),
                 VoiceRecorderWidget(

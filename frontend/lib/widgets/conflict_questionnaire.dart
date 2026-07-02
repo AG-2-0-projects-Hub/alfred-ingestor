@@ -31,8 +31,6 @@ class _ConflictQuestionnaireWidgetState
   late final Map<String, String?> _selectedValues;
   late final Map<String, TextEditingController> _otherControllers;
   bool _isSubmitting = false;
-  bool _submitSuccess = false;
-  Map<String, dynamic>? _resolveResult;
 
   @override
   void initState() {
@@ -90,11 +88,15 @@ class _ConflictQuestionnaireWidgetState
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _submitSuccess = true;
-          _resolveResult = data;
-        });
         widget.onAnswersSubmitted?.call();
+        // Auto-apply the resolution — no separate "Update Knowledge" step.
+        // The parent updates status + master_json and shows the completion
+        // popup directly. This widget is torn down on the resulting rebuild.
+        widget.onResolved(
+          data['status'] as String,
+          data['master_json'] as Map<String, dynamic>,
+        );
+        return;
       } else {
         _showError('Resolve failed (${response.statusCode}): ${response.body}');
       }
@@ -113,51 +115,7 @@ class _ConflictQuestionnaireWidgetState
 
   @override
   Widget build(BuildContext context) {
-    if (_submitSuccess && _resolveResult != null) {
-      return _buildSuccessState();
-    }
     return _buildForm();
-  }
-
-  Widget _buildSuccessState() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.green.shade50,
-        border: Border.all(color: Colors.green.shade200),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green.shade700),
-              const SizedBox(width: 8),
-              Text(
-                'Answers saved to database',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green.shade700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: () => widget.onResolved(
-              _resolveResult!['status'] as String,
-              _resolveResult!['master_json'] as Map<String, dynamic>,
-            ),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: const Text('Update Knowledge'),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildForm() {

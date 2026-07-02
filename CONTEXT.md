@@ -1,18 +1,21 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-05-29 (Commit 6 — host/guest perspective parity + emergency notice + popup refresh, **uncommitted**)
+**Last Session:** 2026-06-30 (soft-delete re-add fixes B1/B2/B4/B5 — tombstones no longer block re-adding a property; guest links to deleted properties show a terminal closed state — staging only, commits `bd13deb` + `fdf965c`; see "Session 2026-06-30" below)
+**Prior Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
+**Prior Session:** 2026-06-02 (Phase 6 QA + multi-tenancy fixes + merge-flow UX — staging only, 6 commits ahead of `main`)
 **Prior Sessions:** 2026-05-28 Commit 4 `40453c9` + Commit 5 `c80a84c` (three-layer real-time)
 **Prior Session:** 2026-05-15 (Phase 5 shipped — design token migration `d432f22`, P0 `ead7512`, P1 `e7295d9`, P2 `d8c20c1`)
 
 ---
 
 ## Live URLs
-| Service | URL |
-|---|---|
-| Backend | https://the-ingestor.onrender.com |
-| Frontend | https://alfred-ingestor.vercel.app |
-| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor |
-| Auto-deploy | Yes — both Render + Vercel on push to `main` |
+| Service | Prod | Staging |
+|---|---|---|
+| Backend | https://the-ingestor.onrender.com | https://the-ingestor-staging.onrender.com |
+| Scraper | https://scraper-ojux.onrender.com | https://scraper-staging-bn7w.onrender.com |
+| Frontend | https://alfred-ingestor.vercel.app | https://alfred-ingestor-git-staging-sanslighthouse-6079s-projects.vercel.app |
+| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor | (branch `staging`) |
+| Auto-deploy | Render + Vercel on push to `main` | Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed) |
 
 ## Supabase Project
 | Key | Value |
@@ -24,9 +27,53 @@
 | Service role key | in `backend/.env` |
 | Bucket | `Property_assets` (private) |
 
+### RLS (enabled 2026-06-10 — shared prod+staging DB)
+- `properties`: `owner_only` (ALL, `owner_id = auth.uid()`) — pre-existing.
+- `guests` / `conversations` / `messages`: RLS ON. Host SELECT via property ownership; host INSERT messages + UPDATE conversations (take-over/resolve markers + mode) via ownership; guest SELECT + guest-only INSERT scoped to `auth.jwt()->>'booking_id'`.
+- `scrape_jobs`: RLS ON, no policies (service-role only).
+- **Guest auth = booking-scoped JWT.** Backend `POST /api/guest-token` mints a short-lived (24h) JWT with `role=anon` + `booking_id` claim, signed with the Supabase JWT secret. Guest Flutter client uses it via a dedicated `SupabaseClient(accessToken: …)` (chat_screen.dart). Bare anon key (no claim) now gets 0 rows.
+- **⚠️ REQUIRED env var:** `SUPABASE_JWT_SECRET` (the **Legacy JWT Secret** at Supabase → Settings → API → JWT Keys → Legacy JWT Secret — NOT the service_role key) must be set on every backend deploy (Render staging `the-ingestor-staging` AND prod `the-ingestor`). Without it `/api/guest-token` 500s and guest chat breaks.
+- **⚠️ Render `PYTHON_VERSION=3.12.10`** must also be set — Render's default Python 3.14 has no `pydantic-core` wheel and fails the Rust build.
+- Backend uses the service-role key (bypasses RLS), so ingest/merge/host-send/resolve are unaffected.
+
+#### RLS integration fixes (2026-06-11, commit `f527e11`)
+Enabling RLS broke three guest-facing reads that previously rode the bare anon key. All fixed:
+- **Property/host name in header**: anon can't read `properties`, so `/api/guest-token` now returns `property_name` + `host_name` (resolved server-side from `master_json`); `chat_screen.dart` uses them directly (no `properties` query).
+- **Realtime**: the guest realtime socket is authed with the booking JWT via `realtime.setAuth(token)` (on open + each refresh) — otherwise RLS delivers 0 rows over the live `messages` stream.
+- **Duplicate system markers**: DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding one (3 racing writers: backend auto-escalation + both host chat-live views). `insert_message` guards against the skipped-insert (0-row) return.
+- **Host-token verification (⚠️ project quirk)**: the project migrated to **asymmetric JWT Signing Keys**, so host *session* tokens are NOT signed with the legacy HS256 secret. Backend endpoints that need to trust a host token (e.g. `/api/property/{id}/soft-delete`) must validate via `supabase.auth.get_user(token)` (algorithm-agnostic), **not** local `jwt.decode(..., HS256)` — the latter 401s on every host token. (The guest token is the exception: we mint it ourselves with HS256, and the legacy secret still verifies it.)
+
+---
+
+## Session 2026-06-30 — Soft-delete re-add + guest-link hardening (staging, ahead of `main`)
+
+After soft-delete shipped (`f527e11`), re-adding a previously-deleted property failed with `duplicate key … properties_airbnb_url_owner_unique`. Root-cause swept the whole soft-delete / re-add / canonical / guest-chat surface and fixed four related bugs (B1–B5; B3/B6 confirmed non-issues).
+
+| Bug | Fix | Where |
+|---|---|---|
+| **B1** Tombstone blocks re-add | Unique constraint on `(airbnb_url, owner_id)` was a plain constraint counting soft-deleted rows. Dropped it; replaced with a **partial unique index** `WHERE deleted_at IS NULL`. (A partial predicate can't live on a constraint, so it's now an index — same enforcement.) | migration `fix_unique_airbnb_url_ignore_soft_deleted` (shared DB) |
+| **B2** Same-nickname re-add silently revives tombstone (ingests but stays hidden) | `get_canonical_property_by_name` now filters `.is_("deleted_at","null")` — a tombstone is never canonical, so re-add always makes a fresh row. Live-property idempotency unchanged. | `backend/services/supabase_client.py` |
+| **B4** Guest with old link to deleted property can still chat | `get_property_for_chat` selects `deleted_at`; `POST /api/guest-token` returns **410** when the property is soft-deleted. Frontend maps 410 → `ConversationClosedException`, caught at bootstrap → terminal "This conversation has ended" card, no input bar. | `supabase_client.py`, `routers/guest_auth.py`, `services/api_client.dart`, `screens/chat_screen.dart` |
+| **B5** Dashboard keeps a property visible after it's deleted elsewhere | Realtime listener drops rows where `deleted_at != null`. | `screens/dashboard_screen.dart` |
+
+**Commits (staging, NOT on `main`):**
+- `bd13deb` — fix(delete): B1 (migration) + B2 + B4 backend + B5
+- `fdf965c` — fix(guest-chat): B4 frontend terminal closed state (410)
+
+**Verification:** migration verified via `pg_indexes` (predicate present), pre-flighted (0 duplicate/empty-url live rows); `python -m py_compile` on backend files OK; `flutter analyze` clean on all changed Dart files; user verified re-add works live on staging.
+
+**Pending:**
+- ⏳ **Vercel staging redeploy** (ISSUE-C, manual) to test B4 frontend + B5 live.
+- 4 pending-intake rows added to `_tests/scenarios.md` (grouped under ISSUE-B soft-delete) — promote before staging→main.
+- Set prod Render env vars (`SUPABASE_JWT_SECRET` + `PYTHON_VERSION=3.12.10`), then staging→main PR.
+
+---
+
 ## Render Monitoring
-- UptimeRobot pings `https://the-ingestor.onrender.com/health` every 5 minutes (keeps free-tier instance warm)
-- Render free tier spins down after 15 min inactivity; UptimeRobot prevents this
+- UptimeRobot pings every 5 minutes (keeps Render free-tier instances warm — 15-min spin-down otherwise):
+  - `https://the-ingestor.onrender.com/health` (prod backend)
+  - `https://scraper-staging-bn7w.onrender.com/health` (staging scraper — added 2026-06-02)
+  - Prod scraper covered by its own existing monitor
 
 ---
 
@@ -38,18 +85,40 @@
 
 ---
 
-## Upcoming Phases (sequenced, as of 2026-06-02)
+## Session 2026-06-02 — Phase 6 rollout + multi-tenancy + merge UX (staging, 6 commits ahead of `main`)
 
-Phase 6 QA system is shipped. Next sequence:
+Full handoff lives in `_Context/session-digest-2026-06-02.md` (gitignored). One-line per commit:
 
-1. **Scenario triage** — walk through `_tests/scenarios.md` (31 rows), mark each known-passing / known-failing / not-yet-built. Cuts the matrix down to what actually needs implementation work.
-2. **Foundation migration** — apply `test_run_id` columns + partial indexes on `properties`, `conversations`, `messages` (SQL in `_Context/plans/alfred-phase6-perspective-parity-and-testing.md` §3.2). Required before data-creating scenarios.
-3. **Add bug-derived scenarios** — user has a list of bugs they've identified manually; each becomes a regression scenario in `_tests/scenarios.md` *before* fixing.
-4. **Run the kept scenarios** — implement runners for everything that survived triage + the bug regressions, get a clean baseline.
-5. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. Tenant key is `properties.owner_id`; child tables join via `property_id` / `booking_id` FKs. Must complete before any real-user data lands.
-6. **Mobile UI optimization** — current focus is desktop; mobile has known UI issues (overlapping text, layout breakage, etc.). Functionality works, presentation doesn't. Out of scope for Phase 6, scheduled here so it's not forgotten.
+| Commit | Subject |
+|---|---|
+| `67a633b` | docs: add QA system usage section to QUICKSTART |
+| `fbda872` | feat(qa): Phase 6 QA system foundation (scenarios.md, TS runner, smoke tests) |
+| `1f266ea` | fix(security): scope property dedup to owner + freeze owner_id on upsert |
+| `0f019f2` | fix(ingest): surface backend errors to user + preserve queue on failure |
+| `2a75a4e` | fix(scraper): switch from retired gemini-3-flash-preview to gemini-2.5-flash |
+| `feaf8fd` | fix(merge-flow): bump timeout to 120s, surface resolved status, reorder UI |
 
-After step 6: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
+DB migration (applied via Supabase MCP, not in git, shared prod+staging DB): `properties.airbnb_url` global UNIQUE → compound `UNIQUE (airbnb_url, owner_id)` — enables multi-tenancy. Safe (only loosens).
+
+Two infra fixes today (no code): paid the overdue GCP bill on the scraper-staging Gemini project; added scraper-staging to UptimeRobot.
+
+**Pending on `main`:** all 6 commits above. Open staging→main PR once user verifies the merge-flow UX on the staging Vercel rebuild.
+
+---
+
+## Upcoming Phases (sequenced, as of 2026-06-08)
+
+Phase 6 QA system operational. Layer 1 done. Layer 2 runners written. Next sequence:
+
+1. **Run Layer 2 full suite** — `cd _tests/runner && npm run full` — verify A3/A4/B6/B7 pass; tune coordinates if needed (Flutter CanvasKit clicks are coordinate-based).
+2. **Promote pending-intake entries** — `_tests/scenarios.md` has 4 entries in the pending-intake table that become proper scenarios before staging→main merge.
+3. **Merge staging → main** — 10 commits ready. Open PR, self-merge. Triggers prod deploy.
+4. **ISSUE-B (Delete FK)** — `ON DELETE CASCADE` on `guests.property_id`, `conversations.property_id`, `messages.conversation_id` — apply via Supabase MCP.
+5. **ISSUE-C (Vercel auto-deploy)** — investigate Vercel webhook delivery; for now manually trigger staging redeployment after every frontend push.
+6. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. G2/G3 are the failing-expected guardrails that enforce this gets done before beta.
+7. **Mobile UI optimization** — functionality works, presentation has known issues on small screens.
+
+After step 7: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
 
 ---
 
@@ -315,6 +384,8 @@ Plan file: `C:\Users\San_8\.claude\plans\alfred-phase5-uiux-audit.md`
 - `ingest_screen.dart` cleanup — dead code, no router references; either delete or wire in
 
 ### Future Backend Work (deferred — needs SQL migrations)
+- **Per-guest separate chat threads (decided 2026-06-09 to defer).** Today a booking link = ONE shared conversation (everyone who opens it shares the thread). Desired down-the-line: each guest gets their *own* thread under the booking so they can't read each other's messages. **Caveat to solve first:** identity is the booking_id in the URL, so the same person opening on phone + browser would otherwise spawn two threads — need a per-guest identity (device/session token or a "who are you" step) before splitting threads. Until then: shared thread is intentional.
+- ~~**Property delete = soft-delete + guest anonymization.**~~ ✅ DONE 2026-06-11 (`f527e11`). `POST /api/property/{id}/soft-delete` (owner-verified via host JWT) blanks the property data columns + drops storage files, anonymizes guests to `Guest <last5 of booking_id>`, stamps `properties.deleted_at`, and KEEPS conversations + messages for training. Dashboard filters `deleted_at IS NULL`. The property row is retained as a tombstone (FK integrity for the kept chats). Replaced the original ISSUE-B ON-DELETE-CASCADE idea. **Future GDPR add-on:** a guest-erasure endpoint (`DELETE /api/guest/:booking_id/data`) before EU users.
 - `properties.trained_at` timestamp — reliable "first training" detection (currently inferred from status)
 - `conversations.checked_out_at` or `is_archived` flag — true "guest checked out" detection for Archived section in expanded view
 - `ai_status` + active chat count filtering by recency (currently counts all guests)
