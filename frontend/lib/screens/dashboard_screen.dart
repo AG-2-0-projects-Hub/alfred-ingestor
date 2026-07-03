@@ -13,6 +13,7 @@ import '../widgets/archived_chats_dialog.dart';
 import '../widgets/chat_live_dialog.dart';
 import 'add_property_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
+import '../widgets/feedback_dialog.dart';
 import '../services/push_notification_service.dart';
 import 'auth_screen.dart';
 
@@ -543,6 +544,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                     ),
                   ),
+                IconButton(
+                  tooltip: 'Send feedback',
+                  icon: const Icon(Icons.feedback_outlined, size: 18),
+                  onPressed: () =>
+                      FeedbackDialog.show(context, route: 'dashboard'),
+                ),
                 IconButton(
                   tooltip: themeController.isDark
                       ? 'Switch to Daylight'
