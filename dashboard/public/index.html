@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>hostwhisperer · command</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Breathing AI-aurora background -->
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand"><span class="host">host</span><span class="whisperer">whisperer</span><span class="sep">·</span><span class="mode">command</span></div>
+    <div class="pulse" id="pulse">
+      <span class="branch" id="branchChip">…</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- Needs-attention strip (hidden when empty) -->
+    <section class="attention" id="attention" hidden></section>
+
+    <!-- Collapsed summary cards -->
+    <section class="card" data-panel="roadmap">
+      <button class="card-head" data-toggle>
+        <span class="chev">▸</span>
+        <span class="card-title">Roadmap</span>
+        <span class="card-summary" id="roadmapSummary">…</span>
+      </button>
+      <div class="card-body" id="roadmapBody" hidden></div>
+    </section>
+
+    <section class="card" data-panel="qa">
+      <button class="card-head" data-toggle>
+        <span class="chev">▸</span>
+        <span class="card-title">QA</span>
+        <span class="card-summary" id="qaSummary">…</span>
+      </button>
+      <div class="card-body" id="qaBody" hidden></div>
+    </section>
+
+    <section class="card" data-panel="git">
+      <button class="card-head" data-toggle>
+        <span class="chev">▸</span>
+        <span class="card-title">Git</span>
+        <span class="card-summary" id="gitSummary">…</span>
+      </button>
+      <div class="card-body" id="gitBody" hidden></div>
+    </section>
+
+    <!-- Actions -->
+    <section class="actions">
+      <button class="pill" id="btnQa">▶ Run QA Smoke</button>
+      <button class="pill ghost" id="btnRefresh">↻ Refresh</button>
+    </section>
+
+    <!-- QA output terminal (hidden until run) -->
+    <section class="terminal" id="terminal" hidden>
+      <div class="terminal-head"><span>QA smoke</span><button class="x" id="termClose">✕</button></div>
+      <pre id="terminalOut"></pre>
+    </section>
+  </main>
+
+  <footer class="foot">hostwhisperer command · local · reads ROADMAP.md · scenarios.md · git</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

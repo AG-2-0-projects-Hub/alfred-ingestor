@@ -1,6 +1,7 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-06-30 (soft-delete re-add fixes B1/B2/B4/B5 — tombstones no longer block re-adding a property; guest links to deleted properties show a terminal closed state — staging only, commits `bd13deb` + `fdf965c`; see "Session 2026-06-30" below)
+**Last Session:** 2026-07-02 (**PR #2 merged staging→main** — all Phase-6 RLS + guest-JWT + soft-delete/re-add work now on **prod**; prod guest chat verified working. One prod-only scare: Gemini billing dunning-block on GCP project `1090657837262` — resolved by paying the overdue balance, no code involved. See "Session 2026-06-30" below.)
+**Prior Session:** 2026-06-30 (soft-delete re-add fixes B1/B2/B4/B5 — tombstones no longer block re-adding a property; guest links to deleted properties show a terminal closed state — commits `bd13deb` + `fdf965c`; see "Session 2026-06-30" below)
 **Prior Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
 **Prior Session:** 2026-06-02 (Phase 6 QA + multi-tenancy fixes + merge-flow UX — staging only, 6 commits ahead of `main`)
 **Prior Sessions:** 2026-05-28 Commit 4 `40453c9` + Commit 5 `c80a84c` (three-layer real-time)
@@ -62,10 +63,15 @@ After soft-delete shipped (`f527e11`), re-adding a previously-deleted property f
 
 **Verification:** migration verified via `pg_indexes` (predicate present), pre-flighted (0 duplicate/empty-url live rows); `python -m py_compile` on backend files OK; `flutter analyze` clean on all changed Dart files; user verified re-add works live on staging.
 
-**Pending:**
-- ⏳ **Vercel staging redeploy** (ISSUE-C, manual) to test B4 frontend + B5 live.
-- 4 pending-intake rows added to `_tests/scenarios.md` (grouped under ISSUE-B soft-delete) — promote before staging→main.
-- Set prod Render env vars (`SUPABASE_JWT_SECRET` + `PYTHON_VERSION=3.12.10`), then staging→main PR.
+**Shipped to prod 2026-07-02 (PR #2, merge commit `d0a092e`):**
+- ✅ B4 frontend + B5 verified on staging, intake rows promoted → **B10 / C8 / D5** (`passing`), scenarios 32→35.
+- ✅ Prod Render env vars (`SUPABASE_JWT_SECRET` + `PYTHON_VERSION=3.12.10`) set; staging→main PR #2 merged; prod Render + Vercel deployed; prod backend `/health` 200.
+- ✅ Prod guest chat verified working (header + live AI reply under RLS/JWT).
+- ⚠️ **Prod-only incident:** first prod guest message failed with `403 PERMISSION_DENIED "Lightning dunning decision is deny for project: projects/1090657837262"` — a **billing** dunning-block on the prod messenger's Gemini project (NOT quota, NOT code). Resolved by paying the overdue GCP balance; no redeploy needed. See Known Constraints.
+
+**Open follow-ups (not blocking):**
+- Duplicate guest messages on failed retry: `web-incoming` inserts the guest row *before* the Gemini call (`backend/routers/messages.py:45`), so failed sends pile up guest rows. Consider insert-after-success or dedupe.
+- Older pending-intake rows (popup lifecycle, merge UX, RLS header, system markers) still unpromoted in `_tests/scenarios.md` — already on prod, promote when convenient.
 
 ---
 
@@ -459,6 +465,7 @@ Covers 3 changes (no backend changes, no new packages):
 ---
 
 ## Known Constraints
+- **Gemini billing dunning-block (recurring):** if an AI path 500s with `google.genai.errors.ClientError: 403 PERMISSION_DENIED … "Lightning dunning decision is deny for project: projects/<N>"`, that is a **billing** enforcement block (overdue invoice / expired card / suspended billing account) on that GCP project — NOT quota (quota = `429 RESOURCE_EXHAUSTED`) and NOT code. Fix at https://console.cloud.google.com/billing (pay balance / update card); access restores in minutes–hours, no redeploy. Prod messenger Gemini project = `1090657837262` (hit this 2026-07-02); the scraper's Gemini project hit the same class of issue earlier. `GEMINI_API_KEY` env var per backend service selects which project. Stopgap: point prod's `GEMINI_API_KEY` at the billing-current staging project's key.
 - Render free tier: 15-min inactivity spin-down; mitigated by UptimeRobot 5-min ping
 - `asyncio.wait_for(timeout=45)` guards both Gemini calls — if Gemini hangs, client gets a structured 504 (not a raw connection kill)
 - Supabase singleton client (`_client`) is shared across `asyncio.to_thread` calls — thread-safe in practice because supabase-py uses httpx which is connection-pool safe, but worth watching

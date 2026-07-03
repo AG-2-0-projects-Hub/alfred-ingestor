@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Alfred / HostWhisperer — Launch Roadmap</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  @page :first { margin: 0; }
+
+  :root {
+    --obsidian: #0A0B10; --obsidian-2: #12141C;
+    --ink: #1A1C24; --ink-soft: #4A4E5C; --line: #E4E6EE;
+    --amethyst: #6E38A7; --vapor: #4DA6FF; --mint: #2BB682; --amber: #C8841A;
+    --red: #C8324B; --green: #2BB682;
+    --bg-soft: #FAFAFC;
+  }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: 'Inter', 'Plus Jakarta Sans', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); font-size: 10.5pt; line-height: 1.55; margin: 0; background: #fff;
+  }
+
+  /* ---------- COVER ---------- */
+  .cover {
+    position: relative; height: 297mm; width: 100%;
+    background:
+      radial-gradient(60% 45% at 18% 22%, rgba(110,56,167,0.55) 0%, rgba(110,56,167,0) 60%),
+      radial-gradient(55% 40% at 85% 30%, rgba(77,166,255,0.40) 0%, rgba(77,166,255,0) 62%),
+      radial-gradient(70% 50% at 70% 88%, rgba(127,255,190,0.18) 0%, rgba(127,255,190,0) 60%),
+      linear-gradient(160deg, #12141C 0%, #0A0B10 70%);
+    color: #fff; padding: 40mm 26mm; page-break-after: always; overflow: hidden;
+  }
+  .cover .wordmark { font-size: 30pt; letter-spacing: -0.5px; margin-bottom: 8mm; }
+  .cover .wordmark b { font-weight: 800; }
+  .cover .wordmark span { font-weight: 200; color: #E8ECF5; }
+  .cover .eyebrow { text-transform: uppercase; letter-spacing: 4px; font-size: 9pt; color: #9FB3D1; margin-bottom: 6mm; }
+  .cover h1 { font-size: 34pt; font-weight: 800; line-height: 1.1; margin: 0 0 6mm 0; max-width: 150mm; }
+  .cover .sub { font-size: 13pt; color: #C9D3E4; font-weight: 300; max-width: 140mm; }
+  .cover .tagline { margin-top: 14mm; font-size: 14pt; font-weight: 300; font-style: italic; color: #7FFFBE; }
+  .cover .meta { position: absolute; bottom: 32mm; left: 26mm; right: 26mm; display: flex; gap: 16mm;
+    border-top: 1px solid rgba(255,255,255,0.14); padding-top: 6mm; font-size: 9.5pt; color: #AEB9CC; }
+  .cover .meta b { color: #fff; font-weight: 600; display: block; font-size: 10.5pt; }
+  .cover .chips { margin-top: 12mm; }
+  .cover .chip { display: inline-block; border: 1px solid rgba(255,255,255,0.22); border-radius: 999px;
+    padding: 3px 12px; font-size: 8.5pt; margin: 0 6px 6px 0; color: #DCE4F1; background: rgba(255,255,255,0.04); }
+
+  /* ---------- BODY ---------- */
+  h2 { font-size: 16pt; font-weight: 800; color: var(--obsidian-2); margin: 11mm 0 3mm 0;
+    padding-bottom: 2mm; border-bottom: 2px solid var(--amethyst); page-break-after: avoid; }
+  h2 .num { color: var(--amethyst); font-weight: 800; margin-right: 8px; }
+  h3 { font-size: 11.5pt; font-weight: 700; color: var(--amethyst); margin: 6mm 0 1.5mm 0; page-break-after: avoid; }
+  h3 .new { font-size: 8pt; font-weight: 700; color: var(--mint); border: 1px solid var(--mint);
+    border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: middle; }
+  p { margin: 0 0 2.5mm 0; }
+  a { color: var(--vapor); text-decoration: none; }
+  strong { font-weight: 700; color: var(--obsidian-2); }
+  em { color: var(--ink-soft); }
+  ul { margin: 0 0 3mm 0; padding-left: 5mm; }
+  li { margin-bottom: 1.4mm; }
+
+  .lead { font-size: 11pt; color: var(--ink-soft); border-left: 3px solid var(--vapor); padding-left: 5mm; margin: 0 0 4mm 0; }
+  blockquote { margin: 3mm 0; padding: 3mm 5mm; background: var(--bg-soft); border-left: 3px solid var(--amber);
+    color: var(--ink-soft); font-style: italic; border-radius: 0 6px 6px 0; }
+
+  /* tier badges */
+  .tier { display: inline-block; font-size: 7.5pt; font-weight: 800; letter-spacing: 0.3px;
+    color: #fff; border-radius: 4px; padding: 0.5px 5px; margin-right: 4px; vertical-align: middle; white-space: nowrap; }
+  .tier.nec { background: var(--red); }
+  .tier.help { background: var(--amber); }
+  .tier.nice { background: var(--green); }
+
+  /* legend box */
+  .legend { border: 1px solid var(--line); border-radius: 8px; padding: 3.5mm 4mm; background: var(--bg-soft); margin: 3mm 0; }
+  .legend p { margin: 0 0 1.5mm 0; }
+  .legend .principle { margin-top: 2.5mm; padding-top: 2.5mm; border-top: 1px solid var(--line); }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0 5mm 0; font-size: 9pt; page-break-inside: auto; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: linear-gradient(160deg, #12141C, #0A0B10); color: #fff; text-align: left;
+    padding: 2.6mm 3mm; font-weight: 600; font-size: 8.7pt; vertical-align: top; }
+  td { padding: 2.4mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:nth-child(even) { background: var(--bg-soft); }
+  td:first-child { font-weight: 600; color: var(--obsidian-2); }
+  .matrix td:first-child { border-left: 3px solid var(--amethyst); }
+  .sev-high { color: var(--red); font-weight: 700; }
+  .sev-med { color: var(--amber); font-weight: 700; }
+
+  /* milestone cards */
+  .ms { border: 1px solid var(--line); border-radius: 8px; padding: 3.5mm 4mm; margin-bottom: 3mm;
+    page-break-inside: avoid; border-left-width: 5px; }
+  .ms.m0 { border-left-color: var(--amethyst); }
+  .ms.m1 { border-left-color: var(--vapor); }
+  .ms.m2 { border-left-color: var(--mint); }
+  .ms.m3 { border-left-color: var(--amber); }
+  .ms .tag { display: inline-block; font-size: 8pt; font-weight: 700; letter-spacing: 0.5px; color: #fff;
+    border-radius: 4px; padding: 1.5px 7px; margin-right: 8px; vertical-align: middle; }
+  .ms.m0 .tag { background: var(--amethyst); }
+  .ms.m1 .tag { background: var(--vapor); }
+  .ms.m2 .tag { background: var(--mint); }
+  .ms.m3 .tag { background: var(--amber); }
+  .ms .name { font-weight: 800; font-size: 11.5pt; color: var(--obsidian-2); }
+  .ms .desc { margin: 2mm 0 1.5mm 0; }
+  .ms .exit { font-size: 9pt; color: var(--ink-soft); }
+  .ms .exit b { color: var(--obsidian-2); }
+
+  .pb { page-break-before: always; }
+  .endnote { margin-top: 8mm; padding-top: 4mm; border-top: 1px solid var(--line);
+    font-size: 9pt; color: var(--ink-soft); font-style: italic; }
+  .kbd { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 8.5pt; background: #F0F1F6;
+    border: 1px solid var(--line); border-radius: 4px; padding: 0.5px 4px; color: var(--obsidian-2); }
+</style>
+</head>
+<body>
+
+<!-- ===================== COVER ===================== -->
+<div class="cover">
+  <div class="eyebrow">Founder-facing source of truth</div>
+  <div class="wordmark"><b>host</b><span>whisperer</span></div>
+  <h1>Launch Roadmap</h1>
+  <div class="sub">Alfred — the multi-agent assistant engine, taken from working product to launched SaaS. Nine workstreams across four milestones, sequenced by readiness, every item tiered by urgency.</div>
+  <div class="tagline">"Give yourself the gift of time."</div>
+  <div class="chips">
+    <span class="chip">M0 · Harden</span>
+    <span class="chip">M1 · Beta-Ready</span>
+    <span class="chip">M2 · Closed Beta</span>
+    <span class="chip">M3 · Public + V2</span>
+    <span class="chip">Horizon · V3</span>
+  </div>
+  <div class="meta">
+    <div><b>Version 1.1</b>Updated 2026-06-30</div>
+    <div><b>Status</b>Active — pre-closed-beta</div>
+    <div><b>Owner</b>Founder · Execution by AG agents</div>
+  </div>
+</div>
+
+<div class="body">
+
+<!-- ===================== 1 ===================== -->
+<h2><span class="num">1</span>How to use this document</h2>
+<p>This is the single source of truth for getting Alfred from "working product" to "launched SaaS." It is organized as <strong>9 parallel tracks</strong> mapped across <strong>4 milestones</strong> (+ a Horizon).</p>
+<ul>
+  <li><strong>Milestones (M0→M3)</strong> answer <em>"when / in what order."</em> Sequenced by <strong>readiness</strong>, not dates — each milestone's exit criteria unlock the next.</li>
+  <li><strong>Tracks</strong> answer <em>"what kind of work."</em> They run in parallel; a milestone is "done" when every track has cleared its cell.</li>
+  <li>The <strong>Strategic Risk Register</strong> (§9) holds existential/strategic exposures and lean mitigations.</li>
+  <li>The <strong>Open Decisions register</strong> (§10) holds blockers that gate downstream work.</li>
+  <li>The <strong>Operating Model</strong> (§8) defines the autopilot: PM agent + supporting agents.</li>
+</ul>
+
+<div class="legend">
+  <p><strong>Priority tiers</strong> — every added item is tagged so you know what's load-bearing vs optional:</p>
+  <p><span class="tier nec">NECESSARY</span> must clear before its milestone ships; legal, financial, data-safety, or guest-trust critical.</p>
+  <p><span class="tier help">HELPFUL</span> materially de-risks or accelerates; do when bandwidth allows.</p>
+  <p><span class="tier nice">NICE</span> later; scale- or revenue-gated.</p>
+  <p class="principle"><strong>Anti-over-engineering principle:</strong> bias to <strong>buy-not-build</strong> and the simplest solution that clears the bar. Most "necessary" items are a <em>decision</em> or a <em>toggle</em>, not a system to build — use managed providers (Stripe Tax, a merchant-of-record, hosted status page, provider safety filters). An "agent" is a prompt + a trigger, not a service.</p>
+</div>
+
+<!-- ===================== 2 ===================== -->
+<h2><span class="num">2</span>Naming &amp; brand architecture</h2>
+<p>Resolved decision (2026-06-30):</p>
+<table>
+  <thead><tr><th style="width:26%">Name</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td>Alfred</td><td>The <strong>engine / assistant persona</strong> — the AI guests and hosts talk to. Internal + in-product.</td></tr>
+    <tr><td>HostWhisperer</td><td>The <strong>public product &amp; company brand</strong> — landing page, marketing, billing, domain.</td></tr>
+  </tbody>
+</table>
+<p>The HostWhisperer brand identity already exists (see <span class="kbd">_Context/Design inspo/Brand_ID_guidelines.md</span>): ethereal glassmorphism, deep obsidian canvas, AI-aurora mesh gradients, "the Invisible Proxy" persona.</p>
+<blockquote>Tagline anchor: "Give yourself the gift of time."</blockquote>
+
+<!-- ===================== 3 ===================== -->
+<h2><span class="num">3</span>Where we are now (snapshot)</h2>
+<p class="lead"><strong>The product largely exists and runs.</strong> The full V1 loop is live: ingest (host files + Airbnb scrape) → merge/conflict resolution → vectorized "Brain" → guest chat → escalation / Live Tunnel → self-learning loop → host dashboard (Flutter) + guest web app (Next.js/Vercel). RLS is enforced with booking-scoped guest JWTs.</p>
+<p>We are effectively at <strong>Phase 6 of 7</strong> of the V1 build. Remaining work is <strong>hardening + go-to-market + the business/trust layer</strong>, not net-new core product. See <span class="kbd">_Context/session-digest.md</span> for live engineering state.</p>
+
+<!-- ===================== 4 ===================== -->
+<h2><span class="num">4</span>Milestone spine</h2>
+<div class="milestones">
+  <div class="ms m0">
+    <div><span class="tag">M0</span><span class="name">Harden &amp; Ship</span></div>
+    <div class="desc">Close out work in flight; get the current system onto solid ground. <strong>No new product.</strong></div>
+    <div class="exit"><b>Exit:</b> staging verified e2e under JWT; prod env vars set; <span class="kbd">staging→main</span> merged; DB reset plan ready; QA intake promoted; backups + 2FA verified; uptime monitors green.</div>
+  </div>
+  <div class="ms m1">
+    <div><span class="tag">M1</span><span class="name">Beta-Ready</span></div>
+    <div class="desc">Everything a real human needs before touching Alfred: brand, landing/waitlist, legal + privacy, final UX, mobile, infra migrated, AI guardrails, agents stood up.</div>
+    <div class="exit"><b>Exit:</b> brand applied; landing + waitlist live; ToS + Privacy published; security review passed; mobile-optimized; Cloud Run migrated; self-serve onboarding works; restore tested; PM + QA agents live.</div>
+  </div>
+  <div class="ms m2">
+    <div><span class="tag">M2</span><span class="name">Closed Beta</span></div>
+    <div class="desc">Invite 20–30 properties (family / partners). Observe, support, learn, iterate. <strong>WhatsApp + Telegram go live here</strong> — the channels beta testers actually use.</div>
+    <div class="exit"><b>Exit:</b> cohort onboarded; WA/TG live; feedback loop running; stability acceptable; conversion/retention signal captured.</div>
+  </div>
+  <div class="ms m3">
+    <div><span class="tag">M3</span><span class="name">Public Launch + begin V2</span></div>
+    <div class="desc">Open to paying customers; add the V2 scale stack public volume requires.</div>
+    <div class="exit"><b>Exit:</b> billing + tax live; marketing campaign shipped; V2 scale stack deployed; load-tested.</div>
+  </div>
+  <div class="ms" style="border-left-color:#9aa0b0">
+    <div><span class="tag" style="background:#6b7080">V3</span><span class="name">Horizon</span></div>
+    <div class="desc">OTA channel-manager integration + advanced automation. See §11.</div>
+  </div>
+</div>
+
+<!-- ===================== 5 ===================== -->
+<h2 class="pb"><span class="num">5</span>The matrix (tracks × milestones)</h2>
+<table class="matrix">
+  <thead>
+    <tr>
+      <th style="width:15%">Track</th>
+      <th style="width:21%">M0 · Harden</th>
+      <th style="width:21%">M1 · Beta-Ready</th>
+      <th style="width:21%">M2 · Closed Beta</th>
+      <th style="width:22%">M3 · Public + V2</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1. Engineering &amp; Infra</td>
+      <td>Redeploy staging, verify guest chat e2e under JWT, test soft-delete, prod env vars, <span class="kbd">staging→main</span>, DB reset</td>
+      <td>Cloud Run migration, self-serve onboarding, harden error states, <span class="tier nec">NEC</span> AI guardrails + per-tenant rate limit</td>
+      <td><strong>WhatsApp + Telegram live</strong>, beta stability fixes</td>
+      <td>V2: Redis/BullMQ queues, Sentry/Axiom, Resend, PostHog, scale-out</td>
+    </tr>
+    <tr>
+      <td>2. Brand &amp; Identity</td>
+      <td>Lock name (done), secure domain</td>
+      <td>Finalize logo/wordmark, apply glassmorphism design system</td>
+      <td>—</td>
+      <td>Brand refresh for public</td>
+    </tr>
+    <tr>
+      <td>3. Marketing &amp; Growth</td>
+      <td>—</td>
+      <td>Landing page (brief §7), value prop, waitlist</td>
+      <td>Beta testimonials, referral seeds</td>
+      <td>Launch campaign, pricing page, SEO/content, paid acquisition</td>
+    </tr>
+    <tr>
+      <td>4. UX/UI &amp; Mobile</td>
+      <td>—</td>
+      <td>Final UI pass, mobile optimization, onboarding UX</td>
+      <td>Usability fixes from beta</td>
+      <td>Polish</td>
+    </tr>
+    <tr>
+      <td>5. Privacy, Security &amp; Trust</td>
+      <td><span class="tier nec">NEC</span> Finalize ToS</td>
+      <td><span class="tier nec">NEC</span> Privacy Policy, cookie taxonomy + consent banner, document RLS, security review, bucket/retention audit</td>
+      <td>DPA / consent ops (if EU), incident response basics</td>
+      <td>SLA, compliance hardening</td>
+    </tr>
+    <tr>
+      <td>6. QA, Maintenance &amp; Reliability</td>
+      <td>Promote intake → scenarios, run Layer 1, uptime monitors</td>
+      <td>Layer 2 Playwright, dedicated QA agent (§8), <span class="tier help">HELP</span> AI answer eval set, QA-matrix evolution</td>
+      <td>Beta monitoring + triage</td>
+      <td>Regression suite, load test (200 concurrent)</td>
+    </tr>
+    <tr>
+      <td>7. Agent Operations</td>
+      <td>Define operating model (hybrid)</td>
+      <td>Stand up PM agent + near-term agents (§8)</td>
+      <td>Autopilot during beta, escalate decisions</td>
+      <td>Tune autonomy</td>
+    </tr>
+    <tr>
+      <td>8. Business &amp; Money</td>
+      <td>—</td>
+      <td><span class="tier nec">NEC</span> Legal entity + tax/billing approach, <span class="tier nec">NEC</span> unit-economics sketch, <span class="tier help">HELP</span> pricing decision</td>
+      <td>(free beta — billing optional)</td>
+      <td><span class="tier nec">NEC</span> Billing + tax live, <span class="tier help">HELP</span> insurance, <span class="tier nice">NICE</span> AUP/SLA</td>
+    </tr>
+    <tr>
+      <td>9. Reliability &amp; Continuity</td>
+      <td><span class="tier nec">NEC</span> Verify backups + 2FA/secrets audit</td>
+      <td><span class="tier nec">NEC</span> Test a restore + email deliverability (SPF/DKIM/DMARC), <span class="tier help">HELP</span> status page</td>
+      <td><span class="tier help">HELP</span> Incident runbook + on-call alerting</td>
+      <td><span class="tier nice">NICE</span> DR drill, SLA</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ===================== 6 ===================== -->
+<h2 class="pb"><span class="num">6</span>Track detail</h2>
+
+<h3>Track 1 — Engineering &amp; Infra</h3>
+<p><em>Objective:</em> a stable, scalable backend that runs without firefighting.</p>
+<ul>
+  <li><strong>M0:</strong> Redeploy staging; verify guest chat e2e under booking JWT; test soft-delete/anonymization; set prod env vars (<span class="kbd">SUPABASE_JWT_SECRET</span>, <span class="kbd">PYTHON_VERSION=3.12.10</span>); merge <span class="kbd">staging→main</span>; prepare clean DB reset.</li>
+  <li><strong>M1:</strong> Cloud Run migration; self-serve signup + guided onboarding; harden error states.</li>
+  <li><span class="tier nec">NEC</span> <strong>AI guardrails (keep simple):</strong> per-conversation/tenant <strong>rate limit</strong> (a counter, not a quota engine) to cap runaway cost/abuse; <strong>high-stakes-field fallback</strong> — for address, access codes, checkout, Alfred uses only confirmed Master-JSON data or says "let me confirm with your host" rather than guessing; lean on the <strong>provider's built-in safety filters</strong> for moderation; basic system-prompt hardening against injection. <em>No ML moderation pipeline.</em></li>
+  <li><strong>M2:</strong> <span class="tier nec">NEC</span> <strong>WhatsApp + Telegram live.</strong> <em>Dependency:</em> WhatsApp Business API needs Meta verification — <strong>start in M1</strong> (R/D2). Telegram has no gate.</li>
+  <li><strong>M3:</strong> V2 scale stack — Redis cache + BullMQ queues, Sentry + Axiom, Resend, PostHog.</li>
+</ul>
+
+<h3>Track 2 — Brand &amp; Identity</h3>
+<p><em>Objective:</em> one coherent HostWhisperer identity.</p>
+<ul>
+  <li><strong>M0:</strong> Name locked; secure domain + handles.</li>
+  <li><strong>M1:</strong> Finalize wordmark (<strong>host</strong> bold / <em>whisperer</em> light) + key/waves symbol; codify design tokens; apply to dashboard, guest app, landing.</li>
+  <li><strong>M3:</strong> Refresh for public surface.</li>
+</ul>
+
+<h3>Track 3 — Marketing &amp; Growth</h3>
+<p><em>Objective:</em> strangers → waitlist → beta → paying hosts.</p>
+<ul>
+  <li><strong>M1:</strong> Landing page against the brief (§7); sharpen value prop; waitlist.</li>
+  <li><strong>M2:</strong> Beta testimonials / case studies; referral seeds.</li>
+  <li><strong>M3:</strong> Launch campaign, pricing page, SEO/content, paid acquisition.</li>
+  <li><span class="tier help">HELP</span> <strong>Foundation (M1, lightweight):</strong> define <strong>ICP</strong> (property count, region, persona) and <strong>North-Star metric + funnel</strong> — one page each, not a research project.</li>
+</ul>
+
+<h3>Track 4 — UX/UI &amp; Mobile</h3>
+<p><em>Objective:</em> effortless on the devices people actually use.</p>
+<ul>
+  <li><strong>M1:</strong> Final UI pass (dashboard + guest app); <strong>mobile optimization</strong> (guests are phone-first); onboarding UX.</li>
+  <li><strong>M2:</strong> Usability fixes from beta. <strong>M3:</strong> Polish.</li>
+  <li><span class="tier nice">NICE</span> <strong>Open:</strong> native iOS/Android apps (Flutter can) add an app-store track — <strong>default web-only until demand proves it</strong> (D9).</li>
+</ul>
+
+<h3>Track 5 — Privacy, Security &amp; Trust</h3>
+<p><em>Objective:</em> legally and technically trustworthy before real data flows.</p>
+<ul>
+  <li><strong>M0:</strong> <span class="tier nec">NEC</span> Finalize ToS (<span class="kbd">tos-draft.md</span> exists) — <strong>include an AI-accuracy disclaimer</strong> (R/R2).</li>
+  <li><strong>M1:</strong> <span class="tier nec">NEC</span> Privacy Policy; cookie taxonomy (functional/analytics/marketing) + consent banner wired to the real stack (only non-essential cookies post-consent); document data protection (RLS, soft-delete + anonymization already built); security review (security-review + insecure-defaults skills); bucket/retention audit.</li>
+  <li><strong>M2:</strong> DPA / consent ops <em>if EU guests</em> (conditional — D4); basic incident-response runbook.</li>
+  <li><strong>M3:</strong> SLA, compliance hardening.</li>
+</ul>
+
+<h3>Track 6 — QA, Maintenance &amp; Reliability</h3>
+<p><em>Objective:</em> quality holds automatically as the system changes.</p>
+<ul>
+  <li><strong>M0:</strong> Promote pending-intake → <span class="kbd">_tests/scenarios.md</span>; run Layer 1; uptime monitors (UptimeRobot).</li>
+  <li><strong>M1:</strong> Layer 2 Playwright; <strong>dedicated QA agent</strong> (§8); evolve <span class="kbd">scenarios.md</span> into the spec-first QA matrix; error monitoring.</li>
+  <li><span class="tier help">HELP</span> <strong>AI answer eval set (keep small):</strong> ~20–30 fixed guest questions with expected-good answers; re-run on model changes to catch drift. Manual-to-start; distinct from UI QA.</li>
+  <li><strong>M2:</strong> Beta monitoring + triage. <strong>M3:</strong> Regression suite; load test (200 concurrent, p95 &lt; 5s).</li>
+</ul>
+
+<h3>Track 7 — Agent Operations</h3>
+<p><em>Objective:</em> Alfred-on-autopilot — agents run day-to-day, founder decides.</p>
+<ul>
+  <li><strong>M0:</strong> Operating model defined (hybrid). <strong>M1:</strong> Stand up PM agent + near-term agents (§8).</li>
+  <li><strong>M2:</strong> Autopilot through beta; escalate genuine decisions. <strong>M3:</strong> Tune autonomy.</li>
+</ul>
+
+<h3>Track 8 — Business &amp; Money <span class="new">NEW</span></h3>
+<p><em>Objective:</em> get paid, stay legal and solvent — with the least machinery.</p>
+<ul>
+  <li><span class="tier nec">NEC</span> <strong>M1 — Legal entity + tax/billing approach (decision, not a build).</strong> Pick a structure for liability protection; choose the billing path. <em>Keep it simple: a <strong>merchant-of-record</strong> (Paddle / Lemon Squeezy) or <strong>Stripe + Stripe Tax</strong> handles VAT/sales-tax registration and remittance for you — do <strong>not</strong> build tax logic.</em></li>
+  <li><span class="tier nec">NEC</span> <strong>M1 — Unit-economics sketch.</strong> One spreadsheet: per-property COGS (Gemini/Claude/Pinecone/Apify/Firecrawl/infra) vs price, so pricing covers margin. Back-of-envelope, not a model.</li>
+  <li><span class="tier help">HELP</span> <strong>M1 — Pricing decision</strong> — tiers, free-trial vs freemium (D3).</li>
+  <li><span class="tier nec">NEC</span> <strong>M3 — Billing live</strong> via the chosen provider (dunning, refunds, invoices, proration are the <em>provider's</em> job — don't build).</li>
+  <li><span class="tier help">HELP</span> <strong>M3 — Insurance</strong> (E&amp;O + cyber) once there's revenue/users to justify it — not before.</li>
+  <li><span class="tier nice">NICE</span> <strong>M3+ — Acceptable Use Policy + SLA</strong> (template-based).</li>
+  <li><em>Note: the closed beta (M2) can run <strong>free</strong> → billing isn't required until M3.</em></li>
+</ul>
+
+<h3>Track 9 — Reliability &amp; Continuity <span class="new">NEW</span></h3>
+<p><em>Objective:</em> data is safe, outages are visible, and you're not a single point of failure.</p>
+<ul>
+  <li><span class="tier nec">NEC</span> <strong>M0 — Verify backups + 2FA/secrets audit.</strong> Confirm Supabase automated backups are on; enable <strong>2FA on every vendor account</strong> (Supabase/Render/Vercel/Pinecone/Apify/domain registrar); store creds + recovery codes in a password manager. <em>Nothing to build — just turn things on.</em></li>
+  <li><span class="tier nec">NEC</span> <strong>M1 — Test a restore once</strong> (and document the steps); set up <strong>email deliverability</strong> (SPF/DKIM/DMARC on the domain) so mail lands.</li>
+  <li><span class="tier help">HELP</span> <strong>M1 — Status page</strong> — use a hosted/free one; don't build.</li>
+  <li><span class="tier help">HELP</span> <strong>M2 — Incident runbook + on-call alerting</strong> — wire existing uptime monitors to push to your phone; one-page runbook, not a system.</li>
+  <li><span class="tier nice">NICE</span> <strong>M3 — DR drill + SLA commitments.</strong></li>
+</ul>
+
+<!-- ===================== 7 ===================== -->
+<h2 class="pb"><span class="num">7</span>Marketing principles brief</h2>
+<p class="lead">Evolutionary Marketing + Neuromarketing. A starting brief the landing-page work (Track 3, M1) builds against. <strong>Basics now; deepen with research before execution.</strong></p>
+
+<h3>Evolutionary Marketing — core idea</h3>
+<p>Speak to deep, evolved drivers, not features. For premium STR owners: <strong>status</strong> (run a high-end operation effortlessly), <strong>time/resource conservation</strong> (reclaim hours), <strong>risk/loss aversion</strong> (never miss a message or a review), <strong>tribe/belonging</strong> (join smart operators). Frame the product as restoring <em>freedom and time</em>.</p>
+
+<h3>Neuromarketing — principles for the landing page</h3>
+<ul>
+  <li><strong>Cognitive ease / low friction</strong> — negative space, one clear action per view.</li>
+  <li><strong>Loss aversion framing</strong> — dramatize the status-quo cost (missed messages, 2am pings, bad reviews) before relief.</li>
+  <li><strong>Social proof</strong> — beta testimonials, property counts, trust signals (M2 feeds this).</li>
+  <li><strong>Anchoring</strong> — pricing against the value of time saved / a property manager's fee.</li>
+  <li><strong>Visual processing &amp; gaze cueing</strong> — serene, decluttered hero imagery; directional cues to the CTA.</li>
+  <li><strong>Authority &amp; calm</strong> — the "Invisible Proxy" voice: serene assurance.</li>
+</ul>
+
+<h3>To research before building</h3>
+<ul>
+  <li>Evidence-based Neuromarketing landing patterns (CTA placement, contrast, hierarchy, scroll depth).</li>
+  <li>Evolutionary-driver messaging tested in B2B SaaS / proptech.</li>
+  <li>Competitor teardown (Hospitable, Besty, HostAI, etc.) — positioning gaps.</li>
+  <li>STR host willingness-to-pay / pricing anchors.</li>
+</ul>
+
+<!-- ===================== 8 ===================== -->
+<h2 class="pb"><span class="num">8</span>Operating model (autopilot)</h2>
+<p class="lead"><strong>Goal:</strong> the platform runs mostly on automatic; the founder steers and decides.</p>
+
+<h3>Permanent PM agent — hybrid (scheduled + event-driven)</h3>
+<ul>
+  <li><strong>Scheduled:</strong> daily check + weekly roadmap review — updates cell status, reports progress, surfaces blockers, proposes next actions.</li>
+  <li><strong>Event-driven:</strong> reacts to errors, founder feedback, PR merges, failed deploys, QA failures — acts or escalates.</li>
+  <li><strong>Escalates for:</strong> architectural decisions, spend, brand/positioning, anything in the registers (§9–§10).</li>
+</ul>
+
+<h3>Supporting agents</h3>
+<table>
+  <thead><tr><th style="width:17%">Agent</th><th style="width:17%">Trigger model</th><th style="width:14%">Tier · sequence</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td>QA agent</td><td>Hybrid, event-primary</td><td><span class="tier nec">NEC</span> M1</td><td>Pre-merge gate: Layer 1 on every <span class="kbd">staging→main</span> PR, <strong>block on failure</strong>. Nightly/weekly full Layer 2 Playwright regression + report (catches realtime/free-tier + cold-start drift). On-demand too.</td></tr>
+    <tr><td>Release / deploy agent</td><td>Event-driven</td><td><span class="tier help">HELP</span> M1</td><td>Verified deploys (Render/Vercel/Cloud Run), confirm health, handle the Vercel manual-redeploy quirk, report status.</td></tr>
+    <tr><td>Support-triage agent</td><td>Event-driven</td><td><span class="tier help">HELP</span> M1–M2</td><td>Watch escalations + beta feedback; classify, draft responses, route real issues to founder/PM agent.</td></tr>
+    <tr><td>FinOps / cost agent</td><td>Scheduled daily + anomaly</td><td><span class="tier nec">NEC</span> near-term</td><td>Watch API + infra spend, attribute cost per tenant, alert on runaway <em>before the bill does</em>. Protects margin (R3).</td></tr>
+    <tr><td>AI-quality / eval agent</td><td>Scheduled + on model change</td><td><span class="tier help">HELP</span> near-term</td><td>Run the eval set, score answer quality, catch drift when Gemini/Claude update (R2).</td></tr>
+    <tr><td>Incident / on-call agent</td><td>Event-driven</td><td><span class="tier help">HELP</span> near-term</td><td>First responder to outages: run diagnostics, draft status-page update, page founder only if it can't self-resolve.</td></tr>
+    <tr><td>Security / dependency agent</td><td>Scheduled + on PR</td><td><span class="tier help">HELP</span> around beta</td><td>Dependency vulns, secret-leak scans, RLS-regression checks, periodic security-review.</td></tr>
+    <tr><td>Customer-success / onboarding agent</td><td>Event + scheduled</td><td><span class="tier help">HELP</span> around beta</td><td>Detect stuck onboarding (property never trained), nudge hosts, health-check tenants.</td></tr>
+    <tr><td>Analytics / insights agent</td><td>Scheduled weekly</td><td><span class="tier nice">NICE</span> post-beta</td><td>Metrics digest, funnel + churn-signal surfacing.</td></tr>
+    <tr><td>Growth / content agent</td><td>Scheduled</td><td><span class="tier nice">NICE</span> post-beta</td><td>Draft SEO/content/build-in-public, competitor monitoring, waitlist nurture.</td></tr>
+    <tr><td>Compliance-watch agent</td><td>Scheduled</td><td><span class="tier nice">NICE</span> later</td><td>Monitor Airbnb ToS changes, GDPR/EU AI Act, platform-policy shifts (R1).</td></tr>
+  </tbody>
+</table>
+<p><strong>Build order (don't build all at once):</strong> near-term = <strong>PM, QA, FinOps, AI-quality, Incident</strong> (protect money, trust, uptime). Around beta = Release, Support-triage, Security, Customer-success. Later = Analytics, Growth, Compliance-watch.</p>
+<blockquote><strong>Over-engineering guard:</strong> add an agent only when the <em>manual</em> version of its job becomes a recurring drag. Each agent is a prompt + a trigger, not a microservice.</blockquote>
+
+<!-- ===================== 9 ===================== -->
+<h2 class="pb"><span class="num">9</span>Strategic risk register</h2>
+<table>
+  <thead><tr><th style="width:5%">#</th><th style="width:23%">Risk</th><th style="width:13%">Severity</th><th style="width:48%">Lean mitigation</th><th style="width:11%">Tier</th></tr></thead>
+  <tbody>
+    <tr><td>R1</td><td><strong>Airbnb platform dependency / ToS</strong> — scraping + moving guests off-platform ("Trojan Horse") could violate policy; Airbnb could detect &amp; block.</td><td class="sev-high">High / existential</td><td>Keep a low profile; treat <strong>Channex/OTA (V3) as the legitimate path</strong>; hold a written "if Airbnb blocks us" thesis; don't over-invest in fragile scraping. Compliance-watch agent monitors policy.</td><td><span class="tier nec">NEC</span> now</td></tr>
+    <tr><td>R2</td><td><strong>AI gives wrong/harmful answer</strong> (wrong code, checkout, address).</td><td class="sev-high">High</td><td>ToS accuracy disclaimer + high-stakes-field fallback (Track 1) + eval set (Track 6).</td><td><span class="tier nec">NEC</span></td></tr>
+    <tr><td>R3</td><td><strong>Runaway AI cost / abuse</strong> — a spammer runs up your bill.</td><td class="sev-med">Med–High</td><td>Per-tenant rate limit (Track 1) + FinOps agent alerts.</td><td><span class="tier nec">NEC</span></td></tr>
+    <tr><td>R4</td><td><strong>Vendor single points of failure</strong> — Gemini/Pinecone/Render/Apify/Firecrawl.</td><td class="sev-med">Med</td><td>Document dependencies; <strong>accept for now</strong> — don't build a multi-vendor abstraction prematurely; revisit if one proves unreliable.</td><td><span class="tier help">HELP</span></td></tr>
+    <tr><td>R5</td><td><strong>Founder unavailability (bus factor)</strong> — 24/7 service, one person.</td><td class="sev-med">Med</td><td>Runbooks + autopilot agents + recovery codes stored safely.</td><td><span class="tier help">HELP</span></td></tr>
+    <tr><td>R6</td><td><strong>Competition</strong> (Hospitable, Besty, HostAI).</td><td class="sev-med">Med</td><td>Clear ICP + differentiation (self-learning loop, Spanish/LATAM focus).</td><td><span class="tier help">HELP</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== 10 ===================== -->
+<h2><span class="num">10</span>Open decisions / blockers register</h2>
+<table>
+  <thead><tr><th style="width:5%">#</th><th style="width:33%">Decision / blocker</th><th style="width:33%">Gates</th><th style="width:29%">Status</th></tr></thead>
+  <tbody>
+    <tr><td>D1</td><td>Domain name + handles for HostWhisperer</td><td>Brand, landing, email</td><td>Open</td></tr>
+    <tr><td>D2</td><td><strong>Start Meta Business verification for WhatsApp</strong> (days–weeks lead)</td><td>M2 WA channel</td><td>Open — <strong>start in M1</strong></td></tr>
+    <tr><td>D3</td><td>Pricing model + free-trial vs freemium</td><td>M3 monetization; beta→paid</td><td>Open</td></tr>
+    <tr><td>D4</td><td>EU guests / GDPR scope (DPA, consent ops, cookie law)</td><td>Privacy M1/M2</td><td>Open</td></tr>
+    <tr><td>D5</td><td>Tracking/analytics stack (PostHog + landing analytics)</td><td>Cookie taxonomy, consent banner</td><td>Open</td></tr>
+    <tr><td>D6</td><td>Cost &amp; burn tracking (AI + infra scale with usage)</td><td>Sustainability; FinOps agent</td><td>Watch</td></tr>
+    <tr><td>D7</td><td>DB reset execution window before beta</td><td>M0 exit → M2</td><td>Open</td></tr>
+    <tr><td>D8</td><td><strong>Legal entity + billing path</strong> (MoR vs Stripe+Stripe Tax)</td><td>Track 8; M3 billing</td><td>Open</td></tr>
+    <tr><td>D9</td><td>Native mobile apps vs web-only</td><td>M1/M3 UX scope</td><td>Open — <strong>default web-only</strong></td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== 11 ===================== -->
+<h2><span class="num">11</span>Horizon — V3</h2>
+<p>Parked; detail when M3 is in sight.</p>
+<ul>
+  <li><strong>OTA / channel-manager integration (Channex.io)</strong> — sync to Airbnb / Booking / VRBO through one layer instead of per-platform APIs. <em>Also the legitimate de-risk for R1.</em></li>
+  <li><strong>Dynamic pricing with a heat-map view</strong> — recommended nightly pricing across dates/properties as a visual heat map.</li>
+  <li>Cleaning-schedule automation, multi-language expansion (candidates).</li>
+</ul>
+
+<div class="endnote">Founder-facing source of truth. The PM agent keeps cell status current. Update exit criteria as scope firms up.</div>
+
+</div>
+</body>
+</html>

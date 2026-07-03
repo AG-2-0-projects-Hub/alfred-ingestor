@@ -1,0 +1,267 @@
+# Alfred / HostWhisperer — Launch Roadmap
+
+**Version:** 1.2
+**Created:** 2026-06-30 · **Updated:** 2026-07-02 (added Track 10 Support & Help; transactional email, consent capture, sub-processor list + data-subject rights, demo/sandbox property, beta analytics, launch-language decision D10, a11y + social-meta gaps)
+**Owner:** Founder (decision-maker + direction) · Execution: AG agents (Claude Code / Gemini)
+**Status:** Active — pre-closed-beta
+**Structure:** Workstream tracks × launch milestones (matrix), sequenced by readiness (no hard dates)
+
+---
+
+## 1. How to use this document
+
+This is the single source of truth for getting Alfred from "working product" to "launched SaaS." It is organized as **10 parallel tracks** mapped across **4 milestones** (+ a Horizon).
+
+- **Milestones (M0→M3)** answer *"when / in what order."* Sequenced by **readiness**, not dates — each milestone's exit criteria unlock the next.
+- **Tracks** answer *"what kind of work."* They run in parallel; a milestone is "done" when every track has cleared its cell.
+- The **Strategic Risk Register** (§9) holds existential/strategic exposures and their (lean) mitigations.
+- The **Open Decisions register** (§10) holds blockers that gate downstream work — resolve early.
+- The **Operating Model** (§8) defines the autopilot: PM agent + supporting agents, founder intervening only for decisions.
+
+### Priority tiers
+Every added item is tagged so you know what's load-bearing vs optional:
+
+- 🔴 **Necessary** — must clear before its milestone ships; legal, financial, data-safety, or guest-trust critical.
+- 🟡 **Helpful** — materially de-risks or accelerates; do when bandwidth allows.
+- 🟢 **Nice-to-have** — later; scale- or revenue-gated.
+
+### Anti-over-engineering principle
+**Bias to buy-not-build and the simplest solution that clears the bar.** Most "necessary" items below are a *decision* or a *toggle*, not a system to build — use managed providers (Stripe Tax, a merchant-of-record, hosted status page, provider safety filters) and add complexity only where the risk genuinely justifies it. An "agent" here is a prompt + a trigger, not a service.
+
+---
+
+## 2. Naming & brand architecture
+
+Resolved decision (2026-06-30):
+
+| Name | Role |
+|---|---|
+| **Alfred** | The **engine / assistant persona** — the AI guests and hosts talk to. Internal + in-product. |
+| **HostWhisperer** | The **public product & company brand** — landing page, marketing, billing, domain. |
+
+The HostWhisperer brand identity already exists (see `_Context/Design inspo/Brand_ID_guidelines.md`): ethereal glassmorphism, deep obsidian canvas, AI-aurora mesh gradients, "the Invisible Proxy" persona. Product UI and landing both build against that guide.
+
+> **Tagline anchor:** "Give yourself the gift of time."
+
+---
+
+## 3. Where we are now (snapshot)
+
+**The product largely exists and runs.** The full V1 loop is live: ingest (host files + Airbnb scrape) → merge/conflict resolution → vectorized "Brain" → guest chat → escalation / Live Tunnel → self-learning loop → host dashboard (Flutter) + guest web app (Next.js/Vercel). RLS is enforced with booking-scoped guest JWTs.
+
+We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hardening + go-to-market + the business/trust layer**, not net-new core product. See `_Context/session-digest.md` for live engineering state.
+
+---
+
+## 4. Milestone spine
+
+- **M0 — Harden & Ship** — close out work in flight; get the current system onto solid ground. *No new product.*
+  **Exit:** staging verified e2e under JWT; prod env vars set; `staging→main` merged; DB reset plan ready; QA intake promoted; backups + 2FA verified; uptime monitors green.
+- **M1 — Beta-Ready** — everything a real human needs before touching Alfred: brand applied, landing/waitlist, legal + privacy, final UX, mobile, infra migrated, AI guardrails, agents stood up.
+  **Exit:** brand applied; landing + waitlist live; ToS + Privacy published; security review passed; mobile-optimized; Cloud Run migrated; self-serve onboarding works; restore tested; PM + QA agents live.
+- **M2 — Closed Beta** — invite 20–30 properties (family/partners). Observe, support, learn, iterate. **WhatsApp + Telegram go live here** (the channels beta testers actually use).
+  **Exit:** cohort onboarded; WA/TG live; feedback loop running; stability acceptable; conversion/retention signal captured.
+- **M3 — Public Launch + begin V2** — open to paying customers; add the V2 scale stack public volume requires.
+  **Exit:** billing + tax live; marketing campaign shipped; V2 scale stack deployed; load-tested.
+- **Horizon — V3** — OTA channel-manager + advanced automation. See §11.
+
+---
+
+## 5. The matrix (tracks × milestones)
+
+| Track | M0 Harden | M1 Beta-Ready | M2 Closed Beta | M3 Public + V2 |
+|---|---|---|---|---|
+| **1. Engineering & Infra** | Redeploy staging, verify guest chat e2e under JWT, test soft-delete, set prod env vars, `staging→main`, DB reset | Cloud Run migration, self-serve onboarding, harden error states, 🔴 AI guardrails + per-tenant rate limit | **WhatsApp + Telegram live**, beta stability fixes | V2: Redis/BullMQ queues, Sentry/Axiom, Resend, PostHog, scale-out |
+| **2. Brand & Identity** | Lock name (done), secure domain | Finalize logo/wordmark, apply glassmorphism design system | — | Brand refresh for public |
+| **3. Marketing & Growth** | — | Landing page (Evolutionary + Neuromarketing brief §7), value prop, waitlist | Beta testimonials, referral seeds | Launch campaign, pricing page, SEO/content, paid acquisition |
+| **4. UX/UI & Mobile** | — | Final UI pass, mobile optimization, onboarding UX | Usability fixes from beta | Polish |
+| **5. Privacy, Security & Trust** | 🔴 Finalize ToS | 🔴 Privacy Policy, cookie taxonomy + consent banner, document RLS, security review, bucket/retention audit | DPA / consent ops (if EU), incident response basics | SLA, compliance hardening |
+| **6. QA, Maintenance & Reliability** | Promote intake → scenarios, run Layer 1, uptime monitors | Layer 2 Playwright, dedicated QA agent (§8), 🟡 AI answer eval set, QA-matrix evolution | Beta monitoring + triage | Regression suite, load test (200 concurrent) |
+| **7. Agent Operations** | Define operating model (hybrid) | Stand up PM agent + near-term agents (§8) | Autopilot during beta, escalate decisions | Tune autonomy |
+| **8. Business & Money** | — | 🔴 Legal entity + tax/billing approach, 🔴 unit-economics sketch, 🟡 pricing decision | (free beta — billing optional) | 🔴 Billing + tax live, 🟡 insurance, 🟢 AUP/SLA |
+| **9. Reliability & Continuity** | 🔴 Verify backups + 2FA/secrets audit | 🔴 Test a restore + email deliverability (SPF/DKIM/DMARC), 🟡 status page | 🟡 Incident runbook + on-call alerting | 🟢 DR drill, SLA |
+| **10. Support & Help** | — | 🔴 Support channel (help@ + FAQ), 🟡 in-app feedback/bug capture | Beta support triage | 🟢 Help center / KB, onboarding video |
+
+---
+
+## 6. Track detail
+
+### Track 1 — Engineering & Infra
+*Objective:* a stable, scalable backend that runs without firefighting.
+- **M0:** Redeploy staging; verify guest chat e2e under booking JWT; test soft-delete/anonymization; set prod env vars (`SUPABASE_JWT_SECRET`, `PYTHON_VERSION=3.12.10`); merge `staging→main`; prepare clean DB reset.
+- **M1:** Cloud Run migration; self-serve signup + guided onboarding; harden error states.
+  - 🔴 **AI guardrails (keep simple):** per-conversation/tenant **rate limit** (a counter, not a quota engine) to cap runaway cost/abuse; **high-stakes-field fallback** — for address, access codes, checkout, Alfred uses only confirmed Master-JSON data or says "let me confirm with your host" rather than guessing; lean on the **model provider's built-in safety filters** for moderation; basic system-prompt hardening against injection. *No ML moderation pipeline.*
+- **M2:** 🔴 **WhatsApp + Telegram live.** *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2). Telegram has no gate.
+- **M3:** V2 scale stack — Redis cache + BullMQ queues, Sentry + Axiom, Resend, PostHog.
+- 🔴 **M1 — Transactional email for beta (buy-not-build):** confirm what sends auth mail today (Supabase Auth?); wire the minimum set — welcome, password reset, guest-link delivery. Full Resend template suite stays V2/M3.
+
+### Track 2 — Brand & Identity
+*Objective:* one coherent HostWhisperer identity.
+- **M0:** Name locked; secure domain + handles.
+- **M1:** Finalize wordmark (**host** bold / *whisperer* light) + key/waves symbol; codify design tokens; apply to dashboard, guest app, landing.
+- **M3:** Refresh for public surface.
+
+### Track 3 — Marketing & Growth
+*Objective:* strangers → waitlist → beta → paying hosts.
+- **M1:** Landing page against the brief (§7); sharpen value prop; waitlist.
+- **M2:** Beta testimonials / case studies; referral seeds.
+- **M3:** Launch campaign, pricing page, SEO/content, paid acquisition tests.
+- 🟡 **Foundation (do in M1, lightweight):** define **ICP** (property count, region, persona) and **North-Star metric + funnel** — one page each, not a research project.
+- 🟡 **M1 — Demo / sandbox property:** a live "try Alfred without signup" example for the landing + prospects; doubles as a marketing asset.
+- 🟡 **M2 — Lightweight beta analytics:** basic activation/funnel signal before PostHog (M3) lands.
+- 🟢 **M1 — Social/meta polish:** OG tags, favicon, link-preview image for the landing.
+- 🟢 **M2/M3 — Onboarding/demo video:** marketing + support in one.
+
+### Track 4 — UX/UI & Mobile
+*Objective:* effortless on the devices people actually use.
+- **M1:** Final UI pass (dashboard + guest app); **mobile optimization** (guests are phone-first); onboarding UX.
+- **M2:** Usability fixes from beta.
+- **M3:** Polish.
+- 🟢 **Open:** native iOS/Android apps (Flutter can) add an app-store track — **default web-only until demand proves it** (D9).
+- 🟡 **M1 — Launch-language decision (D10):** if the ICP is Spanish/LATAM hosts, ship the UI in Spanish at launch — full multi-language stays V3.
+- 🟢 **M1 — Accessibility pass:** basic a11y on the guest web app (contrast, labels, keyboard nav).
+
+### Track 5 — Privacy, Security & Trust
+*Objective:* legally and technically trustworthy before real data flows.
+- **M0:** 🔴 Finalize ToS (`tos-draft.md` exists) — **include an AI-accuracy disclaimer** (R/R2).
+- **M1:** 🔴 Privacy Policy; cookie taxonomy (functional/analytics/marketing) + consent banner wired to the real stack (only non-essential cookies post-consent); document data protection (RLS, soft-delete + anonymization already built); security review (security-review + insecure-defaults skills); bucket/retention audit.
+- **M2:** DPA / consent ops *if EU guests* (conditional — D4); basic incident-response runbook.
+- **M3:** SLA, compliance hardening.
+- 🔴 **M1 — Consent capture at signup:** a versioned ToS/Privacy "I agree" recorded per account (not just cookie consent).
+- 🔴 **M1 — Sub-processor list:** enumerate PII processors (Gemini/Vertex, Supabase, Apify/Firecrawl, hosting) for the Privacy Policy.
+- 🔴 **M1/M2 — Data-subject rights:** self-serve account deletion + data export (host-side soft-delete exists; user-level does not). Necessary if EU (D4).
+
+### Track 6 — QA, Maintenance & Reliability
+*Objective:* quality holds automatically as the system changes.
+- **M0:** Promote pending-intake → `_tests/scenarios.md`; run Layer 1; uptime monitors (UptimeRobot).
+- **M1:** Layer 2 Playwright; **dedicated QA agent** (§8); evolve `scenarios.md` into the spec-first QA matrix; error monitoring.
+  - 🟡 **AI answer eval set (keep small):** ~20–30 fixed guest questions with expected-good answers; re-run on model changes to catch drift. Manual-to-start; this is distinct from UI QA.
+- **M2:** Beta monitoring + triage loop.
+- **M3:** Regression suite; load test (200 concurrent, p95 < 5s).
+
+### Track 7 — Agent Operations
+*Objective:* Alfred-on-autopilot — agents run day-to-day, founder decides.
+- **M0:** Operating model defined (hybrid).
+- **M1:** Stand up **PM agent** + near-term supporting agents (§8).
+- **M2:** Autopilot through beta; escalate genuine decisions.
+- **M3:** Tune autonomy by what proved trustworthy.
+
+### Track 8 — Business & Money *(new)*
+*Objective:* get paid, stay legal and solvent — with the least machinery.
+- 🔴 **M1 — Legal entity + tax/billing approach (decision, not a build).** Pick a structure for liability protection; choose the billing path. *Keep it simple: a **merchant-of-record** (Paddle / Lemon Squeezy) or **Stripe + Stripe Tax** handles VAT/sales-tax registration and remittance for you — do **not** build tax logic.*
+- 🔴 **M1 — Unit-economics sketch.** One spreadsheet: per-property COGS (Gemini/Claude/Pinecone/Apify/Firecrawl/infra) vs price, so pricing covers margin. Back-of-envelope, not a model.
+- 🟡 **M1 — Pricing decision** — tiers, free-trial vs freemium (D3).
+- 🔴 **M3 — Billing live** via the chosen provider (dunning, refunds, invoices, proration are the *provider's* job — don't build).
+- 🟡 **M3 — Insurance** (E&O + cyber) once there's revenue/users to justify it — not before.
+- 🟢 **M3+ — Acceptable Use Policy + SLA** (template-based).
+- *Note:* the closed beta (M2) can run **free** → billing isn't required until M3.
+
+### Track 9 — Reliability & Continuity *(new)*
+*Objective:* data is safe, outages are visible, and you're not a single point of failure.
+- 🔴 **M0 — Verify backups + 2FA/secrets audit.** Confirm Supabase automated backups are on; enable **2FA on every vendor account** (Supabase/Render/Vercel/Pinecone/Apify/domain registrar); store creds + recovery codes in a password manager. *Nothing to build — just turn things on.*
+- 🔴 **M1 — Test a restore once** (and document the steps); set up **email deliverability** (SPF/DKIM/DMARC on the domain) so transactional/marketing mail lands.
+- 🟡 **M1 — Status page** — use a hosted/free one; don't build.
+- 🟡 **M2 — Incident runbook + on-call alerting** — wire existing uptime monitors to push to your phone; one-page runbook, not a system.
+- 🟢 **M3 — DR drill + SLA commitments.**
+
+### Track 10 — Support & Help *(new)*
+*Objective:* a stuck tester can reach you and help themselves — without you living in your inbox.
+- 🔴 **M1 — Support channel:** a `help@` inbox (or shared) + a one-page FAQ. The bar for beta, not a helpdesk.
+- 🟡 **M1 — In-app feedback / bug capture:** a "Report" affordance in the dashboard + guest app → structured feedback (route, severity, optional screenshot) into a table you triage, with an optional ping to your phone. *Buy-not-build: a tiny in-app widget beats chasing WhatsApp messages.*
+- 🟡 **M2 — Beta support triage:** the Support-triage agent (§8) works this queue; you handle real decisions.
+- 🟢 **M3 — Help center / knowledge base + onboarding content.**
+
+---
+
+## 7. Marketing principles brief (Evolutionary Marketing + Neuromarketing)
+
+> A starting brief the landing-page work (Track 3, M1) builds against. **Basics now; deepen with research before execution.**
+
+**Evolutionary Marketing — core idea:** speak to deep, evolved drivers, not features. For premium STR owners: **status** (run a high-end operation effortlessly), **time/resource conservation** (reclaim hours), **risk/loss aversion** (never miss a message or a review), **tribe/belonging** (join smart operators). Frame the product as restoring *freedom and time*.
+
+**Neuromarketing — principles to apply on the landing page:**
+- **Cognitive ease / low friction** — negative space, one clear action per view.
+- **Loss aversion framing** — dramatize the status-quo cost (missed messages, 2am pings, bad reviews) before relief.
+- **Social proof** — beta testimonials, property counts, trust signals (M2 feeds this).
+- **Anchoring** — pricing against the value of time saved / a property manager's fee.
+- **Visual processing & gaze cueing** — serene, decluttered hero imagery; directional cues to the CTA.
+- **Authority & calm** — the "Invisible Proxy" voice: serene assurance.
+
+**To research before building:**
+1. Evidence-based Neuromarketing landing patterns (CTA placement, contrast, hierarchy, scroll depth).
+2. Evolutionary-driver messaging tested in B2B SaaS / proptech.
+3. Competitor teardown (Hospitable, Besty, HostAI, etc.) — positioning gaps.
+4. STR host willingness-to-pay / pricing anchors.
+
+---
+
+## 8. Operating model (autopilot)
+
+**Goal:** the platform runs mostly on automatic; the founder steers and decides.
+
+### Permanent PM agent — hybrid (scheduled + event-driven)
+- **Scheduled:** daily check + weekly roadmap review — updates cell status, reports progress, surfaces blockers, proposes next actions.
+- **Event-driven:** reacts to errors, founder feedback, PR merges, failed deploys, QA failures — acts or escalates.
+- **Escalates for:** architectural decisions, spend, brand/positioning, anything in the registers (§9–§10).
+
+### Supporting agents
+
+| Agent | Trigger model | Tier · sequence | Responsibility |
+|---|---|---|---|
+| **QA agent** | Hybrid, event-primary | 🔴 M1 | Pre-merge gate: run Layer 1 on every `staging→main` PR, **block on failure**. Nightly/weekly full Layer 2 Playwright regression + report (catches Supabase realtime/free-tier + cold-start drift). On-demand too. |
+| **Release / deploy agent** | Event-driven | 🟡 M1 | Verified deploys (Render/Vercel/Cloud Run), confirm health, handle the Vercel manual-redeploy quirk, report status. |
+| **Support-triage agent** | Event-driven | 🟡 M1–M2 | Watch escalations + beta feedback; classify, draft responses, route real issues to founder/PM agent. |
+| **FinOps / cost agent** | Scheduled daily + anomaly | 🔴 near-term | Watch API + infra spend, attribute cost per tenant, alert on runaway *before the bill does*. Protects margin (R/R3). |
+| **AI-quality / eval agent** | Scheduled + on model change | 🟡 near-term | Run the eval set, score answer quality, catch drift when Gemini/Claude update (R/R2). |
+| **Incident / on-call agent** | Event-driven | 🟡 near-term | First responder to outages: run diagnostics, draft status-page update, page founder only if it can't self-resolve. |
+| **Security / dependency agent** | Scheduled + on PR | 🟡 around beta | Dependency vulns, secret-leak scans, RLS-regression checks, periodic security-review. |
+| **Customer-success / onboarding agent** | Event + scheduled | 🟡 around beta | Detect stuck onboarding (property never trained), nudge hosts, health-check tenants. |
+| **Analytics / insights agent** | Scheduled weekly | 🟢 post-beta | Metrics digest, funnel + churn-signal surfacing. |
+| **Growth / content agent** | Scheduled | 🟢 post-beta | Draft SEO/content/build-in-public, competitor monitoring, waitlist nurture. |
+| **Compliance-watch agent** | Scheduled | 🟢 later | Monitor Airbnb ToS changes, GDPR/EU AI Act, platform-policy shifts (R/R1). |
+
+**Build order (don't build all at once):** near-term = **PM, QA, FinOps, AI-quality, Incident** (protect money, trust, uptime). Around beta = Release, Support-triage, Security, Customer-success. Later = Analytics, Growth, Compliance-watch.
+> **Over-engineering guard:** add an agent only when the *manual* version of its job becomes a recurring drag. Each agent is a prompt + a trigger, not a microservice.
+
+---
+
+## 9. Strategic risk register
+
+| # | Risk | Severity | Lean mitigation | Tier |
+|---|---|---|---|---|
+| R1 | **Airbnb platform dependency / ToS** — scraping listings + moving guests off-platform ("Trojan Horse") could violate policy; Airbnb could detect & block. | **High / existential** | Keep a low profile; treat **Channex/OTA (V3) as the legitimate path**; hold a written "if Airbnb blocks us" thesis; don't over-invest in fragile scraping. Compliance-watch agent monitors policy. | 🔴 acknowledge now |
+| R2 | **AI gives wrong/harmful answer** (wrong code, checkout, address). | High | ToS accuracy disclaimer + high-stakes-field fallback (Track 1) + eval set (Track 6). | 🔴 |
+| R3 | **Runaway AI cost / abuse** — a spammer runs up your bill. | Med–High | Per-tenant rate limit (Track 1) + FinOps agent alerts. | 🔴 |
+| R4 | **Vendor single points of failure** — Gemini/Pinecone/Render/Apify/Firecrawl. | Med | Document dependencies; **accept for now** — don't build a multi-vendor abstraction prematurely; revisit if one proves unreliable. | 🟡 |
+| R5 | **Founder unavailability (bus factor)** — 24/7 service, one person. | Med | Runbooks + autopilot agents + recovery codes stored safely. | 🟡 |
+| R6 | **Competition** (Hospitable, Besty, HostAI). | Med | Clear ICP + differentiation (self-learning loop, Spanish/LATAM focus). | 🟡 |
+
+---
+
+## 10. Open decisions / blockers register
+
+| # | Decision / blocker | Gates | Status |
+|---|---|---|---|
+| D1 | Domain name + handles for HostWhisperer | Brand, landing, email | Open |
+| D2 | **Start Meta Business verification for WhatsApp** (days–weeks lead) | M2 WA channel | Open — **start in M1** |
+| D3 | Pricing model + free-trial vs freemium | M3 monetization; beta→paid | Open |
+| D4 | EU guests / GDPR scope (drives DPA, consent ops, cookie law) | Privacy M1/M2 | Open |
+| D5 | Tracking/analytics stack confirmation (PostHog + landing analytics) | Cookie taxonomy, consent banner | Open |
+| D6 | Cost & burn tracking (AI + infra scale with usage) | Sustainability; FinOps agent | Watch |
+| D7 | DB reset execution window before beta | M0 exit → M2 | Open |
+| D8 | **Legal entity + billing path** (MoR vs Stripe+Stripe Tax) | Track 8; M3 billing | Open |
+| D9 | Native mobile apps vs web-only | M1/M3 UX scope | Open — **default web-only** |
+| D10 | Launch language (Spanish/LATAM-first vs English-first) | M1 UX scope, marketing copy, ICP | Open |
+
+---
+
+## 11. Horizon — V3
+
+Parked; detail when M3 is in sight.
+- **OTA / channel-manager integration (Channex.io)** — sync to Airbnb / Booking / VRBO through one layer instead of per-platform APIs. *Also the legitimate de-risk for R1.*
+- **Dynamic pricing with a heat-map view** — recommended nightly pricing across dates/properties as a visual heat map.
+- Cleaning-schedule automation, multi-language expansion (candidates).
+
+---
+
+*Founder-facing source of truth. The PM agent keeps cell status current. Update exit criteria as scope firms up.*

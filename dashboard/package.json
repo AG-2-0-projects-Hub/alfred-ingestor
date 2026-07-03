@@ -1,0 +1,13 @@
+{
+  "name": "hostwhisperer-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local project command dashboard for Alfred / HostWhisperer — glance-first overview of roadmap, QA and git state.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
