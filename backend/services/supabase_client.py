@@ -268,12 +268,49 @@ def get_guest_by_booking_id(booking_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("guests")
-        .select("id, name, booking_id, property_id, preferred_language")
+        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
     )
     return result.data if result else None
+
+
+def get_guest_by_telegram_chat_id(chat_id: str) -> dict | None:
+    """Find the guest linked to a Telegram chat (via /start <booking_id>)."""
+    client = get_client()
+    result = (
+        client.table("guests")
+        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
+        .eq("telegram_chat_id", str(chat_id))
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def link_guest_telegram(booking_id: str, chat_id: str) -> None:
+    """Attach a Telegram chat id to a guest booking (idempotent)."""
+    client = get_client()
+    client.table("guests").update(
+        {"telegram_chat_id": str(chat_id)}
+    ).eq("booking_id", booking_id).execute()
+
+
+def get_guest_by_conversation_id(conversation_id: str) -> dict | None:
+    """Resolve the guest behind a conversation — used to deliver a host reply to
+    the guest's Telegram chat when they're Telegram-linked."""
+    client = get_client()
+    conv = (
+        client.table("conversations")
+        .select("booking_id")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv and conv.data):
+        return None
+    return get_guest_by_booking_id(conv.data["booking_id"])
 
 
 def get_property_for_chat(property_id: str) -> dict | None:

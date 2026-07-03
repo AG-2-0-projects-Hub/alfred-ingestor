@@ -166,6 +166,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   Widget _buildStep2(bool isMobile) {
     final guestUrl = _result!['guest_chat_url'] as String;
     final hostUrl = _result!['host_chat_url'] as String;
+    final telegramUrl = _result!['telegram_link'] as String?;
 
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
@@ -173,7 +174,11 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _urlRow('Guest link', guestUrl),
+          _urlRow('Guest link (web)', guestUrl),
+          if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _urlRow('Guest link (Telegram)', telegramUrl),
+          ],
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
         ],

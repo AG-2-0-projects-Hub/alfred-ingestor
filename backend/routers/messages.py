@@ -7,7 +7,7 @@ import string
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import supabase_client, gemini_messenger
+from services import supabase_client, gemini_messenger, telegram_client
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -29,25 +29,49 @@ class HostSendRequest(BaseModel):
     message: str
 
 
-@router.post("/messages/web-incoming")
-async def web_incoming(req: WebIncomingRequest):
-    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, req.booking_id)
+async def process_guest_message(booking_id: str, message: str) -> dict:
+    """Channel-agnostic guest pipeline shared by the web chat and the Telegram
+    bot. Runs the Brain (Gemini first pass → optional web-search second pass →
+    escalation) and persists everything.
+
+    Returns {reply, requires_escalation, conversation_id, mode}. In intervene
+    mode `reply` is None (the host answers). Raises HTTPException(404) if the
+    guest/property is missing and HTTPException(504) on Gemini timeout — the web
+    caller surfaces these as HTTP errors; the Telegram caller catches them and
+    sends a friendly message.
+    """
+    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, booking_id)
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     conversation = await asyncio.to_thread(
         supabase_client.find_or_create_conversation,
-        req.booking_id,
+        booking_id,
         guest["property_id"],
     )
 
-    # Always log the guest message so the host can see it even in intervene mode
-    await asyncio.to_thread(
-        supabase_client.insert_message,
+    # History as it stood BEFORE this message — Gemini sees it separately from
+    # the "Current Guest Message" field (matching the blueprint template).
+    history = await asyncio.to_thread(
+        supabase_client.get_conversation_messages,
         conversation["id"],
-        "guest",
-        req.message,
     )
+
+    # Dedupe guard: a client retry (web) or a Telegram webhook re-delivery can
+    # replay the same message. Skip the insert if it's identical to the most
+    # recent guest message — avoids piling up duplicate guest rows on retry.
+    last_guest = next(
+        (m for m in reversed(history) if m.get("sender_type") == "guest"), None
+    )
+    is_duplicate = last_guest is not None and last_guest.get("content") == message
+    if not is_duplicate:
+        # Always log the guest message so the host can see it even in intervene mode.
+        await asyncio.to_thread(
+            supabase_client.insert_message,
+            conversation["id"],
+            "guest",
+            message,
+        )
 
     if conversation.get("mode") == "intervene":
         await asyncio.to_thread(
@@ -55,7 +79,12 @@ async def web_incoming(req: WebIncomingRequest):
             conversation["id"],
             ai_status="paused",
         )
-        return {"status": "intervene_mode", "reply": None}
+        return {
+            "reply": None,
+            "requires_escalation": False,
+            "conversation_id": conversation["id"],
+            "mode": "intervene",
+        }
 
     property_data = await asyncio.to_thread(
         supabase_client.get_property_for_chat,
@@ -64,22 +93,13 @@ async def web_incoming(req: WebIncomingRequest):
     if not property_data or not property_data.get("master_json"):
         raise HTTPException(status_code=404, detail="Property data not found")
 
-    # Fetch history before the current message was inserted so Gemini sees it
-    # separately in the "Current Guest Message" field (matching blueprint template)
-    history = await asyncio.to_thread(
-        supabase_client.get_conversation_messages,
-        conversation["id"],
-    )
-    # Exclude the message we just inserted (last item)
-    history = history[:-1] if history else []
-
     try:
         first_result = await asyncio.wait_for(
             gemini_messenger.first_pass(
                 master_json=property_data["master_json"],
                 conversation_history=history,
                 preferred_language=guest.get("preferred_language") or "not_set",
-                guest_message=req.message,
+                guest_message=message,
                 learned_knowledge=property_data.get("learned_knowledge") or [],
             ),
             timeout=GEMINI_TIMEOUT_S,
@@ -91,7 +111,7 @@ async def web_incoming(req: WebIncomingRequest):
                     master_json=property_data["master_json"],
                     conversation_history=history,
                     preferred_language=guest.get("preferred_language") or "not_set",
-                    guest_message=req.message,
+                    guest_message=message,
                     search_query=first_result["search_query"],
                 ),
                 timeout=GEMINI_TIMEOUT_S,
@@ -101,7 +121,7 @@ async def web_incoming(req: WebIncomingRequest):
     except asyncio.TimeoutError:
         log.warning(
             "Gemini call exceeded %ss for booking=%s; returning 504 so the client gets a CORS-friendly error",
-            GEMINI_TIMEOUT_S, req.booking_id,
+            GEMINI_TIMEOUT_S, booking_id,
         )
         await asyncio.to_thread(
             supabase_client.update_conversation,
@@ -155,6 +175,19 @@ async def web_incoming(req: WebIncomingRequest):
         "reply": reply,
         "requires_escalation": requires_escalation,
         "conversation_id": conversation["id"],
+        "mode": conversation.get("mode") or "autopilot",
+    }
+
+
+@router.post("/messages/web-incoming")
+async def web_incoming(req: WebIncomingRequest):
+    result = await process_guest_message(req.booking_id, req.message)
+    if result["mode"] == "intervene":
+        return {"status": "intervene_mode", "reply": None}
+    return {
+        "reply": result["reply"],
+        "requires_escalation": result["requires_escalation"],
+        "conversation_id": result["conversation_id"],
     }
 
 
@@ -171,6 +204,20 @@ async def host_send(req: HostSendRequest):
         req.conversation_id,
         ai_status="paused",
     )
+
+    # If the guest is on Telegram, deliver the host's reply there too. Web guests
+    # get it live via Supabase realtime; Telegram guests need an active push.
+    # Best-effort — never fail the host send if Telegram delivery hiccups.
+    try:
+        guest = await asyncio.to_thread(
+            supabase_client.get_guest_by_conversation_id, req.conversation_id
+        )
+        if guest and guest.get("telegram_chat_id"):
+            await telegram_client.send_message(guest["telegram_chat_id"], req.message)
+    except Exception as exc:
+        log.warning("host_send: Telegram delivery failed for conv=%s: %s",
+                    req.conversation_id, exc)
+
     return {"status": "sent"}
 
 
@@ -254,12 +301,18 @@ async def create_guest(req: CreateGuestRequest):
 
     slug = _slugify(prop.get("name") or "property")
     frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0].strip().rstrip("/")
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@").strip()
 
     # Retry on booking_id collision (very unlikely but safe)
     for _ in range(5):
         booking_id = f"{slug}-{_random_suffix()}"
         guest_chat_url = f"{frontend_url}/chat?booking={booking_id}"
         host_chat_url = f"{frontend_url}/chat-live?booking={booking_id}&property={req.property_id}"
+        # Telegram deep link: tapping it opens the bot and sends `/start <booking_id>`,
+        # which links this guest's chat. booking_ids are [a-z0-9-] → Telegram-safe.
+        telegram_link = (
+            f"https://t.me/{bot_username}?start={booking_id}" if bot_username else None
+        )
         try:
             guest = await asyncio.to_thread(
                 supabase_client.create_guest,
@@ -273,6 +326,7 @@ async def create_guest(req: CreateGuestRequest):
                 "booking_id": booking_id,
                 "guest_chat_url": guest_chat_url,
                 "host_chat_url": host_chat_url,
+                "telegram_link": telegram_link,
             }
         except Exception as exc:
             if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
