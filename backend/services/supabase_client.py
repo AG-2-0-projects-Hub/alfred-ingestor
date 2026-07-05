@@ -290,11 +290,20 @@ def get_guest_by_telegram_chat_id(chat_id: str) -> dict | None:
 
 
 def link_guest_telegram(booking_id: str, chat_id: str) -> None:
-    """Attach a Telegram chat id to a guest booking (idempotent)."""
+    """Attach a Telegram chat to a guest booking.
+
+    A Telegram account maps to exactly one booking (unique index on
+    telegram_chat_id). So first RELEASE this chat from any other booking it was
+    linked to, then attach it here. This makes /start on a new booking MOVE the
+    link instead of hitting a unique violation — needed for a returning guest
+    (new stay, same Telegram) and for testing several bookings from one account.
+    """
     client = get_client()
-    client.table("guests").update(
-        {"telegram_chat_id": str(chat_id)}
-    ).eq("booking_id", booking_id).execute()
+    cid = str(chat_id)
+    client.table("guests").update({"telegram_chat_id": None}) \
+        .eq("telegram_chat_id", cid).neq("booking_id", booking_id).execute()
+    client.table("guests").update({"telegram_chat_id": cid}) \
+        .eq("booking_id", booking_id).execute()
 
 
 def get_guest_by_conversation_id(conversation_id: str) -> dict | None:
