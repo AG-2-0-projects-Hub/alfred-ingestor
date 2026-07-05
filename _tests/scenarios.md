@@ -488,6 +488,84 @@ This section is populated by the Gemini Exploration Agent when it finds anomalie
 
 ---
 
+## J. Telegram guest channel
+
+Guest-side Telegram (native port of the Make.com bot). Host stays on the dashboard.
+Status reflects live testing on staging (2026-07-05).
+
+**Update (2026-07-05 — fixes shipped):** J8 confirmed working (system lines already
+render italic + muted on web; italic on Telegram). J6, J7, J9 and J10's copy/language
+are implemented and awaiting retest. J10's Overview "Also send in English" toggle UI
+and J11 (pending/transparent card state) are deferred as focused follow-ups.
+
+### J1. Guest links a booking via /start
+- **id:** tg-link-01
+- **touches:** `backend/routers/telegram.py`, `backend/services/supabase_client.py`
+- **layer:** 4
+- **setup:** trained property with a guest booking; a Telegram account
+- **action:** tap `t.me/<bot>?start=<booking_id>` (sends `/start <booking_id>`)
+- **guest_expected:** bot confirms connection with the property name; `guests.telegram_chat_id` set
+- **status:** passing
+
+### J2. Guest question answered on Telegram
+- **id:** tg-answer-01
+- **action:** linked guest sends a question in Telegram
+- **guest_expected:** Alfred replies in Telegram; guest + ai rows stored; conversation visible on the dashboard
+- **status:** passing
+
+### J3. Escalation surfaces on dashboard; host reply reaches Telegram
+- **id:** tg-escalation-01
+- **action:** guest sends a message that triggers escalation
+- **host_expected:** dashboard conversation shows the escalation alert
+- **guest_expected:** the host's reply from the dashboard is delivered to the guest's Telegram
+- **status:** passing
+
+### J4. Re-/start on a new booking moves the link
+- **id:** tg-relink-01
+- **action:** the same Telegram account taps a different booking's link
+- **expected:** chat is released from the old booking and attached to the new one (no unique error); the new conversation becomes active
+- **status:** passing
+
+### J5. Guest link opens in a web browser too (channel parity)
+- **id:** tg-web-parity-01
+- **action:** open the guest web link for a Telegram-linked booking
+- **expected:** the same conversation renders on the web
+- **status:** passing
+
+### J6. Conversation appears on the dashboard on /start (before first message)
+- **id:** tg-conv-on-start-01
+- **action:** guest taps the link (`/start`) but sends no message yet
+- **host_expected:** the conversation appears on the dashboard immediately, so the host can proactively message the guest
+- **status:** failing — *fix: create the conversation on link, not on first message*
+
+### J7. Guest receives transition notices on Telegram
+- **id:** tg-transitions-01
+- **action:** conversation escalates, then the host resolves it
+- **guest_expected:** the guest is told on Telegram when a human takes over and when Alfred resumes ("issue resolved")
+- **status:** failing — *fix: push handoff / resolved / resumed notices to Telegram*
+
+### J8. Automated/system messages are visually distinct
+- **id:** tg-system-style-01
+- **expected:** system/automated lines (handoff, resolved, resumed) render in a distinct style (italic) both in the web chat and on Telegram — clearly different from normal chat bubbles
+- **status:** failing
+
+### J9. Telegram link shown in the host chat view
+- **id:** tg-hostview-link-01
+- **expected:** the host's conversation view shows the guest's Telegram link alongside the web Guest Chat Link
+- **status:** failing
+
+### J10. Warm, localized welcome message (configurable)
+- **id:** tg-welcome-lang-01
+- **expected:** the `/start` welcome is warm and in the property's local language; an Overview toggle "Also send in English" appends the English version
+- **status:** pending — *copy + language detection implemented (default local-only); Overview toggle UI deferred*
+
+### J11. New guest link shows as pending (transparent) until first guest message
+- **id:** tg-pending-card-01
+- **expected:** a created-but-not-yet-messaged guest link shows on the property card with a transparent/faded style (distinct from active and archived), flipping to active on the guest's first message
+- **status:** failing — *deferred: needs a "guest has messaged" signal*
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
@@ -500,7 +578,8 @@ This section is populated by the Gemini Exploration Agent when it finds anomalie
 | F. Theme | 1 | — | 1 | — |
 | G. RLS | 3 | 3 | — | — |
 | H. Push | 1 | — | 1 | — |
-| **Total** | **35** | **9** | **26** | **0** |
+| J. Telegram | 11 | — | — | 11 |
+| **Total** | **46** | **9** | **26** | **11** |
 
 ---
 

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services import supabase_client, gemini_messenger, telegram_client
+from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -17,6 +18,25 @@ GEMINI_TIMEOUT_S = 45
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def _notify_tg_transition(guest: dict | None, host_name: str | None, kind: str) -> None:
+    """Push the same transition notice the web shows to a Telegram-linked guest.
+
+    kind: 'intervene' (a human takes over) or 'resume' (Alfred is back). Copy
+    mirrors ChatSystemMessages.formatForGuest. No-op for web-only guests
+    (no telegram_chat_id). Best-effort — never fail the caller.
+    """
+    if not guest or not guest.get("telegram_chat_id"):
+        return
+    if kind == "intervene":
+        text = f"You are now speaking with {host_name or 'your host'}."
+    else:
+        text = "Alfred has resumed the conversation."
+    try:
+        await telegram_client.send_italic(guest["telegram_chat_id"], text)
+    except Exception as exc:
+        log.warning("telegram transition notice (%s) failed: %s", kind, exc)
 
 
 class WebIncomingRequest(BaseModel):
@@ -170,6 +190,9 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
             "system",
             "__SYS_INTERVENE__",
         )
+        # Telegram guests don't render the web marker — push the same notice.
+        _, host_name = _resolve_identity(property_data)
+        await _notify_tg_transition(guest, host_name, "intervene")
 
     return {
         "reply": reply,
@@ -271,7 +294,33 @@ async def resolve_conversation(req: ResolveRequest):
         learned_entry,
     )
 
+    # Telegram guest gets the same "Alfred has resumed" notice the web shows.
+    await _notify_tg_transition(guest, None, "resume")
+
     return {"status": "resolved", "learned": learned_entry}
+
+
+class TransitionRequest(BaseModel):
+    conversation_id: str
+    kind: str  # 'intervene' | 'resume'
+
+
+@router.post("/conversations/announce-transition")
+async def announce_transition(req: TransitionRequest):
+    """Called by the host dashboard right after it inserts a manual mode-change
+    marker (Intervene / Resume). Pushes the matching notice to the guest's
+    Telegram if linked. No-op for web-only guests. Best-effort."""
+    guest = await asyncio.to_thread(
+        supabase_client.get_guest_by_conversation_id, req.conversation_id
+    )
+    host_name = None
+    if req.kind == "intervene" and guest:
+        prop = await asyncio.to_thread(
+            supabase_client.get_property_for_chat, guest["property_id"]
+        )
+        _, host_name = _resolve_identity(prop)
+    await _notify_tg_transition(guest, host_name, req.kind)
+    return {"status": "ok"}
 
 
 # ── Guest link generation ─────────────────────────────────────────────────────

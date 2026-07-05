@@ -326,7 +326,7 @@ def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name, learned_knowledge, deleted_at")
+        .select("id, master_json, name, learned_knowledge, deleted_at, welcome_also_english")
         .eq("id", property_id)
         .maybe_single()
         .execute()
@@ -354,6 +354,30 @@ def find_or_create_conversation(booking_id: str, property_id: str) -> dict:
         "last_message_at": _now(),
     }).execute()
     return insert_result.data[0]
+
+
+def ensure_conversation_with_welcome(
+    booking_id: str, property_id: str, welcome_text: str
+) -> tuple[dict, bool]:
+    """Get-or-create the conversation and, if it has no messages yet, post the
+    welcome as Alfred's first message. Returns (conversation, welcome_inserted).
+
+    Idempotent: safe to call on every /start and every guest-token load — the
+    welcome is inserted at most once (only when the thread is empty).
+    """
+    client = get_client()
+    conversation = find_or_create_conversation(booking_id, property_id)
+    existing = (
+        client.table("messages")
+        .select("id")
+        .eq("conversation_id", conversation["id"])
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return conversation, False
+    insert_message(conversation["id"], "ai", welcome_text)
+    return conversation, True
 
 
 def get_conversation_messages(conversation_id: str) -> list[dict]:

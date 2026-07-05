@@ -15,13 +15,13 @@ import os
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from services import supabase_client, telegram_client
+from services import supabase_client, telegram_client, welcome
 from routers.messages import process_guest_message
+from routers.guest_auth import _resolve_identity
 
 router = APIRouter()
 log = logging.getLogger(__name__)
 
-_CONNECTED = "✅ You're connected to *{name}*. Ask me anything about your stay!"
 _STRANGER = (
     "I couldn't find that booking. Please use the exact Telegram link your host "
     "shared with you."
@@ -134,8 +134,19 @@ async def _handle_start(chat_id, text: str) -> None:
     prop = await asyncio.to_thread(
         supabase_client.get_property_for_chat, guest["property_id"]
     )
-    name = (prop or {}).get("name") or "your stay"
-    await telegram_client.send_message(chat_id, _CONNECTED.format(name=name))
+    property_name, _ = _resolve_identity(prop)
+    welcome_text = welcome.build_welcome(
+        property_name or (prop or {}).get("name"),
+        (prop or {}).get("master_json"),
+        also_english=bool((prop or {}).get("welcome_also_english")),
+    )
+    # Create the conversation + store the welcome (once) so it shows on the
+    # dashboard immediately, then greet the guest on Telegram.
+    await asyncio.to_thread(
+        supabase_client.ensure_conversation_with_welcome,
+        payload, guest["property_id"], welcome_text,
+    )
+    await telegram_client.send_message(chat_id, welcome_text)
 
 
 async def _handle_guest_message(chat_id, text: str) -> None:

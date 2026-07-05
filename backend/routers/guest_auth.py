@@ -5,7 +5,7 @@ import time
 import jwt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import supabase_client
+from services import supabase_client, welcome
 
 router = APIRouter()
 
@@ -96,6 +96,19 @@ async def guest_token(req: GuestTokenRequest):
             status_code=410, detail="This conversation is no longer available."
         )
     property_name, host_name = _resolve_identity(prop)
+
+    # Post the welcome once (creating the conversation) so it renders on the web
+    # and the conversation shows on the dashboard immediately — same behaviour as
+    # Telegram /start. Idempotent: only inserts when the thread is empty.
+    welcome_text = welcome.build_welcome(
+        property_name or (prop or {}).get("name"),
+        (prop or {}).get("master_json"),
+        also_english=bool((prop or {}).get("welcome_also_english")),
+    )
+    await asyncio.to_thread(
+        supabase_client.ensure_conversation_with_welcome,
+        req.booking_id, guest["property_id"], welcome_text,
+    )
 
     now = int(time.time())
     payload = {
