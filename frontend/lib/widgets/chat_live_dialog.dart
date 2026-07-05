@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
@@ -74,6 +75,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   String? _guestChatUrl;
   String _guestName = 'the guest';
   bool _copiedLink = false;
+  bool _copiedTg = false;
+
+  /// Telegram deep link for this booking, built from the bot username env var.
+  /// Null when the app wasn't configured with a bot username.
+  String? get _telegramUrl {
+    final u = dotenv.env['TELEGRAM_BOT_USERNAME']?.trim();
+    if (u == null || u.isEmpty) return null;
+    return 'https://t.me/${u.replaceFirst('@', '')}?start=${widget.bookingId}';
+  }
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
   String? _escalationReason;
@@ -151,6 +161,18 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
   }
 
+  Future<void> _copyTelegramLink() async {
+    final url = _telegramUrl;
+    if (url == null) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) {
+      setState(() => _copiedTg = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _copiedTg = false);
+      });
+    }
+  }
+
   Future<void> _insertSystemMessage(String content) async {
     if (_conversationId == null) return;
     await Supabase.instance.client.from('messages').insert(<String, dynamic>{
@@ -194,7 +216,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     });
   }
 
-  Future<void> _setMode(String mode) async {
+  Future<void> _setMode(String mode, {bool announce = false}) async {
     if (_conversationId == null) return;
     await Supabase.instance.client
         .from('conversations')
@@ -205,6 +227,22 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await _insertSystemMessage(ChatSystemMessages.intervene);
     } else {
       await _insertSystemMessage(ChatSystemMessages.resume);
+    }
+    // Manual toggles push the same notice to a Telegram-linked guest. The
+    // auto-escalation path (announce:false) is skipped — the backend already
+    // notified Telegram when it inserted the escalation marker.
+    if (announce) {
+      try {
+        await ApiClient.postJson(
+          '/api/conversations/announce-transition',
+          {
+            'conversation_id': _conversationId,
+            'kind': mode == 'intervene' ? 'intervene' : 'resume',
+          },
+        );
+      } catch (_) {
+        // Best-effort — never let a notice failure break the mode switch.
+      }
     }
   }
 
@@ -586,6 +624,56 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   ],
                 ),
               ],
+              if (_telegramUrl != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Guest Telegram Link',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: context.palette.textPrimary),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: context.palette.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: context.palette.border),
+                  ),
+                  child: Text(
+                    _telegramUrl!,
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: context.palette.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _copiedTg ? null : _copyTelegramLink,
+                    icon: Icon(
+                      _copiedTg
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.copy_rounded,
+                      size: 16,
+                    ),
+                    label: Text(_copiedTg ? 'Copied!' : 'Copy Telegram Link'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _copiedTg
+                          ? context.palette.success
+                          : context.palette.primary,
+                      side: BorderSide(
+                          color: _copiedTg
+                              ? context.palette.success
+                              : context.palette.border),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -623,7 +711,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                     label: 'Autopilot',
                     active: isAutopilot,
                     activeColor: context.palette.primary,
-                    onTap: isAutopilot ? null : () => _setMode('autopilot'),
+                    onTap: isAutopilot
+                        ? null
+                        : () => _setMode('autopilot', announce: true),
                   ),
                 ),
                 Expanded(
@@ -631,7 +721,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                     label: 'Intervene',
                     active: !isAutopilot,
                     activeColor: context.palette.warning,
-                    onTap: !isAutopilot ? null : () => _setMode('intervene'),
+                    onTap: !isAutopilot
+                        ? null
+                        : () => _setMode('intervene', announce: true),
                   ),
                 ),
               ],

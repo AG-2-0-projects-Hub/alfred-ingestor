@@ -16,10 +16,13 @@ flutter config --no-analytics
 # Write frontend/.env from Vercel environment variables.
 # These must be set in the Vercel project dashboard:
 #   SUPABASE_URL, SUPABASE_ANON_KEY, BACKEND_URL
+#   TELEGRAM_BOT_USERNAME (optional — enables the guest Telegram link in the
+#   host chat view; the link is hidden when unset).
 cat > frontend/.env <<EOF
 SUPABASE_URL=${SUPABASE_URL}
 SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
 BACKEND_URL=${BACKEND_URL}
+TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
 EOF
 
 echo "frontend/.env written with BACKEND_URL=${BACKEND_URL}"
