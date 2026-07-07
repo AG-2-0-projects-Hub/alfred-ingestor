@@ -818,8 +818,12 @@ class _PillPreviewList extends StatelessWidget {
         // Need a "+N more" line; reserve its height so it doesn't spill over.
         maxFit = ((available - overflowLineH) / perPill).floor();
       }
+      // Don't force a pill that doesn't fit: the reserve-the-overflow-line math
+      // above guarantees shown pills + the "+N more" line always fit within the
+      // available height (so they can never overlap the action row). If space is
+      // so tight that not even one pill fits alongside the count, show just the
+      // "+N more active" line rather than a clipped/overlapping pill.
       maxFit = maxFit.clamp(0, previews.length);
-      if (maxFit < 1 && previews.isNotEmpty) maxFit = 1; // always show at least one
       if (maxFit > 5) maxFit = 5;
       final shown = previews.take(maxFit).toList();
       final overflow = previews.length - shown.length;

@@ -709,16 +709,18 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       // Mobile: single column, banner-style cards, scrollable.
       // Height must clear the 160px hero + name + optional alert pill + the
-      // action row (+ Guest / Settings / calendar / history); 220 clipped the
-      // actions off the bottom, so Settings was unreachable. Don't try to fit
-      // everything in viewport — vertical scroll is expected.
+      // action row (+ Guest / Settings / calendar / history), PLUS leave room
+      // for at least one conversation pill and the "+N more active" line above
+      // the actions (340 ≈ 160 hero + ~90 pill area + name/actions). 220 clipped
+      // the actions; 300 left the pill area too short so the count line was cut.
+      // Vertical scroll is expected — don't try to fit everything in viewport.
       if (viewportW < 500) {
         const mobilePadH = 16.0;
         const mobilePadTop = kToolbarHeight + 16.0;
         const mobilePadBottom = 24.0;
         const mobileGap = 14.0;
         final mobileCardW = viewportW - mobilePadH * 2;
-        const mobileCardH = 300.0;
+        const mobileCardH = 340.0;
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(
               mobilePadH, mobilePadTop, mobilePadH, mobilePadBottom),
