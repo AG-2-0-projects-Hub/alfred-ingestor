@@ -376,9 +376,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
               ),
               child: Column(
                 children: [
-                  _buildDialogAppBar(),
+                  _buildDialogAppBar(isMobile),
                   const Divider(height: 1),
-                  Expanded(child: _buildBody()),
+                  Expanded(child: _buildBody(isMobile)),
                 ],
               ),
             ),
@@ -388,7 +388,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     );
   }
 
-  Widget _buildDialogAppBar() {
+  Widget _buildDialogAppBar(bool isMobile) {
     final palette = context.palette;
     final isEmergency = _escalationReason?.startsWith('emergency_') == true;
     final modeColor = _mode == 'intervene'
@@ -445,6 +445,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             ),
           ),
           const SizedBox(width: 4),
+          // On mobile the guest-link panel moves out of view (the conversation
+          // takes the full width), so expose it from the app bar instead.
+          if (isMobile && _guestChatUrl != null)
+            IconButton(
+              icon: const Icon(Icons.link_rounded),
+              tooltip: 'Guest links',
+              onPressed: _showGuestLinkSheet,
+              color: palette.textMuted,
+            ),
           IconButton(
             icon: const Icon(Icons.close_rounded),
             tooltip: 'Close',
@@ -456,7 +465,79 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     );
   }
 
-  Widget _buildBody() {
+  /// Bottom sheet holding the guest-link panel — used on mobile, where the
+  /// side panel is collapsed so the conversation can take the full width.
+  void _showGuestLinkSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(top: 8, bottom: 16),
+          child: _buildGuestLinkSection(),
+        ),
+      ),
+    );
+  }
+
+  /// The messages area (empty state or the scrolling bubble list). Extracted so
+  /// the desktop two-pane layout and the mobile stacked layout share one source.
+  Widget _buildMessagesList() {
+    if (_messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded,
+                size: 40, color: context.palette.border),
+            const SizedBox(height: 12),
+            Text(
+              'No messages yet.',
+              style: GoogleFonts.inter(
+                  color: context.palette.textMuted, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+    final states = _computeEscalationWindow();
+    final isEmergency = _escalationReason?.startsWith('emergency_') == true;
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(16),
+      itemCount: _messages.length,
+      itemBuilder: (_, i) => _buildBubble(
+        _messages[i],
+        escalationState: states[i],
+        isEmergency: isEmergency,
+      ),
+    );
+  }
+
+  /// Mobile: conversation takes the full width; mode toggle + resolve/banner
+  /// sit above it, the reply box below. Guest links live in a bottom sheet
+  /// (app-bar link icon). Avoids the fixed 320px side panel crushing the chat.
+  Widget _buildMobileBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildModeToggle(),
+        if (_mode == 'intervene') _buildResolveButton(),
+        if (_mode == 'autopilot' && _escalationReason != null)
+          _buildUnresolvedBanner(),
+        const Divider(height: 1),
+        Expanded(child: _buildMessagesList()),
+        if (_mode == 'intervene') _buildHostInput(),
+      ],
+    );
+  }
+
+  Widget _buildBody(bool isMobile) {
+    if (isMobile) return _buildMobileBody();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -478,39 +559,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 ),
               ),
               const Divider(height: 1),
-              Expanded(
-                child: _messages.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.chat_bubble_outline_rounded,
-                                size: 40, color: context.palette.border),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No messages yet.',
-                              style: GoogleFonts.inter(
-                                  color: context.palette.textMuted, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      )
-                    : Builder(builder: (_) {
-                        final states = _computeEscalationWindow();
-                        final isEmergency =
-                            _escalationReason?.startsWith('emergency_') == true;
-                        return ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _messages.length,
-                          itemBuilder: (_, i) => _buildBubble(
-                            _messages[i],
-                            escalationState: states[i],
-                            isEmergency: isEmergency,
-                          ),
-                        );
-                      }),
-              ),
+              Expanded(child: _buildMessagesList()),
             ],
           ),
         ),
