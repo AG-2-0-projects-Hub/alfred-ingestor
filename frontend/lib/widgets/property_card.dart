@@ -803,44 +803,64 @@ class _PillPreviewList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (ctx, constraints) {
-      const perPill = 32.0;
+      // Real compact-pill footprint: 12+12 padding + ~18 content + 3+3 margin.
+      // The old 32px estimate under-counted, so too many pills were rendered
+      // and overflowed downward onto the action row. Reserve the "+N more"
+      // line's height when not everything fits.
+      const perPill = 48.0;
+      const overflowLineH = 22.0;
       final available = constraints.maxHeight;
-      final int maxFit = (available / perPill).floor().clamp(2, 5);
+      final fitAll = (available / perPill).floor();
+      int maxFit;
+      if (previews.length <= fitAll) {
+        maxFit = previews.length; // everything fits — no "+N more" line needed
+      } else {
+        // Need a "+N more" line; reserve its height so it doesn't spill over.
+        maxFit = ((available - overflowLineH) / perPill).floor();
+      }
+      maxFit = maxFit.clamp(0, previews.length);
+      if (maxFit < 1 && previews.isNotEmpty) maxFit = 1; // always show at least one
+      if (maxFit > 5) maxFit = 5;
       final shown = previews.take(maxFit).toList();
       final overflow = previews.length - shown.length;
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final c in shown)
-            ConversationPill(
-              conv: c,
-              compact: true,
-              // On the card, pending links get the faded style but no label
-              // (the "Awaiting reply" chip only shows in the conversations overview).
-              pending: c['has_guest_message'] != true,
-              onTap: () => onOpenChat(c['booking_id'] as String),
-            ),
-          if (overflow > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: InkWell(
-                onTap: onOpenAll,
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Text(
-                    '+$overflow more active',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: ctx.palette.textSecondary,
+      // ClipRect guarantees the pills can never paint over the action row,
+      // even if the height estimate is a pixel off.
+      return ClipRect(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final c in shown)
+              ConversationPill(
+                conv: c,
+                compact: true,
+                // On the card, pending links get the faded style but no label
+                // (the "Awaiting reply" chip only shows in the conversations overview).
+                pending: c['has_guest_message'] != true,
+                onTap: () => onOpenChat(c['booking_id'] as String),
+              ),
+            if (overflow > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: InkWell(
+                  onTap: onOpenAll,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Text(
+                      '+$overflow more active',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: ctx.palette.textSecondary,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       );
     });
   }
