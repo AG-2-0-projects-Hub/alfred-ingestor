@@ -7,6 +7,9 @@
 **Stack:** [Define after BLAST Blueprint phase]
 **Data Schema:** [Define after BLAST Blueprint phase]
 
+## Session Start
+**Before any other action:** read `CONTEXT.md` and `_Context/session-digest.md` (if present) to know exactly where the project stands and what happened last session.
+
 ## Git — HARD RULES
 
 **NEVER run `git commit` or `git push` on your own.**
