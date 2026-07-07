@@ -1,7 +1,7 @@
 # Alfred / HostWhisperer — Launch Roadmap
 
 **Version:** 1.2
-**Created:** 2026-06-30 · **Updated:** 2026-07-02 (added Track 10 Support & Help; transactional email, consent capture, sub-processor list + data-subject rights, demo/sandbox property, beta analytics, launch-language decision D10, a11y + social-meta gaps)
+**Created:** 2026-06-30 · **Updated:** 2026-07-07 (status sync pass — marked shipped items done across Tracks 1/2/6/7/10 so this doc and the command dashboard agree; see `_Context/session-digest.md`)
 **Owner:** Founder (decision-maker + direction) · Execution: AG agents (Claude Code / Gemini)
 **Status:** Active — pre-closed-beta
 **Structure:** Workstream tracks × launch milestones (matrix), sequenced by readiness (no hard dates)
@@ -88,16 +88,22 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 
 ### Track 1 — Engineering & Infra
 *Objective:* a stable, scalable backend that runs without firefighting.
-- **M0:** Redeploy staging; verify guest chat e2e under booking JWT; test soft-delete/anonymization; set prod env vars (`SUPABASE_JWT_SECRET`, `PYTHON_VERSION=3.12.10`); merge `staging→main`; prepare clean DB reset.
+- ✅ **M0:** Redeploy staging + verify guest chat e2e under booking JWT (confirmed working, staging + prod).
+- ✅ **M0:** Test soft-delete/anonymization end-to-end (shipped `bd13deb`/`fdf965c`, live-verified).
+- ✅ **M0:** Set prod env vars (`SUPABASE_JWT_SECRET`, `PYTHON_VERSION=3.12.10`).
+- **M0:** Merge `staging→main` — new batch pending (Telegram, roadmap, dashboard, feedback, prompt fixes), deferred until after mobile UI + further QA hardening.
+- **M0:** Prepare clean DB reset plan.
 - **M1:** Cloud Run migration; self-serve signup + guided onboarding; harden error states.
   - 🔴 **AI guardrails (keep simple):** per-conversation/tenant **rate limit** (a counter, not a quota engine) to cap runaway cost/abuse; **high-stakes-field fallback** — for address, access codes, checkout, Alfred uses only confirmed Master-JSON data or says "let me confirm with your host" rather than guessing; lean on the **model provider's built-in safety filters** for moderation; basic system-prompt hardening against injection. *No ML moderation pipeline.*
-- **M2:** 🔴 **WhatsApp + Telegram live.** *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2). Telegram has no gate.
+- ✅ **M2:** Telegram guest channel live (native port, `@AlfredHostW_bot`, live-tested end-to-end on staging 2026-07-05).
+- **M2:** 🔴 WhatsApp live. *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2).
 - **M3:** V2 scale stack — Redis cache + BullMQ queues, Sentry + Axiom, Resend, PostHog.
 - 🔴 **M1 — Transactional email for beta (buy-not-build):** confirm what sends auth mail today (Supabase Auth?); wire the minimum set — welcome, password reset, guest-link delivery. Full Resend template suite stays V2/M3.
 
 ### Track 2 — Brand & Identity
 *Objective:* one coherent HostWhisperer identity.
-- **M0:** Name locked; secure domain + handles.
+- ✅ **M0:** Name locked — Alfred = engine/assistant persona, HostWhisperer = public brand (resolved 2026-06-30).
+- **M0:** Secure domain + handles for HostWhisperer (open — D1).
 - **M1:** Finalize wordmark (**host** bold / *whisperer* light) + key/waves symbol; codify design tokens; apply to dashboard, guest app, landing.
 - **M3:** Refresh for public surface.
 
@@ -133,7 +139,9 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 
 ### Track 6 — QA, Maintenance & Reliability
 *Objective:* quality holds automatically as the system changes.
-- **M0:** Promote pending-intake → `_tests/scenarios.md`; run Layer 1; uptime monitors (UptimeRobot).
+- ✅ **M0:** Run Layer 1 QA suite.
+- ✅ **M0:** Uptime monitors live (UptimeRobot, prod + staging backend/scraper).
+- **M0:** Promote pending-intake entries → `_tests/scenarios.md` (partial — B10/C8/D5 done 2026-07-01; J6–J9 Telegram fixes + older popup/merge/RLS rows still queued).
 - **M1:** Layer 2 Playwright; **dedicated QA agent** (§8); evolve `scenarios.md` into the spec-first QA matrix; error monitoring.
   - 🟡 **AI answer eval set (keep small):** ~20–30 fixed guest questions with expected-good answers; re-run on model changes to catch drift. Manual-to-start; this is distinct from UI QA.
 - **M2:** Beta monitoring + triage loop.
@@ -141,7 +149,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 
 ### Track 7 — Agent Operations
 *Objective:* Alfred-on-autopilot — agents run day-to-day, founder decides.
-- **M0:** Operating model defined (hybrid).
+- ✅ **M0:** Operating model defined (hybrid — see §8).
 - **M1:** Stand up **PM agent** + near-term supporting agents (§8).
 - **M2:** Autopilot through beta; escalate genuine decisions.
 - **M3:** Tune autonomy by what proved trustworthy.
@@ -167,7 +175,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 ### Track 10 — Support & Help *(new)*
 *Objective:* a stuck tester can reach you and help themselves — without you living in your inbox.
 - 🔴 **M1 — Support channel:** a `help@` inbox (or shared) + a one-page FAQ. The bar for beta, not a helpdesk.
-- 🟡 **M1 — In-app feedback / bug capture:** a "Report" affordance in the dashboard + guest app → structured feedback (route, severity, optional screenshot) into a table you triage, with an optional ping to your phone. *Buy-not-build: a tiny in-app widget beats chasing WhatsApp messages.*
+- ✅ 🟡 **M1 — In-app feedback / bug capture:** shipped 2026-07-05 (`feedback_dialog.dart` → `feedback` table, RLS insert-only for hosts). Dashboard-side "Feedback" review card is a scoped-but-unbuilt follow-up.
 - 🟡 **M2 — Beta support triage:** the Support-triage agent (§8) works this queue; you handle real decisions.
 - 🟢 **M3 — Help center / knowledge base + onboarding content.**
 

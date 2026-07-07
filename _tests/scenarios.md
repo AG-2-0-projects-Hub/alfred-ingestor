@@ -324,7 +324,7 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **setup:** property X has 2 guests, G1 and G2, with separate booking_ids and chat URLs. Both have message history.
 - **action:** open G1's chat URL in browser, inspect network and rendered messages
 - **guest_expected:** only G1's conversation visible; attempting to query G2's conversation_id via Supabase REST returns no rows
-- **status:** pending — **will fail until RLS policies are added (see project_rls_pending memory)**
+- **status:** pending — RLS shipped to prod 2026-07-02 (memory `project_rls_pending` resolved); needs a formal retest to promote to passing
 
 ### C8. Guest link to a deleted property shows a terminal closed state
 - **id:** chat-deleted-property-01
@@ -536,23 +536,23 @@ and J11 (pending/transparent card state) are deferred as focused follow-ups.
 - **id:** tg-conv-on-start-01
 - **action:** guest taps the link (`/start`) but sends no message yet
 - **host_expected:** the conversation appears on the dashboard immediately, so the host can proactively message the guest
-- **status:** failing — *fix: create the conversation on link, not on first message*
+- **status:** pending — *fix shipped 2026-07-05 (conversation created at link-generation), awaiting formal retest-and-promote*
 
 ### J7. Guest receives transition notices on Telegram
 - **id:** tg-transitions-01
 - **action:** conversation escalates, then the host resolves it
 - **guest_expected:** the guest is told on Telegram when a human takes over and when Alfred resumes ("issue resolved")
-- **status:** failing — *fix: push handoff / resolved / resumed notices to Telegram*
+- **status:** pending — *fix shipped 2026-07-05 (`_notify_tg_transition`), awaiting formal retest-and-promote*
 
 ### J8. Automated/system messages are visually distinct
 - **id:** tg-system-style-01
 - **expected:** system/automated lines (handoff, resolved, resumed) render in a distinct style (italic) both in the web chat and on Telegram — clearly different from normal chat bubbles
-- **status:** failing
+- **status:** passing
 
 ### J9. Telegram link shown in the host chat view
 - **id:** tg-hostview-link-01
 - **expected:** the host's conversation view shows the guest's Telegram link alongside the web Guest Chat Link
-- **status:** failing
+- **status:** pending — *fix shipped 2026-07-05, awaiting formal retest-and-promote*
 
 ### J10. Warm, localized welcome message (configurable)
 - **id:** tg-welcome-lang-01
@@ -612,6 +612,7 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 | 2026-06-10 | `<pending>` | Guest chat — header under RLS | Property name + host name come from the `/api/guest-token` response (server-resolved from `master_json`, since RLS blocks the anon guest reading `properties`). Header shows on open before any message, with no direct `properties` read. | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | Guest chat — realtime under RLS | Guest realtime socket is authed with the booking JWT (`realtime.setAuth`), so live AI/host replies appear without refresh. Assert: guest sees Alfred's reply and a host take-over message arrive live (previously the stream delivered 0 rows once RLS was on). | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | System markers — no DB-level duplicates | DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding system marker in the same conversation. Assert: AI auto-escalation + host chat-live both firing produce ONE `__SYS_INTERVENE__` row (not two), on both host and guest views. Non-identical sequences (intervene→resume→intervene) are preserved. | Guest chat — display & system messages |
+| 2026-07-07 | `dashboard_screen.dart` + `chat_live_dialog.dart` | **Mobile UI fixes** (phone viewport, default 100% zoom — NOT verified live, deploy-to-test) | (1) **Cards not clipped:** on a narrow (<500px) viewport each property card shows the full action row (`+ Guest` / `Settings` / calendar / history) — Settings is tappable and opens the drawer (was clipped off at the old 220px height). (2) **Account identity:** on a narrow (<480px) app bar an account icon opens a menu showing the host email + Logout (email was hidden with no fallback before). (3) **Host chat usable on mobile:** on a narrow (<600px) `ChatLiveDialog` the conversation takes the full width/height (not a crushed sliver next to a 320px side panel); mode toggle on top, reply box at bottom in Intervene mode, guest web+Telegram links behind a link icon → bottom sheet. Assert Autopilot↔Intervene toggle + host reply still work. **Web/desktop layout must be unchanged** (all three gated behind mobile breakpoints). | — |
 
 > **Promoted 2026-07-01 → B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
 
