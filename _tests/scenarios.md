@@ -566,6 +566,31 @@ and J11 (pending/transparent card state) are deferred as focused follow-ups.
 
 ---
 
+## K. Mobile / responsive layout
+
+Phone-viewport behavior of the host dashboard + chat. All fixes are gated behind
+mobile breakpoints so the web/desktop layout is unchanged.
+
+### K1. Mobile host UI: cards, account menu, and host chat are usable on a phone
+- **id:** mobile-host-layout-01
+- **touches:**
+  - `frontend/lib/screens/dashboard_screen.dart`
+  - `frontend/lib/widgets/chat_live_dialog.dart`
+  - `frontend/lib/widgets/property_card.dart`
+- **layer:** 4
+- **runs_on:** [smart, full]
+- **setup:** host account with ≥1 ready property + a conversation; phone viewport (<500px wide) at default 100% zoom
+- **action:** open the dashboard, tap Settings on a card, open the account menu, open a property's host chat, toggle Autopilot↔Intervene, type a reply, open the guest-links sheet
+- **host_expected:**
+  1. **Property card not clipped** — the full action row (`+ Guest / Settings / calendar / history`) is visible and **Settings is tappable** and opens the detail drawer (previously clipped off the 220px card; now 300px).
+  2. **Account identity** — a profile/person icon in the app bar opens a menu showing the host email + Logout (previously the email was hidden with no fallback on narrow screens).
+  3. **Host chat usable** — the conversation takes the full width/height (not a crushed sliver); Autopilot↔Intervene toggles easily; the reply text field works in Intervene mode; the guest web + Telegram links open in a bottom sheet via the app-bar link icon.
+- **web_expected:** desktop/web layout unchanged (inline email, side-by-side chat panel, self-sizing card grid) — all changes are behind mobile breakpoints.
+- **last_tested:** 2026-07-07 (manual verification by user on staging Vercel build, real phone)
+- **status:** passing
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
@@ -579,7 +604,8 @@ and J11 (pending/transparent card state) are deferred as focused follow-ups.
 | G. RLS | 3 | 3 | — | — |
 | H. Push | 1 | — | 1 | — |
 | J. Telegram | 11 | — | — | 11 |
-| **Total** | **46** | **9** | **26** | **11** |
+| K. Mobile / responsive | 1 | — | — | 1 |
+| **Total** | **47** | **9** | **26** | **12** |
 
 ---
 
@@ -612,7 +638,8 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 | 2026-06-10 | `<pending>` | Guest chat — header under RLS | Property name + host name come from the `/api/guest-token` response (server-resolved from `master_json`, since RLS blocks the anon guest reading `properties`). Header shows on open before any message, with no direct `properties` read. | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | Guest chat — realtime under RLS | Guest realtime socket is authed with the booking JWT (`realtime.setAuth`), so live AI/host replies appear without refresh. Assert: guest sees Alfred's reply and a host take-over message arrive live (previously the stream delivered 0 rows once RLS was on). | RLS + guest JWT — isolation |
 | 2026-06-10 | `<pending>` | System markers — no DB-level duplicates | DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding system marker in the same conversation. Assert: AI auto-escalation + host chat-live both firing produce ONE `__SYS_INTERVENE__` row (not two), on both host and guest views. Non-identical sequences (intervene→resume→intervene) are preserved. | Guest chat — display & system messages |
-| 2026-07-07 | `dashboard_screen.dart` + `chat_live_dialog.dart` | **Mobile UI fixes** (phone viewport, default 100% zoom — NOT verified live, deploy-to-test) | (1) **Cards not clipped:** on a narrow (<500px) viewport each property card shows the full action row (`+ Guest` / `Settings` / calendar / history) — Settings is tappable and opens the drawer (was clipped off at the old 220px height). (2) **Account identity:** on a narrow (<480px) app bar an account icon opens a menu showing the host email + Logout (email was hidden with no fallback before). (3) **Host chat usable on mobile:** on a narrow (<600px) `ChatLiveDialog` the conversation takes the full width/height (not a crushed sliver next to a 320px side panel); mode toggle on top, reply box at bottom in Intervene mode, guest web+Telegram links behind a link icon → bottom sheet. Assert Autopilot↔Intervene toggle + host reply still work. **Web/desktop layout must be unchanged** (all three gated behind mobile breakpoints). | — |
+| 2026-07-07 | `archived_chats_dialog.dart` | **Mobile — Chat History opens the fixed chat view** (deploy-to-test) | Opening a past conversation from a property card's "Chat History" (history icon) opens the consolidated **`ChatLiveDialog`** (mobile-responsive, stacked on top of the history list) for that specific guest — NOT the old full-page `HostPanelScreen → ChatLiveScreen` (which showed the pre-fix crushed layout: sideways "Conversation" label, 320px panel squeezing the messages). Closing the chat returns to the history list. **Fold into K1** once verified. | K1 (mobile-host-layout-01) |
+| 2026-07-07 | `property_card.dart` | **Property card — conversation pills never overlap the action row** (deploy-to-test) | On a property card with many conversations, the pill preview list stays within its own area and never overlaps the `+ Guest / Settings / calendar / history` row below it (previously the pills spilled down over the buttons). Root cause: the per-pill height estimate was 32px but a real compact pill is ~48px, so too many were rendered; fixed the estimate, reserved the "+N more active" line's height, and wrapped the list in a `ClipRect` as a hard guarantee. Applies to both mobile and desktop cards. | K1 (mobile-host-layout-01) |
 
 > **Promoted 2026-07-01 → B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
 
