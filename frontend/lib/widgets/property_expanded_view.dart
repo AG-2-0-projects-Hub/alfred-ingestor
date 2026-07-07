@@ -95,6 +95,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
         if (reason != null && reason.startsWith('emergency_')) return 0;
         if (x['requires_attention'] == true) return 1;
         if (x['mode'] == 'intervene') return 2;
+        if (x['has_guest_message'] != true) return 4; // pending — awaiting reply, last
         return 3;
       }
       return priority(a).compareTo(priority(b));
@@ -209,7 +210,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text('Active Conversations',
+                  Text('Conversations',
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: palette.textSecondary,
@@ -236,6 +237,8 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                                     Expanded(
                                       child: ConversationPill(
                                         conv: c, compact: false,
+                                        pending: c['has_guest_message'] != true,
+                                        showPendingLabel: true,
                                         onTap: () => _openChat(c['booking_id'] as String),
                                       ),
                                     ),

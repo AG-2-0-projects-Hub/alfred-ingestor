@@ -6,11 +6,17 @@ class ConversationPill extends StatefulWidget {
   final Map<String, dynamic> conv;
   final VoidCallback onTap;
   final bool compact;
+  // Guest has a link + welcome but hasn't replied yet → faded/transparent style.
+  final bool pending;
+  // Show the "Awaiting reply" chip (overview only; not on the property card).
+  final bool showPendingLabel;
   const ConversationPill({
     super.key,
     required this.conv,
     required this.onTap,
     this.compact = true,
+    this.pending = false,
+    this.showPendingLabel = false,
   });
 
   Color _statusColor(BuildContext ctx) {
@@ -61,15 +67,21 @@ class _ConversationPillState extends State<ConversationPill>
   Widget build(BuildContext context) {
     final c = widget.conv;
     final guestName = c['guestName'] as String? ?? 'Guest';
-    final isIntervene = c['mode'] == 'intervene';
-    final isUnread = c['requires_attention'] == true;
-    final statusColor = widget._statusColor(context);
+    final pending = widget.pending;
+    final isIntervene = !pending && c['mode'] == 'intervene';
+    final isUnread = !pending && c['requires_attention'] == true;
+    // Pending (awaiting-reply) pills render in a neutral, muted colour so they
+    // read as "not started" rather than active.
+    final statusColor =
+        pending ? context.palette.textMuted : widget._statusColor(context);
 
     final pad = widget.compact
         ? const EdgeInsets.symmetric(horizontal: 8, vertical: 12)
         : const EdgeInsets.symmetric(horizontal: 12, vertical: 12);
 
-    return MouseRegion(
+    return Opacity(
+      opacity: pending ? 0.6 : 1.0,
+      child: MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
@@ -125,6 +137,25 @@ class _ConversationPillState extends State<ConversationPill>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (pending && widget.showPendingLabel) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: context.palette.textMuted.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'Awaiting reply',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: context.palette.textMuted,
+                    ),
+                  ),
+                ),
+              ],
               if (isIntervene) ...[
                 const SizedBox(width: 8),
                 Tooltip(
@@ -166,6 +197,7 @@ class _ConversationPillState extends State<ConversationPill>
           ),
         ),
       ),
+    ),
     );
   }
 }

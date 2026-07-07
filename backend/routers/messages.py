@@ -7,7 +7,7 @@ import string
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import supabase_client, gemini_messenger, telegram_client
+from services import supabase_client, gemini_messenger, telegram_client, welcome
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
 router = APIRouter()
@@ -155,6 +155,15 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
         )
 
     requires_escalation = bool(first_result.get("requires_escalation"))
+
+    # Persist the language Alfred actually replied in, so the next turn has a
+    # stable anchor instead of re-detecting (and possibly flip-flopping) from
+    # scratch. The prompt only reports a real, deliberate switch.
+    detected_language = first_result.get("detected_language")
+    if detected_language:
+        await asyncio.to_thread(
+            supabase_client.update_guest_language, booking_id, detected_language
+        )
 
     await asyncio.to_thread(
         supabase_client.insert_message,
@@ -363,13 +372,26 @@ async def create_guest(req: CreateGuestRequest):
             f"https://t.me/{bot_username}?start={booking_id}" if bot_username else None
         )
         try:
-            guest = await asyncio.to_thread(
+            await asyncio.to_thread(
                 supabase_client.create_guest,
                 booking_id,
                 req.property_id,
                 req.guest_name,
                 guest_chat_url,
                 host_chat_url,
+            )
+            # Create the conversation + store the welcome now, so the new link
+            # shows on the dashboard immediately as "Awaiting reply" (pending),
+            # before the guest ever opens it. Idempotent on later /open.
+            property_name, _ = _resolve_identity(prop)
+            welcome_text = welcome.build_welcome(
+                property_name or prop.get("name"),
+                prop.get("master_json"),
+                also_english=bool(prop.get("welcome_also_english")),
+            )
+            await asyncio.to_thread(
+                supabase_client.ensure_conversation_with_welcome,
+                booking_id, req.property_id, welcome_text,
             )
             return {
                 "booking_id": booking_id,

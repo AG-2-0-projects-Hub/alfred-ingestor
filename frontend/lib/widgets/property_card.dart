@@ -816,6 +816,9 @@ class _PillPreviewList extends StatelessWidget {
             ConversationPill(
               conv: c,
               compact: true,
+              // On the card, pending links get the faded style but no label
+              // (the "Awaiting reply" chip only shows in the conversations overview).
+              pending: c['has_guest_message'] != true,
               onTap: () => onOpenChat(c['booking_id'] as String),
             ),
           if (overflow > 0)

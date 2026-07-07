@@ -121,7 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         final convRows = await Supabase.instance.client
             .from('conversations')
             .select(
-                'id, property_id, booking_id, mode, requires_attention, escalation_reason')
+                'id, property_id, booking_id, mode, requires_attention, escalation_reason, has_guest_message')
             .inFilter('property_id', ids)
             .order('created_at', ascending: false);
 
@@ -178,6 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           if (reason != null && reason.startsWith('emergency_')) return 0;
           if (x['requires_attention'] == true) return 1;
           if (x['mode'] == 'intervene') return 2;
+          if (x['has_guest_message'] != true) return 4; // pending — awaiting reply, last
           return 3;
         }
         return priority(a).compareTo(priority(b));

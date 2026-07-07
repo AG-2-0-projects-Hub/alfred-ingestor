@@ -306,6 +306,18 @@ def link_guest_telegram(booking_id: str, chat_id: str) -> None:
         .eq("booking_id", booking_id).execute()
 
 
+def update_guest_language(booking_id: str, language: str) -> None:
+    """Persist the established conversation language so future turns have a stable
+    anchor (avoids re-detecting from scratch each message). Only meaningful,
+    non-empty values are written."""
+    if not language or not language.strip():
+        return
+    client = get_client()
+    client.table("guests").update(
+        {"preferred_language": language.strip().lower()}
+    ).eq("booking_id", booking_id).execute()
+
+
 def get_guest_by_conversation_id(conversation_id: str) -> dict | None:
     """Resolve the guest behind a conversation — used to deliver a host reply to
     the guest's Telegram chat when they're Telegram-linked."""
@@ -416,6 +428,13 @@ def insert_message(
     if media_url:
         row["media_url"] = media_url
     result = client.table("messages").insert(row).execute()
+
+    # First guest message flips the conversation out of the "Awaiting reply"
+    # (pending) state on the dashboard. Guarded so it writes at most once.
+    if sender_type == "guest":
+        client.table("conversations").update({"has_guest_message": True}) \
+            .eq("id", conversation_id).eq("has_guest_message", False).execute()
+
     # A BEFORE INSERT trigger (suppress_dup_system_marker) can skip a duplicate
     # consecutive system marker, in which case no row is returned. Callers of
     # marker inserts ignore the return; guard so we don't IndexError on skip.
@@ -537,7 +556,9 @@ def create_guest(
         "booking_id": booking_id,
         "property_id": property_id,
         "name": name,
-        "preferred_language": "english",
+        # Start neutral — the working language is established from the actual
+        # conversation, not seeded to English (which caused false "switches").
+        "preferred_language": "not_set",
         "guest_chat_url": guest_chat_url,
         "host_chat_url": host_chat_url,
     }).execute()
