@@ -1,6 +1,7 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-07-02 (**PR #2 merged staging→main** — all Phase-6 RLS + guest-JWT + soft-delete/re-add work now on **prod**; prod guest chat verified working. One prod-only scare: Gemini billing dunning-block on GCP project `1090657837262` — resolved by paying the overdue balance, no code involved. See "Session 2026-06-30" below.)
+**Last Session:** 2026-07-05 (**Native Telegram guest channel + launch roadmap + command dashboard + feedback box**, all staging-only, 10 commits ahead of `main` — Telegram live-tested end-to-end by user and confirmed working. See "Session 2026-07-05" below.)
+**Prior Session:** 2026-07-02 (**PR #2 merged staging→main** — all Phase-6 RLS + guest-JWT + soft-delete/re-add work now on **prod**; prod guest chat verified working. One prod-only scare: Gemini billing dunning-block on GCP project `1090657837262` — resolved by paying the overdue balance, no code involved. See "Session 2026-06-30" below.)
 **Prior Session:** 2026-06-30 (soft-delete re-add fixes B1/B2/B4/B5 — tombstones no longer block re-adding a property; guest links to deleted properties show a terminal closed state — commits `bd13deb` + `fdf965c`; see "Session 2026-06-30" below)
 **Prior Session:** 2026-06-09 (staging merged to main via PR #1 — all 10 commits now on prod; Layer 1 QA done; Layer 2 runners written; QA workflow codified — see `_Context/session-digest.md`)
 **Prior Session:** 2026-06-02 (Phase 6 QA + multi-tenancy fixes + merge-flow UX — staging only, 6 commits ahead of `main`)
@@ -43,6 +44,48 @@ Enabling RLS broke three guest-facing reads that previously rode the bare anon k
 - **Realtime**: the guest realtime socket is authed with the booking JWT via `realtime.setAuth(token)` (on open + each refresh) — otherwise RLS delivers 0 rows over the live `messages` stream.
 - **Duplicate system markers**: DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding one (3 racing writers: backend auto-escalation + both host chat-live views). `insert_message` guards against the skipped-insert (0-row) return.
 - **Host-token verification (⚠️ project quirk)**: the project migrated to **asymmetric JWT Signing Keys**, so host *session* tokens are NOT signed with the legacy HS256 secret. Backend endpoints that need to trust a host token (e.g. `/api/property/{id}/soft-delete`) must validate via `supabase.auth.get_user(token)` (algorithm-agnostic), **not** local `jwt.decode(..., HS256)` — the latter 401s on every host token. (The guest token is the exception: we mint it ourselves with HS256, and the legacy secret still verifies it.)
+
+---
+
+## Session 2026-07-05 — Native Telegram guest channel + launch roadmap + command dashboard + feedback box (staging only, NOT on `main`)
+
+`staging` @ `3d48252`, **10 commits ahead of `origin/main`** (`d0a092e`). Nothing merged to prod this session. Full commit list: `7123eb2` → `6336d21` → `07831b8` → `7440628` → `6d73048` → `8abe3e5` → `8e185ee` → `38a603d` → `fc128a6` → `3d48252`.
+
+### Native Telegram guest channel (the big feature)
+Guests can now chat with Alfred over Telegram exactly like the web link — same channel-agnostic Brain, same escalation/resolve lifecycle. **The host never touches Telegram** — they stay on the Flutter dashboard, and their replies are delivered to the guest's Telegram automatically. This mirrors the workflow WhatsApp will later slot into.
+
+The prior Make.com bot scenario (`_Context/Supabase Alfred Airbnb - E - The Bot.blueprint.json`) was found to target a **schema that no longer exists** (a `hosts` table, `is_escalated`, `check_out_date` — none of which survive in the current DB), so it was ported natively rather than revived. User created a **fresh bot `@AlfredHostW_bot`** (the legacy Make.com bot `@Alfred_supabase_bot` is untouched, unrelated).
+
+- **New:** `backend/services/telegram_client.py` (Bot API wrapper — `send_message` is plain text for AI answers/welcome so Telegram Markdown-parse never silently drops a reply; `send_italic` is HTML `<i>` for system/transition notices; 4096-char chunking), `backend/routers/telegram.py` (`POST /api/telegram/webhook` — secret-header-guarded, uses `BackgroundTasks` so Gemini's ~45s doesn't block the Telegram ack; `POST /api/telegram/set-webhook` — self-registration endpoint that reads the token from Render's own env, so the token never has to be pasted into chat), `backend/services/welcome.py` (pure text builder — detects language from `master_json.location.country` via a small country→language map, defaults local-only, appends English if `properties.welcome_also_english=true` and local≠English).
+- **`backend/routers/messages.py` refactor:** extracted `process_guest_message(booking_id, message)` as the one shared Brain (Gemini first/second pass → escalation → `__SYS_INTERVENE__`) used by both `web_incoming` and the Telegram router — one pipeline, one place for escalation logic. Added a **dedupe guard** (skip inserting a guest message identical to the immediately-preceding one — fixes the pre-existing "insert before Gemini call" retry-duplicate bug flagged in the 2026-07-02 session). Added `_notify_tg_transition()` which pushes the **same** web system-message copy to a Telegram-linked guest (italic) on auto-escalation, on `/api/conversations/resolve`, and via a new `POST /api/conversations/announce-transition` (called by the dashboard's manual Autopilot/Intervene toggle). The guest link's conversation + localized welcome are now created **at link-generation time** (`POST /api/guests`), not just on first open — so a brand-new link shows on the dashboard immediately instead of being invisible until the guest's first message. `create_guest` also returns a `telegram_link`.
+- **`backend/services/supabase_client.py` additions:** `get_guest_by_telegram_chat_id`, `link_guest_telegram` (releases the Telegram chat from any **prior** booking before attaching to a new one — lets one Telegram account move between test bookings, or a returning guest re-`/start` on a new stay, without hitting the unique-index violation), `get_guest_by_conversation_id`, `ensure_conversation_with_welcome` (idempotent — only inserts the welcome if the thread is empty), `update_guest_language`. `insert_message` now flips `conversations.has_guest_message=true` on the guest's first message.
+- **Schema (additive migrations, shared prod+staging DB):** `add_telegram_to_guests` (`guests.telegram_chat_id` + unique partial index), `add_has_guest_message_to_conversations` (`conversations.has_guest_message`, backfilled), `add_welcome_also_english_to_properties` (`properties.welcome_also_english`, default `false`).
+- **Frontend:** `generate_guest_link_dialog.dart` and `chat_live_dialog.dart` both show the Telegram deep link (`t.me/<bot>?start=<booking_id>`) alongside the web link, built from a `TELEGRAM_BOT_USERNAME` env var. Manual mode toggles in `chat_live_dialog.dart` now call `/api/conversations/announce-transition`.
+- **⚠️ Env vars live in TWO separate stores:** `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` on **Render** (backend); `TELEGRAM_BOT_USERNAME` needed on **BOTH Render and Vercel** — Vercel bakes it into the Flutter web build's `.env` asset at compile time for the host-visible link. Missing it on Vercel made the Telegram-link row silently not render; diagnosed by curling the deployed `https://<site>/assets/.env` directly (flutter_dotenv ships `.env` as a plain-text web asset — useful trick for verifying what actually made it into a build).
+
+### Bugs found + fixed via live testing on staging
+- Conversation invisible on the dashboard until the guest's first message → fixed via `ensure_conversation_with_welcome` at link-generation + `/start`.
+- Guest saw no hand-off/resolved notice on Telegram → fixed via `_notify_tg_transition`.
+- Language flipped on stray tokens like "okok" → root cause was `preferred_language` seeded to `"english"` at guest creation, making every non-English guest look like a "switch." Rewrote `gemini_messenger.py`'s LANGUAGE HANDLING to establish language from the **last 3 guest messages** and switch only on a clear/sustained signal (ignores short tokens, loanwords, cross-language phrases like "C'est la vie"). New guests now seed `preferred_language="not_set"`; the established language persists every turn via `update_guest_language`.
+- Knowledge-base host-chat voice (`gemini_client.py`'s `query_knowledge_base`) was generic/flat — rewritten to mirror Alfred's actual concierge voice from the guest-facing prompt, keeping the strict no-speculation framing.
+- Two other entry points still opened the old full-page `ChatLiveScreen` (missing the Telegram link etc.): `generate_guest_link_dialog.dart`'s "Open Host Chat" button and `ingest_screen.dart`'s dev "Open Chat" button — both switched to `ChatLiveDialog` (the popup), so there's one consistent in-app chat view. **The one legitimate full-page holdout is `main.dart`'s `/chat-live` deep-link route** (the `host_chat_url` target opened from outside the app — no dashboard to pop a dialog over). `host_panel_screen.dart` still references `ChatLiveScreen` too but is dead/orphaned (unreachable — nothing links to `/host-panel`); left untouched, out of scope.
+- Property card showed "2 chats" but only 1 conversation visible → root cause was the same "invisible until first message" issue; fixed by the `has_guest_message` flag + UI below.
+- "Toggle on but welcome only in English" reported — root-caused to a **stale test property** (`Santa Prixca`) with `master_json.location.country = null`, not a code bug; verified directly that `welcome.py` produces both languages correctly when country data exists. (4 duplicate Santa Prixca/Prisca test rows exist in the DB from repeated testing — data hygiene, not urgent.)
+
+### Dashboard "Awaiting reply" (pending) state + Overview toggle
+A freshly generated guest link now appears **immediately** on the dashboard (conversation + welcome created at link-generation), rendered faded/transparent and sorted last, with an "Awaiting reply" pill shown **only** in the property's Conversations overview (not on the compact card pills, to avoid a third visual category) — section renamed "Active Conversations" → "Conversations" per user request. `property_detail_drawer.dart`'s Overview tab gained a **"+ English welcome"** switch (compact label + hover Tooltip carrying the full explanation, shortened after feedback that the first version's always-visible paragraph was too verbose) — writes `properties.welcome_also_english` directly via the same host-owned RLS write pattern as the learned-knowledge editor.
+
+### Also shipped this session (staging-only)
+- **`ROADMAP.md` v1.2** (+ `.html`/`.pdf` for print) — the master launch-planning doc: 10 workstream tracks × 4 milestones, Strategic Risk Register, Open Decisions register (D1–D10), 🔴/🟡/🟢 priority tiers, an 11-agent operating model. This is now the source of truth for "what's left before beta" — read it before planning further launch work.
+- **Command dashboard** (`dashboard/`, gitignored `node_modules/`) — a localhost:3333 Node/Express + vanilla-JS tool (`node dashboard/server.js`). Read-only glance overview: roadmap track progress, QA scenario status, live git branch/log/uncommitted files, a "needs attention" strip — plus exactly two actions (toggle a roadmap item's status, run the QA smoke test). **Commit/push functionality was deliberately built then removed** after the user found it confusing/risky for a tool meant to be "just an overview" — commits stay a chat-mediated, explicit-approval action, never a dashboard button. Built with a portable read-layer / local-only action-layer split so it can migrate to a hosted Alfred admin sub-site later without a rewrite.
+- **In-app feedback box** — `feedback_dialog.dart` (type chips: bug/idea/confusing/other + free text) wired to a feedback icon in the dashboard app bar, inserts into a new `feedback` table (migration `create_feedback_table`, RLS insert-only for authenticated hosts). Reviewed via Supabase Studio for now; a read-only "Feedback" card in the command dashboard was scoped as a nice-to-have follow-up, not yet built.
+- **`_tests/scenarios.md`** — new **J. Telegram guest channel** section, 11 scenarios (J1–J11; J1–J5 confirmed passing live; J6–J10 fixed this session, awaiting formal retest-and-promote; J11 deferred). Total scenarios: 46.
+
+### Cloud Run migration — assessed, not started
+Discussed complexity when asked: moderate, roughly a day of focused work. Containerizing FastAPI + the scraper is easy. The real gotcha is the Telegram webhook's `BackgroundTasks` pattern — Cloud Run freezes CPU right after the HTTP response unless `min-instances=1` or "CPU always allocated" is set, so a background reply can silently die mid-flight if that's missed. Cutover chores: new Cloud Run URLs → update `FRONTEND_URL`/`BACKEND_URL`/CORS, re-register the Telegram webhook, add a CI/CD step (Render's git-push auto-deploy goes away). Still sequenced for after QA hardening, before real beta users.
+
+### What's next
+**Mobile UI optimization is the user's stated top priority right now** — the final pre-beta phase per the original Phase 6 plan (see "Upcoming Phases" below). Awaiting the user's own pain-point feedback + inspiration screenshots to kick off properly via the brainstorming skill before any implementation.
 
 ---
 
@@ -112,19 +155,18 @@ Two infra fixes today (no code): paid the overdue GCP bill on the scraper-stagin
 
 ---
 
-## Upcoming Phases (sequenced, as of 2026-06-08)
+## Upcoming Phases (updated 2026-07-05)
 
-Phase 6 QA system operational. Layer 1 done. Layer 2 runners written. Next sequence:
+1. ✅ ~~Run Layer 2 full suite~~ — superseded by live staging testing this session.
+2. ⏸️ **Promote pending-intake entries** — `_tests/scenarios.md` J6–J10 (Telegram) fixed this session, awaiting formal retest-and-promote to `passing`.
+3. ⏸️ **Merge staging → main** — 10 commits ready (Telegram, roadmap, dashboard, feedback, prompt fixes). Deferred until after mobile optimization + further QA hardening, per `ROADMAP.md`.
+4. ✅ ~~ISSUE-B (Delete FK)~~ — resolved via soft-delete (2026-06-11).
+5. ⚠️ **ISSUE-C (Vercel auto-deploy)** — still unreliable; manually trigger staging redeployment after every frontend push, and confirm the redeploy targets the `staging` branch specifically (the Redeploy dialog can default to showing recent `main`-branch deployments).
+6. ✅ ~~RLS policy design~~ — shipped + on prod since PR #2 (2026-07-02).
+7. ✅ ~~WhatsApp / Telegram~~ — **Telegram shipped natively this session** (staging, live-tested). WhatsApp still pending (see `ROADMAP.md` M2).
+8. 🔴 **Mobile UI optimization — CURRENT FOCUS.** Functionality works, presentation has known issues on small screens. Awaiting user's feedback + inspiration screenshots to kick off via the brainstorming skill.
 
-1. **Run Layer 2 full suite** — `cd _tests/runner && npm run full` — verify A3/A4/B6/B7 pass; tune coordinates if needed (Flutter CanvasKit clicks are coordinate-based).
-2. **Promote pending-intake entries** — `_tests/scenarios.md` has 4 entries in the pending-intake table that become proper scenarios before staging→main merge.
-3. **Merge staging → main** — 10 commits ready. Open PR, self-merge. Triggers prod deploy.
-4. **ISSUE-B (Delete FK)** — `ON DELETE CASCADE` on `guests.property_id`, `conversations.property_id`, `messages.conversation_id` — apply via Supabase MCP.
-5. **ISSUE-C (Vercel auto-deploy)** — investigate Vercel webhook delivery; for now manually trigger staging redeployment after every frontend push.
-6. **RLS policy design** — see memory `project_rls_pending`. Tables: `scrape_jobs`, `guests`, `conversations`, `messages`. G2/G3 are the failing-expected guardrails that enforce this gets done before beta.
-7. **Mobile UI optimization** — functionality works, presentation has known issues on small screens.
-
-After step 7: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration`).
+After mobile: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run migration per memory `project_cloud_run_migration` — complexity assessed 2026-07-05, ~1 day, main gotcha is Cloud Run's CPU freeze on `BackgroundTasks` unless `min-instances`/"always allocated" CPU is set). See `ROADMAP.md` for the full sequenced launch plan (10 tracks × 4 milestones).
 
 ---
 
@@ -154,10 +196,13 @@ After step 7: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run m
 |---|---|
 | `main.py` | FastAPI app, CORS from `FRONTEND_URL` env var; `/health` accepts GET + HEAD |
 | `routers/ingest.py` | `POST /api/ingest` — SSE stream, sequential file processing |
-| `routers/messages.py` | `POST /api/messages/web-incoming` (guest→AI), `POST /api/messages/host-send`, `POST /api/guests` |
+| `routers/messages.py` | `process_guest_message()` (shared Brain, used by web + Telegram), `POST /api/messages/web-incoming`, `POST /api/messages/host-send` (also delivers to Telegram if linked), `POST /api/guests` (creates conversation + welcome at link time), `POST /api/conversations/resolve`, `POST /api/conversations/announce-transition` |
+| `routers/telegram.py` | `POST /api/telegram/webhook` (guest channel — secret-guarded, `BackgroundTasks`), `POST /api/telegram/set-webhook` (self-registration) — added 2026-07-05 |
 | `services/supabase_client.py` | All DB/storage operations; singleton Supabase client |
-| `services/gemini_messenger.py` | `first_pass` + `second_pass_with_search` — both async, called with 45s `asyncio.wait_for` guard |
-| `services/gemini_client.py` | Low-level Gemini file upload/prompt execution |
+| `services/gemini_messenger.py` | `first_pass` + `second_pass_with_search` — both async, called with 45s `asyncio.wait_for` guard; LANGUAGE HANDLING rewritten 2026-07-05 (context-aware, last-3-messages) |
+| `services/gemini_client.py` | Low-level Gemini file upload/prompt execution; `query_knowledge_base` voice enriched 2026-07-05 |
+| `services/telegram_client.py` | Telegram Bot API wrapper — plain-text sends (AI answers/welcome) + italic system notices — added 2026-07-05 |
+| `services/welcome.py` | Localized guest welcome text builder (country→language detection) — added 2026-07-05 |
 | `services/file_processor.py` | Route by extension → correct Gemini prompt |
 | `services/hash_guard.py` | SHA-256 duplicate detection |
 
@@ -177,14 +222,15 @@ After step 7: beta launch prep (split staging↔prod URLs, DB reset, Cloud Run m
 | `widgets/aurora_background.dart` | 4-blob radial gradient background widget |
 | `widgets/glass_panel.dart` | Reusable glassmorphic surface (blur + hover) |
 | `widgets/drop_zone.dart` | Dashed-border drag-drop zone (custom CustomPainter) |
-| `widgets/generate_guest_link_dialog.dart` | 2-step dialog: name → copy URLs |
+| `widgets/generate_guest_link_dialog.dart` | 2-step dialog: name → copy web + Telegram URLs; "Open Host Chat" opens `ChatLiveDialog` (was full-page, fixed 2026-07-05) |
+| `widgets/feedback_dialog.dart` | In-app host feedback chatbox (bug/idea/confusing/other + free text) → `feedback` table — added 2026-07-05 |
 | `widgets/archived_chats_dialog.dart` | Past guests list per property |
 | `widgets/conversation_pill.dart` | Color-coded clickable pill per conversation with pulse dot + Live badge |
 | `widgets/property_expanded_view.dart` | Glassmorphic dialog showing active + archived conversations |
 | `widgets/setup_status_banner.dart` | Guided next-step banner mapped from property status |
 | `widgets/file_thumbnail.dart` | Async signed URL image or themed file-type icon |
 | `widgets/inactivity_wrapper.dart` | 1-hour idle → auto-logout via Listener + Timer |
-| `widgets/chat_live_dialog.dart` | In-screen glassmorphic chat dialog (replaces page nav from pills) — Phase 4.5 |
+| `widgets/chat_live_dialog.dart` | In-screen glassmorphic chat dialog (replaces page nav from pills) — Phase 4.5; shows Telegram guest link + calls `/api/conversations/announce-transition` on manual mode toggle — added 2026-07-05 |
 | `services/push_notification_service.dart` | Web Notification API singleton via `package:web` JS interop — Phase 4.5 |
 | `services/api_client.dart` | Typed HTTP wrapper: 60s timeout, 1 retry, ApiException hierarchy |
 | `theme/app_theme.dart` | AppPalette ThemeExtension, daylightTheme + midnightTheme, PaletteX context extension |
