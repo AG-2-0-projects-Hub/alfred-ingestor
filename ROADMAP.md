@@ -1,7 +1,7 @@
 # Alfred / HostWhisperer — Launch Roadmap
 
 **Version:** 1.2
-**Created:** 2026-06-30 · **Updated:** 2026-07-07 (status sync pass — marked shipped items done across Tracks 1/2/6/7/10 so this doc and the command dashboard agree; see `_Context/session-digest.md`)
+**Created:** 2026-06-30 · **Updated:** 2026-07-07 (status sync + Track 4 kickoff — marked shipped items done across Tracks 1/2/6/7/10; Track 4 mobile optimization now in progress with host-dashboard stopgaps shipped; see `_Context/session-digest.md`)
 **Owner:** Founder (decision-maker + direction) · Execution: AG agents (Claude Code / Gemini)
 **Status:** Active — pre-closed-beta
 **Structure:** Workstream tracks × launch milestones (matrix), sequenced by readiness (no hard dates)
@@ -74,7 +74,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 | **1. Engineering & Infra** | Redeploy staging, verify guest chat e2e under JWT, test soft-delete, set prod env vars, `staging→main`, DB reset | Cloud Run migration, self-serve onboarding, harden error states, 🔴 AI guardrails + per-tenant rate limit | **WhatsApp + Telegram live**, beta stability fixes | V2: Redis/BullMQ queues, Sentry/Axiom, Resend, PostHog, scale-out |
 | **2. Brand & Identity** | Lock name (done), secure domain | Finalize logo/wordmark, apply glassmorphism design system | — | Brand refresh for public |
 | **3. Marketing & Growth** | — | Landing page (Evolutionary + Neuromarketing brief §7), value prop, waitlist | Beta testimonials, referral seeds | Launch campaign, pricing page, SEO/content, paid acquisition |
-| **4. UX/UI & Mobile** | — | Final UI pass, mobile optimization, onboarding UX | Usability fixes from beta | Polish |
+| **4. UX/UI & Mobile** | — | 🔨 Mobile optimization (host dashboard stopgaps done), brand visual redesign (Stitch), final UI pass, onboarding UX | Usability fixes from beta | Polish |
 | **5. Privacy, Security & Trust** | 🔴 Finalize ToS | 🔴 Privacy Policy, cookie taxonomy + consent banner, document RLS, security review, bucket/retention audit | DPA / consent ops (if EU), incident response basics | SLA, compliance hardening |
 | **6. QA, Maintenance & Reliability** | Promote intake → scenarios, run Layer 1, uptime monitors | Layer 2 Playwright, dedicated QA agent (§8), 🟡 AI answer eval set, QA-matrix evolution | Beta monitoring + triage | Regression suite, load test (200 concurrent) |
 | **7. Agent Operations** | Define operating model (hybrid) | Stand up PM agent + near-term agents (§8) | Autopilot during beta, escalate decisions | Tune autonomy |
@@ -120,7 +120,10 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 
 ### Track 4 — UX/UI & Mobile
 *Objective:* effortless on the devices people actually use.
-- **M1:** Final UI pass (dashboard + guest app); **mobile optimization** (guests are phone-first); onboarding UX.
+- 🔨 **M1 — Mobile optimization (host dashboard):** in progress — stopgap fixes shipped to `staging` 2026-07-07 (property cards unclipped + tappable Settings, app-bar account/profile menu, host chat dialog usable on mobile, Chat History routed to the fixed dialog, conversation pills no longer overlap the action row). Full mobile+web redesign against the brand still pending (Stitch session).
+- 🔨 **M1 — Host dashboard features (2026-07-07 evening, `96ce00a`):** shipped a host **profile menu** (name/nickname/bio/avatar/email/# properties) + a **dashboard impact-stats strip** (Alfred replies, hours saved, autopilot rate, guests helped), an **escalation-gated resolve button**, and a **conversation archive lifecycle** (auto-archive once `guests.check_out` passes via `pg_cron`, manual archive, auto-reactivate on a new guest message). `check_in/check_out` added to `guests` as placeholders for the future **Channex.io** reservation feed. Deploy-to-test on staging pending.
+- **M1:** Final UI pass (dashboard + guest app); guest-app mobile pass; onboarding UX.
+- **M1 — Visual redesign to brand:** apply the canonical HostWhisperer look (deep-obsidian + AI-aurora ethereal glassmorphism) per `_Context/Alfred_core_description.md` + `_Context/Design inspo/Brand_ID_guidelines.md` — the shipped app still uses the older olive/sage palette. Kick off via Google Stitch.
 - **M2:** Usability fixes from beta.
 - **M3:** Polish.
 - 🟢 **Open:** native iOS/Android apps (Flutter can) add an app-store track — **default web-only until demand proves it** (D9).
