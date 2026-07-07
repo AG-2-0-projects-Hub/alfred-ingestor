@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
-import '../screens/host_panel_screen.dart';
+import 'chat_live_dialog.dart';
 
 class ArchivedChatsDialog extends StatefulWidget {
   final String propertyId;
@@ -43,11 +43,17 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
   }
 
   void _openChat(Map<String, dynamic> guest) {
-    Navigator.of(context).pop();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => HostPanelScreen(propertyId: widget.propertyId),
-      ),
+    final bookingId = guest['booking_id'] as String? ?? '';
+    if (bookingId.isEmpty) return;
+    // Open the tapped past conversation in the same consolidated (and
+    // mobile-responsive) ChatLiveDialog every other entry point uses, stacked
+    // on top of this history list so closing it returns here — instead of the
+    // old full-page HostPanelScreen → ChatLiveScreen (crushed on mobile).
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: widget.propertyId,
+      propertyName: widget.propertyName,
     );
   }
 
