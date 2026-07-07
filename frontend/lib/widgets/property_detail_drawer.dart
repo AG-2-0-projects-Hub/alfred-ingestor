@@ -52,6 +52,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // Voice path state (reuses voice recorder + file status)
   final List<Map<String, String>> _voiceStatuses = [];
 
+  // Guest welcome language toggle
+  bool _savingWelcomeEnglish = false;
+
   // Automated Learning state
   List<Map<String, dynamic>> _learnedKnowledge = [];
   bool _loadingLearned = false;
@@ -340,6 +343,34 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     }
   }
 
+  Future<void> _toggleWelcomeAlsoEnglish(bool value) async {
+    final previous = _property['welcome_also_english'] == true;
+    setState(() {
+      _property['welcome_also_english'] = value;
+      _savingWelcomeEnglish = true;
+    });
+    try {
+      await Supabase.instance.client
+          .from('properties')
+          .update({
+            'welcome_also_english': value,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', _property['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _property['welcome_also_english'] = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Failed to update welcome setting: $e'),
+              backgroundColor: context.palette.danger),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingWelcomeEnglish = false);
+    }
+  }
+
   Future<void> _writeLearned(List<Map<String, dynamic>> updated) async {
     await Supabase.instance.client
         .from('properties')
@@ -549,6 +580,73 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _airbnbUrlRow(airbnbUrl),
           if (createdAt.isNotEmpty)
             _infoRow('Added', _formatDate(createdAt)),
+          const SizedBox(height: 8),
+          _buildWelcomeLanguageSetting(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWelcomeLanguageSetting() {
+    final palette = context.palette;
+    final alsoEnglish = _property['welcome_also_english'] == true;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Guest Welcome',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: palette.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Alfred greets guests in the property\'s local language. '
+                  'Turn this on to also send the welcome in English.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: palette.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Also send in English',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: palette.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _savingWelcomeEnglish
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Switch(
+                  value: alsoEnglish,
+                  activeThumbColor: palette.primary,
+                  onChanged: _toggleWelcomeAlsoEnglish,
+                ),
         ],
       ),
     );
