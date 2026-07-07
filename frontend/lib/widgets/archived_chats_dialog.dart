@@ -30,13 +30,25 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
 
   Future<void> _load() async {
     try {
+      // Chat History = archived conversations (auto-archived once the
+      // reservation ended, or manually archived by the host). Active ones live
+      // on the dashboard. Joined to the guest for name + booking display.
       final data = await Supabase.instance.client
-          .from('guests')
-          .select('id, booking_id, name, created_at, preferred_language')
+          .from('conversations')
+          .select('booking_id, archived_at, guests(name, created_at)')
           .eq('property_id', widget.propertyId)
-          .order('created_at', ascending: false);
+          .not('archived_at', 'is', null)
+          .order('archived_at', ascending: false);
+      final guests = [
+        for (final c in data)
+          {
+            'booking_id': c['booking_id'],
+            'name': (c['guests'] as Map?)?['name'] ?? 'Guest',
+            'created_at': c['archived_at'],
+          }
+      ];
       if (mounted) {
-        setState(() => _guests = List<Map<String, dynamic>>.from(data));
+        setState(() => _guests = List<Map<String, dynamic>>.from(guests));
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);

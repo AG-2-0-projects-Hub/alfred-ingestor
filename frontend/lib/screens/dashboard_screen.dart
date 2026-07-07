@@ -14,6 +14,7 @@ import '../widgets/chat_live_dialog.dart';
 import 'add_property_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
+import '../widgets/profile_dialog.dart';
 import '../services/push_notification_service.dart';
 import 'auth_screen.dart';
 
@@ -27,12 +28,14 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with WidgetsBindingObserver {
   List<Map<String, dynamic>> _properties = [];
-  Map<String, int> _chatCounts = {};
   Map<String, bool> _hasEscalation = {};
   Map<String, bool> _hasEmergency = {};
   Map<String, List<Map<String, dynamic>>> _conversationPreviews = {};
   Map<String, String> _guestNamesByBooking = {};
   bool _loading = true;
+
+  // Host impact stats (get_host_stats RPC). Null until first load.
+  Map<String, dynamic>? _hostStats;
 
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
@@ -49,6 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _notifPermission = PushNotificationService.permissionState;
+    _loadHostStats();
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
@@ -99,7 +103,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       final properties = List<Map<String, dynamic>>.from(data);
 
-      Map<String, int> counts = {};
       Map<String, bool> hasEscalation = {};
       Map<String, bool> hasEmergency = {};
       Map<String, List<Map<String, dynamic>>> previews = {};
@@ -111,8 +114,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             .select('property_id, booking_id, name')
             .inFilter('property_id', ids);
         for (final g in guests) {
-          final pid = g['property_id'] as String;
-          counts[pid] = (counts[pid] ?? 0) + 1;
           final bid = g['booking_id'] as String?;
           if (bid != null) {
             guestNames[bid] = g['name'] as String? ?? 'Guest';
@@ -121,8 +122,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         final convRows = await Supabase.instance.client
             .from('conversations')
             .select(
-                'id, property_id, booking_id, mode, requires_attention, escalation_reason, has_guest_message')
+                'id, property_id, booking_id, mode, requires_attention, escalation_reason, has_guest_message, archived_at')
             .inFilter('property_id', ids)
+            .isFilter('archived_at', null)
             .order('created_at', ascending: false);
 
         _processConversations(convRows, guestNames, hasEscalation, hasEmergency, previews);
@@ -131,7 +133,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (mounted) {
         setState(() {
           _properties = properties;
-          _chatCounts = counts;
           _hasEscalation = hasEscalation;
           _hasEmergency = hasEmergency;
           _conversationPreviews = previews;
@@ -159,6 +160,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     Map<String, List<Map<String, dynamic>>> previews,
   ) {
     for (final c in convRows) {
+      // Archived conversations drop off the dashboard active list. The load
+      // path already filters these out in SQL; this also handles the realtime
+      // stream path, where a cron/API archive pushes the row with archived_at set.
+      if (c['archived_at'] != null) continue;
       final pid = c['property_id'] as String;
       final bid = c['booking_id'] as String? ?? '';
       if (c['requires_attention'] == true) {
@@ -288,21 +293,35 @@ class _DashboardScreenState extends State<DashboardScreen>
         .inFilter('property_id', ids)
         .listen((rows) {
           if (!mounted) return;
-          final counts = <String, int>{};
           final names = <String, String>{};
           for (final g in rows) {
-            final pid = g['property_id'] as String;
-            counts[pid] = (counts[pid] ?? 0) + 1;
             final bid = g['booking_id'] as String?;
             if (bid != null) {
               names[bid] = g['name'] as String? ?? 'Guest';
             }
           }
           setState(() {
-            _chatCounts = counts;
             _guestNamesByBooking = names;
           });
         });
+  }
+
+  // Impact stats for the dashboard strip (single RPC call, scoped to the host
+  // by auth.uid() inside the SECURITY DEFINER function). Best-effort — the
+  // strip simply hides if this fails.
+  Future<void> _loadHostStats() async {
+    try {
+      final res = await Supabase.instance.client.rpc('get_host_stats');
+      if (mounted && res is Map) {
+        setState(() => _hostStats = Map<String, dynamic>.from(res));
+      }
+    } catch (_) {
+      // Ignore — no stats strip rather than an error.
+    }
+  }
+
+  void _openProfile() {
+    ProfileDialog.show(context, propertyCount: _properties.length);
   }
 
   Future<void> _logout() async {
@@ -383,7 +402,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   // any chat dialog. Silent — no spinner. Closes the gap between the resolve
   // API returning and Supabase realtime propagating the conversation update.
   void _onChatResolved() {
-    if (mounted) _loadProperties(silent: true);
+    if (mounted) {
+      _loadProperties(silent: true);
+      _loadHostStats();
+    }
   }
 
   void _openGuestLink(Map<String, dynamic> property) {
@@ -545,6 +567,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                     ),
                   ),
+                if (!isNarrow)
+                  IconButton(
+                    tooltip: 'Profile',
+                    icon: const Icon(Icons.person_outline_rounded, size: 20),
+                    onPressed: _openProfile,
+                  ),
                 IconButton(
                   tooltip: 'Send feedback',
                   icon: const Icon(Icons.feedback_outlined, size: 18),
@@ -583,6 +611,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     color: palette.surface,
                     onSelected: (v) {
                       if (v == 'logout') _logout();
+                      if (v == 'profile') _openProfile();
                     },
                     itemBuilder: (ctx) => [
                       PopupMenuItem<String>(
@@ -594,6 +623,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                       ),
                       const PopupMenuDivider(),
+                      PopupMenuItem<String>(
+                        value: 'profile',
+                        child: Row(
+                          children: [
+                            Icon(Icons.person_outline_rounded,
+                                size: 16, color: palette.textSecondary),
+                            const SizedBox(width: 8),
+                            const Text('Profile'),
+                          ],
+                        ),
+                      ),
                       PopupMenuItem<String>(
                         value: 'logout',
                         child: Row(
@@ -696,10 +736,101 @@ class _DashboardScreenState extends State<DashboardScreen>
         );
       });
     }
-    return _buildGrid();
+    // When the impact-stats strip is shown it sits below the app bar and clears
+    // it, so the grid drops its own big top inset. When stats haven't loaded
+    // (or failed), the grid keeps clearing the app bar itself.
+    if (_hostStats == null) return _buildGrid();
+    return Column(
+      children: [
+        _buildStatsStrip(palette),
+        Expanded(
+          child: _buildGrid(topInsetDesktop: 12, topInsetMobile: 12),
+        ),
+      ],
+    );
   }
 
-  Widget _buildGrid() {
+  Widget _buildStatsStrip(AppPalette palette) {
+    final s = _hostStats;
+    if (s == null) return const SizedBox.shrink();
+    final replies = '${s['alfred_replies'] ?? 0}';
+    final hours = _fmtHours(s['hours_saved']);
+    final autop = s['autopilot_rate'] == null
+        ? '—'
+        : '${(s['autopilot_rate'] as num).round()}%';
+    final guests = '${s['guests_helped'] ?? 0}';
+    final tiles = <Widget>[
+      _statTile(palette, Icons.smart_toy_outlined, replies, 'Alfred replies'),
+      _statTile(palette, Icons.schedule_rounded, hours, 'Hours saved (est.)'),
+      _statTile(palette, Icons.auto_mode_rounded, autop, 'Autopilot rate'),
+      _statTile(palette, Icons.groups_outlined, guests, 'Guests helped'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 12, 16, 4),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (int i = 0; i < tiles.length; i++) ...[
+              if (i > 0) const SizedBox(width: 10),
+              tiles[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statTile(
+      AppPalette palette, IconData icon, String value, String label) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 116),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: palette.glassTint,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: palette.primary),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                value,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: palette.textPrimary,
+                ),
+              ),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                    fontSize: 11, color: palette.textSecondary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Format hours_saved (a numeric like 1.9 or 2.0) → "1.9h" / "2h".
+  String _fmtHours(dynamic v) {
+    final n = (v is num) ? v : 0;
+    final s = n.toStringAsFixed(1);
+    return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}h';
+  }
+
+  Widget _buildGrid({
+    double topInsetDesktop = kToolbarHeight + 28.0,
+    double topInsetMobile = kToolbarHeight + 16.0,
+  }) {
     final items = [..._properties, <String, dynamic>{}];
     final n = items.length;
 
@@ -716,13 +847,13 @@ class _DashboardScreenState extends State<DashboardScreen>
       // Vertical scroll is expected — don't try to fit everything in viewport.
       if (viewportW < 500) {
         const mobilePadH = 16.0;
-        const mobilePadTop = kToolbarHeight + 16.0;
+        final mobilePadTop = topInsetMobile;
         const mobilePadBottom = 24.0;
         const mobileGap = 14.0;
         final mobileCardW = viewportW - mobilePadH * 2;
         const mobileCardH = 340.0;
         return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(
+          padding: EdgeInsets.fromLTRB(
               mobilePadH, mobilePadTop, mobilePadH, mobilePadBottom),
           physics: const AlwaysScrollableScrollPhysics(),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -738,7 +869,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ? PropertyCard.add(onAddProperty: _openAddProperty)
                 : PropertyCard(
                     property: item,
-                    activeChatCount: _chatCounts[item['id'] as String] ?? 0,
+                    activeChatCount:
+                        (_conversationPreviews[item['id'] as String] ?? const [])
+                            .length,
                     hasEscalation:
                         _hasEscalation[item['id'] as String] ?? false,
                     hasEmergency:
@@ -766,7 +899,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       const minCardH = 280.0;
       const gap = 18.0;
       const padH = 28.0;
-      const padTop = kToolbarHeight + 28.0;
+      final padTop = topInsetDesktop;
       const padBottom = 32.0;
 
       // Pick the largest column count whose card width is >= minCardW.
@@ -794,7 +927,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       final aspect = cardW / cardH;
 
       return GridView.builder(
-        padding: const EdgeInsets.fromLTRB(padH, padTop, padH, padBottom),
+        padding: EdgeInsets.fromLTRB(padH, padTop, padH, padBottom),
         physics: fits
             ? const NeverScrollableScrollPhysics()
             : const AlwaysScrollableScrollPhysics(),
@@ -811,7 +944,9 @@ class _DashboardScreenState extends State<DashboardScreen>
               ? PropertyCard.add(onAddProperty: _openAddProperty)
               : PropertyCard(
                   property: item,
-                  activeChatCount: _chatCounts[item['id'] as String] ?? 0,
+                  activeChatCount:
+                      (_conversationPreviews[item['id'] as String] ?? const [])
+                          .length,
                   hasEscalation: _hasEscalation[item['id'] as String] ?? false,
                   hasEmergency: _hasEmergency[item['id'] as String] ?? false,
                   conversationPreviews:

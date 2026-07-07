@@ -309,6 +309,23 @@ async def resolve_conversation(req: ResolveRequest):
     return {"status": "resolved", "learned": learned_entry}
 
 
+class ArchiveRequest(BaseModel):
+    conversation_id: str
+
+
+@router.post("/conversations/archive")
+async def archive_conversation(req: ArchiveRequest):
+    """Manually archive a conversation (host "delete conversation" action).
+
+    Non-destructive: it drops off the dashboard active list but keeps messages
+    and returns to active if the guest sends a new message (see
+    supabase_client.insert_message)."""
+    await asyncio.to_thread(
+        supabase_client.archive_conversation, req.conversation_id
+    )
+    return {"status": "archived"}
+
+
 class TransitionRequest(BaseModel):
     conversation_id: str
     kind: str  # 'intervene' | 'resume'

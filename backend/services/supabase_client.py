@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 _client: Client | None = None
@@ -435,6 +435,16 @@ def insert_message(
         client.table("conversations").update({"has_guest_message": True}) \
             .eq("id", conversation_id).eq("has_guest_message", False).execute()
 
+        # Reactivate an archived conversation: a new guest message pulls it back
+        # into the active list (covers both auto-archive on check_out and manual
+        # host archive). Done unconditionally — clearing an already-null
+        # archived_at is a harmless no-op, and bumping last_message_at on each
+        # guest message is correct anyway (it also stops the hourly cron from
+        # immediately re-archiving a conversation revived after check_out).
+        client.table("conversations").update(
+            {"archived_at": None, "last_message_at": _now()}
+        ).eq("id", conversation_id).execute()
+
     # A BEFORE INSERT trigger (suppress_dup_system_marker) can skip a duplicate
     # consecutive system marker, in which case no row is returned. Callers of
     # marker inserts ignore the return; guard so we don't IndexError on skip.
@@ -529,6 +539,17 @@ def update_conversation(conversation_id: str, **fields) -> None:
     client.table("conversations").update(fields).eq("id", conversation_id).execute()
 
 
+def archive_conversation(conversation_id: str) -> None:
+    """Manually archive a conversation (host "delete conversation" action).
+
+    Non-destructive: messages/training are kept and the conversation returns to
+    the active list if the guest sends a new message (see insert_message)."""
+    client = get_client()
+    client.table("conversations").update(
+        {"archived_at": _now()}
+    ).eq("id", conversation_id).execute()
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 
 # ── Knowledge injection ───────────────────────────────────────────────────────
@@ -552,6 +573,7 @@ def create_guest(
 ) -> dict:
     """Insert a new guest booking row and return it."""
     client = get_client()
+    now = datetime.now(timezone.utc)
     result = client.table("guests").insert({
         "booking_id": booking_id,
         "property_id": property_id,
@@ -561,6 +583,11 @@ def create_guest(
         "preferred_language": "not_set",
         "guest_chat_url": guest_chat_url,
         "host_chat_url": host_chat_url,
+        # Testing defaults until Channex.io feeds real reservation dates: the
+        # stay starts now and runs 96h. check_out drives auto-archiving of the
+        # conversation once it passes (pg_cron job auto-archive-conversations).
+        "check_in": now.isoformat(),
+        "check_out": (now + timedelta(hours=96)).isoformat(),
     }).execute()
     return result.data[0]
 

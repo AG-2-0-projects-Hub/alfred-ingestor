@@ -112,30 +112,25 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
       _archivedExpanded = true;
       _loadingArchived = true;
     });
-    // No `is_archived` column exists yet (see Future Backend Work in CONTEXT.md).
-    // "Archived" here = past guests for this property whose booking_id is NOT
-    // in the active conversations list. Matches the existing
-    // ArchivedChatsDialog behavior of querying the `guests` table directly.
+    // Archived = conversations with archived_at set (auto-archived once the
+    // reservation check_out passed, or manually archived by the host). Joined
+    // to the guest name for display.
     try {
-      final activeIds = _activeConversations
-          .map((c) => c['booking_id'] as String?)
-          .whereType<String>()
-          .toSet();
-      final guests = await Supabase.instance.client
-          .from('guests')
-          .select('booking_id, name, created_at')
+      final rows = await Supabase.instance.client
+          .from('conversations')
+          .select('booking_id, mode, requires_attention, escalation_reason, guests(name)')
           .eq('property_id', widget.property['id'])
-          .order('created_at', ascending: false);
+          .not('archived_at', 'is', null)
+          .order('archived_at', ascending: false);
       final archived = [
-        for (final g in guests)
-          if (!activeIds.contains(g['booking_id']))
-            {
-              'booking_id': g['booking_id'],
-              'guestName': g['name'] ?? 'Guest',
-              'mode': 'archived',
-              'requires_attention': false,
-              'escalation_reason': null,
-            }
+        for (final c in rows)
+          {
+            'booking_id': c['booking_id'],
+            'guestName': (c['guests'] as Map?)?['name'] ?? 'Guest',
+            'mode': 'archived',
+            'requires_attention': false,
+            'escalation_reason': null,
+          }
       ];
       if (mounted) setState(() {
         _archivedConvs = archived;

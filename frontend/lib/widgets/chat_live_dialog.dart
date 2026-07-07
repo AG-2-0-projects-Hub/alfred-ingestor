@@ -87,6 +87,12 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
   String? _escalationReason;
+  bool _requiresAttention = false;
+
+  // A conversation is "escalated" only when the backend flagged it
+  // (requires_attention + escalation_reason). A manual Intervene toggle sets
+  // neither — so the resolve button must not appear just because mode==intervene.
+  bool get _isEscalated => _requiresAttention || _escalationReason != null;
   bool _isSending = false;
   bool _isResolving = false;
   final _hostController = TextEditingController();
@@ -142,6 +148,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           setState(() {
             _mode = row['mode'] as String? ?? 'autopilot';
             _escalationReason = row['escalation_reason'] as String?;
+            _requiresAttention = row['requires_attention'] == true;
           });
           if (_conversationId == null) {
             setState(() => _conversationId = rowId);
@@ -275,6 +282,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         setState(() {
           _mode = 'autopilot';
           _escalationReason = null;
+          _requiresAttention = false;
         });
         await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
         widget.onResolved?.call();
@@ -301,6 +309,59 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       }
     } finally {
       if (mounted) setState(() => _isResolving = false);
+    }
+  }
+
+  Future<void> _archiveConversation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.palette.surface,
+        title: const Text('Archive conversation?'),
+        content: Text(
+          'The reservation may still be active. If the guest sends a new '
+          'message, it will move back to Active Conversations.',
+          style: GoogleFonts.inter(fontSize: 13, color: context.palette.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || _conversationId == null) return;
+    try {
+      await ApiClient.postJson(
+        '/api/conversations/archive',
+        {'conversation_id': _conversationId},
+      );
+      // Reuse the dashboard's optimistic-refresh callback so the archived
+      // conversation drops off the active list immediately.
+      widget.onResolved?.call();
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conversation archived.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to archive: $e')),
+        );
+      }
     }
   }
 
@@ -454,6 +515,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
               onPressed: _showGuestLinkSheet,
               color: palette.textMuted,
             ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: Icon(Icons.more_vert_rounded, color: palette.textMuted),
+            color: palette.surface,
+            onSelected: (v) {
+              if (v == 'archive') _archiveConversation();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem<String>(
+                value: 'archive',
+                child: Row(
+                  children: [
+                    Icon(Icons.archive_outlined,
+                        size: 16, color: palette.textSecondary),
+                    const SizedBox(width: 8),
+                    const Text('Archive conversation'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.close_rounded),
             tooltip: 'Close',
@@ -526,7 +608,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildModeToggle(),
-        if (_mode == 'intervene') _buildResolveButton(),
+        if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
         if (_mode == 'autopilot' && _escalationReason != null)
           _buildUnresolvedBanner(),
         const Divider(height: 1),
@@ -571,7 +653,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             children: [
               _buildGuestLinkSection(),
               _buildModeToggle(),
-              if (_mode == 'intervene') _buildResolveButton(),
+              if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
               if (_mode == 'autopilot' && _escalationReason != null)
                 _buildUnresolvedBanner(),
               const Divider(height: 1),
