@@ -5,7 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../screens/chat_live_screen.dart';
+import 'chat_live_dialog.dart';
 import '../theme/app_theme.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
@@ -89,12 +89,13 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   void _openHostChat() {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
+    final propertyName = widget.property['name'] as String? ?? '';
     Navigator.of(context).pop();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            ChatLiveScreen(bookingId: bookingId, propertyId: propertyId),
-      ),
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: propertyId,
+      propertyName: propertyName,
     );
   }
 

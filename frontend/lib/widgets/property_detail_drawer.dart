@@ -592,47 +592,28 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final alsoEnglish = _property['welcome_also_english'] == true;
     return Container(
       margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: palette.surfaceAlt,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: palette.border),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Guest Welcome',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: palette.textPrimary,
-                  ),
+            child: Tooltip(
+              message:
+                  'Alfred greets guests in the property\'s local language by '
+                  'default. Turn this on to also send the welcome in English.',
+              waitDuration: const Duration(milliseconds: 300),
+              child: Text(
+                '+ English welcome',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: palette.textPrimary,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Alfred greets guests in the property\'s local language. '
-                  'Turn this on to also send the welcome in English.',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: palette.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Also send in English',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: palette.textPrimary,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           const SizedBox(width: 12),

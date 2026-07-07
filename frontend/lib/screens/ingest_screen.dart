@@ -10,7 +10,7 @@ import '../widgets/drop_zone.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
-import 'chat_live_screen.dart';
+import '../widgets/chat_live_dialog.dart';
 
 class IngestScreen extends StatefulWidget {
   const IngestScreen({super.key});
@@ -365,14 +365,11 @@ class _IngestScreenState extends State<IngestScreen> {
               final bookingId = bookingController.text.trim();
               if (bookingId.isEmpty) return;
               Navigator.pop(ctx);
-              Navigator.push(
+              ChatLiveDialog.show(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => ChatLiveScreen(
-                    bookingId: bookingId,
-                    propertyId: propertyId,
-                  ),
-                ),
+                bookingId: bookingId,
+                propertyId: propertyId,
+                propertyName: _nicknameController.text.trim(),
               );
             },
             child: const Text('Open'),
