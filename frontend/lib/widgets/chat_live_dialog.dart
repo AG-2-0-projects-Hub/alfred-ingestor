@@ -909,9 +909,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   }
 
   // Classifies each message as part of an active escalation, a resolved
-  // escalation, or neither. When a 'resolved' marker is seen, retroactively
-  // flips every message in the open window from active → resolved so the
-  // bubble renderer can colour them green (closed lifecycle).
+  // escalation, or neither, so the bubble renderer can colour the WHOLE chain
+  // (guest trigger → Alfred's escalation reply → host replies → guest
+  // follow-ups → resolve) amber while active and green once resolved.
+  //
+  // The window closes on the `__SYS_RESOLVED__` marker — which is inserted last,
+  // after the host's replies — NOT on the escalated reply's resolution_status
+  // (that sits early in the chain and would wrongly exclude everything after it).
   List<_EscalationState> _computeEscalationWindow() {
     final out =
         List<_EscalationState>.filled(_messages.length, _EscalationState.none);
@@ -919,6 +923,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     int windowStart = -1;
     for (int i = 0; i < _messages.length; i++) {
       final m = _messages[i];
+      final content = m['content'];
+      // Open at the escalation trigger: the guest message right before an
+      // escalated reply, or the escalated reply itself. (A manual Intervene is
+      // not an escalation, so it intentionally does not open a window.)
       if (!inWindow &&
           m['sender_type'] == 'guest' &&
           i + 1 < _messages.length &&
@@ -926,15 +934,21 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         inWindow = true;
         windowStart = i;
       }
-      if (m['is_escalated_interaction'] == true) {
-        if (!inWindow) windowStart = i;
+      if (!inWindow && m['is_escalated_interaction'] == true) {
         inWindow = true;
+        windowStart = i;
       }
       if (inWindow) out[i] = _EscalationState.active;
-      if (m['resolution_status'] == 'resolved' && inWindow) {
+      // Resolve marker → flip the ENTIRE span green and close the window.
+      if (inWindow && content == ChatSystemMessages.resumeAfterResolve) {
         for (int j = windowStart; j <= i; j++) {
           out[j] = _EscalationState.resolved;
         }
+        inWindow = false;
+        windowStart = -1;
+      } else if (inWindow && content == ChatSystemMessages.resume) {
+        // Manual resume without a formal resolve: stop the window but leave the
+        // span amber (unresolved) — nothing was actually resolved.
         inWindow = false;
         windowStart = -1;
       }
@@ -1134,14 +1148,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         bottomRight: Radius.circular(3),
       );
     } else if (isHost) {
-      bgColor = context.palette.surface;
-      border = Border.all(color: context.palette.border);
       radius = const BorderRadius.only(
         topLeft: Radius.circular(3),
         topRight: Radius.circular(14),
         bottomLeft: Radius.circular(14),
         bottomRight: Radius.circular(14),
       );
+      // Host replies made during the intervention are part of the chain, so
+      // they take the same amber (active) / green (resolved) treatment.
+      if (isResolved) {
+        bgColor = context.palette.successContainer;
+        border = Border.all(color: context.palette.success, width: 1.5);
+      } else if (isActive && isEmergency) {
+        bgColor = context.palette.dangerContainer;
+        border = Border.all(color: context.palette.danger, width: 1.5);
+      } else if (isActive) {
+        bgColor = context.palette.warningContainer;
+        border = Border.all(color: context.palette.warning, width: 1.5);
+      } else {
+        bgColor = context.palette.surface;
+        border = Border.all(color: context.palette.border);
+      }
     } else if (isResolved) {
       bgColor = context.palette.successContainer;
       border = Border.all(color: context.palette.success, width: 1.5);

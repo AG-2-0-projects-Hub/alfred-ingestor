@@ -62,6 +62,14 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   int? _editingLearnedIndex;
   final _editProblemCtrl = TextEditingController();
   final _editSolutionCtrl = TextEditingController();
+  // After Accept, a card lingers in the review queue for a few seconds showing
+  // an Undo, then moves to the Vault. Keyed by the entry's resolved_at.
+  final Set<String> _acceptGrace = {};
+  final Map<String, Timer> _acceptTimers = {};
+  // Vault delete gets the same brief Undo before the row is actually removed.
+  final Set<String> _deleteGrace = {};
+  final Map<String, Timer> _deleteTimers = {};
+  static const _graceDuration = Duration(seconds: 3);
 
   // Live property subscription while the drawer is open. Without this, the
   // dashboard's stream updates the underlying property but the drawer keeps
@@ -88,6 +96,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     _kbChatController.dispose();
     _editProblemCtrl.dispose();
     _editSolutionCtrl.dispose();
+    for (final t in _acceptTimers.values) {
+      t.cancel();
+    }
+    for (final t in _deleteTimers.values) {
+      t.cancel();
+    }
     _propStream?.cancel();
     super.dispose();
   }
@@ -382,10 +396,80 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     if (mounted) setState(() => _learnedKnowledge = updated);
   }
 
+  // Stable-ish key for a learned entry (resolved_at is set once at creation).
+  String _learnedKey(Map<String, dynamic> e, int index) =>
+      (e['resolved_at'] as String?) ?? 'idx_$index';
+
+  // Entries still awaiting review: not reviewed yet, or in the post-accept
+  // grace window (briefly shown with Undo before moving to the Vault).
+  List<MapEntry<int, Map<String, dynamic>>> get _pendingLearned {
+    final out = <MapEntry<int, Map<String, dynamic>>>[];
+    for (var i = 0; i < _learnedKnowledge.length; i++) {
+      final e = _learnedKnowledge[i];
+      if (e['reviewed'] != true || _acceptGrace.contains(_learnedKey(e, i))) {
+        out.add(MapEntry(i, e));
+      }
+    }
+    return out;
+  }
+
+  // Accepted entries that have settled into the Vault (not in the grace window).
+  List<MapEntry<int, Map<String, dynamic>>> get _vaultLearned {
+    final out = <MapEntry<int, Map<String, dynamic>>>[];
+    for (var i = 0; i < _learnedKnowledge.length; i++) {
+      final e = _learnedKnowledge[i];
+      if (e['reviewed'] == true && !_acceptGrace.contains(_learnedKey(e, i))) {
+        out.add(MapEntry(i, e));
+      }
+    }
+    return out;
+  }
+
   Future<void> _acceptLearned(int index) async {
+    final key = _learnedKey(_learnedKnowledge[index], index);
     final updated = List<Map<String, dynamic>>.from(_learnedKnowledge);
     updated[index] = {...updated[index], 'reviewed': true};
     await _writeLearned(updated);
+    // Keep the card in the review queue with an Undo for a few seconds, then
+    // let it settle into the Vault.
+    _acceptTimers[key]?.cancel();
+    if (mounted) setState(() => _acceptGrace.add(key));
+    _acceptTimers[key] = Timer(_graceDuration, () {
+      _acceptTimers.remove(key);
+      if (mounted) setState(() => _acceptGrace.remove(key));
+    });
+  }
+
+  // Vault delete with a brief Undo: the row shows "Removing… Undo" for a few
+  // seconds, then the entry is actually removed from learned_knowledge. onChange
+  // refreshes the open Vault dialog (guarded — it's a no-op once closed).
+  void _beginVaultDelete(String key, {VoidCallback? onChange}) {
+    _deleteTimers[key]?.cancel();
+    if (mounted) setState(() => _deleteGrace.add(key));
+    onChange?.call();
+    _deleteTimers[key] = Timer(_graceDuration, () async {
+      _deleteTimers.remove(key);
+      final updated = List<Map<String, dynamic>>.from(_learnedKnowledge)
+        ..removeWhere((e) => (e['resolved_at'] as String?) == key);
+      await _writeLearned(updated);
+      if (mounted) setState(() => _deleteGrace.remove(key));
+      onChange?.call();
+    });
+  }
+
+  void _undoVaultDelete(String key, {VoidCallback? onChange}) {
+    _deleteTimers.remove(key)?.cancel();
+    if (mounted) setState(() => _deleteGrace.remove(key));
+    onChange?.call();
+  }
+
+  Future<void> _undoAccept(int index) async {
+    final key = _learnedKey(_learnedKnowledge[index], index);
+    _acceptTimers.remove(key)?.cancel();
+    final updated = List<Map<String, dynamic>>.from(_learnedKnowledge);
+    updated[index] = {...updated[index], 'reviewed': false};
+    await _writeLearned(updated);
+    if (mounted) setState(() => _acceptGrace.remove(key));
   }
 
   Future<void> _saveLearned(int index) async {
@@ -404,6 +488,178 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final updated = List<Map<String, dynamic>>.from(_learnedKnowledge)
       ..removeAt(index);
     await _writeLearned(updated);
+  }
+
+  Future<bool> _confirmDelete(String question) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this entry?'),
+        content: Text(
+          'This permanently removes it from $question learned knowledge. '
+          'Alfred will no longer use it to answer guests.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  // The Vault: everything Alfred has learned (accepted entries), where the host
+  // can review the full history and delete anything unwanted (with a brief Undo).
+  void _showKnowledgeVault() {
+    bool dialogOpen = true;
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            void safeRefresh() {
+              if (dialogOpen) setDialogState(() {});
+            }
+
+            final entries = _vaultLearned;
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.inventory_2_outlined,
+                      size: 18, color: context.palette.accent),
+                  const SizedBox(width: 8),
+                  const Text('Knowledge Vault'),
+                ],
+              ),
+              content: SizedBox(
+                width: 440,
+                child: entries.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'Nothing here yet. Accepted learning entries live here — '
+                          'you can review or remove them anytime.',
+                          style: GoogleFonts.inter(
+                              fontSize: 12, color: context.palette.textMuted),
+                        ),
+                      )
+                    : ListView(
+                        shrinkWrap: true,
+                        children: entries.map((p) {
+                          final index = p.key;
+                          final entry = p.value;
+                          final key = _learnedKey(entry, index);
+                          final deleting = _deleteGrace.contains(key);
+                          final category = entry['category'] as String? ?? 'other';
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              border: Border.all(color: Colors.green.shade200),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.shade100,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        category,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.green.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    if (deleting) ...[
+                                      Text('Removing…',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color: Colors.red.shade600)),
+                                      TextButton.icon(
+                                        onPressed: () => _undoVaultDelete(key,
+                                            onChange: safeRefresh),
+                                        icon: const Icon(Icons.undo_rounded, size: 14),
+                                        label: const Text('Undo'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor:
+                                              context.palette.textSecondary,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 2),
+                                          textStyle:
+                                              GoogleFonts.inter(fontSize: 12),
+                                        ),
+                                      ),
+                                    ] else
+                                      IconButton(
+                                        tooltip: 'Delete',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: Icon(Icons.delete_outline_rounded,
+                                            size: 18, color: Colors.red.shade600),
+                                        onPressed: () async {
+                                          if (await _confirmDelete(
+                                              'this property’s')) {
+                                            _beginVaultDelete(key,
+                                                onChange: safeRefresh);
+                                          }
+                                        },
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Opacity(
+                                  opacity: deleting ? 0.5 : 1.0,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Q: ${entry['problem_summary'] ?? ''}',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color: context.palette.textPrimary,
+                                              height: 1.4)),
+                                      const SizedBox(height: 4),
+                                      Text('A: ${entry['solution_summary'] ?? ''}',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color: context.palette.textSecondary,
+                                              height: 1.4)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) => dialogOpen = false);
   }
 
   @override
@@ -876,6 +1132,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                           .titleSmall
                           ?.copyWith(fontWeight: FontWeight.w600),
                     ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: _showKnowledgeVault,
+                      icon: const Icon(Icons.inventory_2_outlined, size: 15),
+                      label: Text(_vaultLearned.isEmpty
+                          ? 'Vault'
+                          : 'Vault (${_vaultLearned.length})'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: context.palette.textSecondary,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        textStyle: GoogleFonts.inter(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -891,16 +1161,19 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                       child: CircularProgressIndicator(color: context.palette.primary),
                     ),
                   )
-                else if (_learnedKnowledge.isEmpty)
+                else if (_pendingLearned.isEmpty)
                   Text(
-                    'No automated learning entries yet. Resolve an escalation to generate one.',
+                    _vaultLearned.isEmpty
+                        ? 'No automated learning entries yet. Resolve an escalation to generate one.'
+                        : 'All caught up — nothing waiting for review. Open the Vault to see what Alfred has learned.',
                     style: GoogleFonts.inter(fontSize: 12, color: context.palette.textMuted),
                   )
                 else
-                  ..._learnedKnowledge.asMap().entries.map((e) {
+                  ..._pendingLearned.map((e) {
                     final index = e.key;
                     final entry = e.value;
                     final reviewed = entry['reviewed'] == true;
+                    final inGrace = _acceptGrace.contains(_learnedKey(entry, index));
                     final isEditing = _editingLearnedIndex == index;
                     final bg = reviewed ? Colors.green.shade50 : Colors.orange.shade50;
                     final borderColor = reviewed ? Colors.green.shade300 : Colors.orange.shade300;
@@ -987,9 +1260,37 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                               style: GoogleFonts.inter(fontSize: 12, color: context.palette.textSecondary, height: 1.4),
                             ),
                             const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                if (!reviewed)
+                            if (inGrace)
+                              Row(
+                                children: [
+                                  Icon(Icons.check_circle_rounded,
+                                      size: 15, color: Colors.green.shade600),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Saved to Vault',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.green.shade700,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  TextButton.icon(
+                                    onPressed: () => _undoAccept(index),
+                                    icon: const Icon(Icons.undo_rounded, size: 14),
+                                    label: const Text('Undo'),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: context.palette.textSecondary,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 2),
+                                      textStyle: GoogleFonts.inter(fontSize: 12),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              Row(
+                                children: [
                                   OutlinedButton.icon(
                                     onPressed: () => _acceptLearned(index),
                                     icon: Icon(Icons.check_rounded, size: 14),
@@ -1001,36 +1302,36 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                       textStyle: GoogleFonts.inter(fontSize: 12),
                                     ),
                                   ),
-                                if (!reviewed) const SizedBox(width: 6),
-                                OutlinedButton.icon(
-                                  onPressed: () {
-                                    _editProblemCtrl.text = entry['problem_summary'] as String? ?? '';
-                                    _editSolutionCtrl.text = entry['solution_summary'] as String? ?? '';
-                                    setState(() => _editingLearnedIndex = index);
-                                  },
-                                  icon: Icon(Icons.edit_outlined, size: 14),
-                                  label: const Text('Edit'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: context.palette.textSecondary,
-                                    side: BorderSide(color: context.palette.border),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    textStyle: GoogleFonts.inter(fontSize: 12),
+                                  const SizedBox(width: 6),
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                      _editProblemCtrl.text = entry['problem_summary'] as String? ?? '';
+                                      _editSolutionCtrl.text = entry['solution_summary'] as String? ?? '';
+                                      setState(() => _editingLearnedIndex = index);
+                                    },
+                                    icon: Icon(Icons.edit_outlined, size: 14),
+                                    label: const Text('Edit'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: context.palette.textSecondary,
+                                      side: BorderSide(color: context.palette.border),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      textStyle: GoogleFonts.inter(fontSize: 12),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                OutlinedButton.icon(
-                                  onPressed: () => _discardLearned(index),
-                                  icon: Icon(Icons.delete_outline_rounded, size: 14),
-                                  label: const Text('Discard'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.red.shade700,
-                                    side: BorderSide(color: Colors.red.shade300),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    textStyle: GoogleFonts.inter(fontSize: 12),
+                                  const SizedBox(width: 6),
+                                  OutlinedButton.icon(
+                                    onPressed: () => _discardLearned(index),
+                                    icon: Icon(Icons.delete_outline_rounded, size: 14),
+                                    label: const Text('Discard'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red.shade700,
+                                      side: BorderSide(color: Colors.red.shade300),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      textStyle: GoogleFonts.inter(fontSize: 12),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
                           ],
                         ],
                       ),
