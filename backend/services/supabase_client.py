@@ -501,7 +501,7 @@ def get_conversation_thread_for_resolve(
         .execute()
     )
     if not first_esc.data:
-        return conv_id, []
+        return conv_id, [], escalation_reason
     threshold = first_esc.data[0]["created_at"]
     thread = (
         client.table("messages")
@@ -511,7 +511,7 @@ def get_conversation_thread_for_resolve(
         .order("created_at")
         .execute()
     )
-    return conv_id, (thread.data or [])
+    return conv_id, (thread.data or []), escalation_reason
 
 
 def resolve_conversation(
