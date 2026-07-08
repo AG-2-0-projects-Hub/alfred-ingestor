@@ -1,7 +1,7 @@
 # Alfred / HostWhisperer — Launch Roadmap
 
 **Version:** 1.2
-**Created:** 2026-06-30 · **Updated:** 2026-07-07 (status sync + Track 4 kickoff — marked shipped items done across Tracks 1/2/6/7/10; Track 4 mobile optimization now in progress with host-dashboard stopgaps shipped; see `_Context/session-digest.md`)
+**Created:** 2026-06-30 · **Updated:** 2026-07-08 (Wave-1 execution — AI guardrails implemented (uncommitted, pending deploy-test), DB-reset runbook + RLS/data-protection write-up done; dependency-ordered execution plan added at `_Context/Roadmap_tackle_plan.md`; see `_Context/session-digest.md`)
 **Owner:** Founder (decision-maker + direction) · Execution: AG agents (Claude Code / Gemini)
 **Status:** Active — pre-closed-beta
 **Structure:** Workstream tracks × launch milestones (matrix), sequenced by readiness (no hard dates)
@@ -92,9 +92,9 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 - ✅ **M0:** Test soft-delete/anonymization end-to-end (shipped `bd13deb`/`fdf965c`, live-verified).
 - ✅ **M0:** Set prod env vars (`SUPABASE_JWT_SECRET`, `PYTHON_VERSION=3.12.10`).
 - **M0:** Merge `staging→main` — new batch pending (Telegram, roadmap, dashboard, feedback, prompt fixes), deferred until after mobile UI + further QA hardening.
-- **M0:** Prepare clean DB reset plan.
+- ✅ **M0:** Prepare clean DB reset plan — runbook at `_Context/plans/db-reset-runbook.md` (2026-07-08). Execution stays destructive-gated (shared DB wipes prod: explicit CONFIRM + fresh verified backup; see tackle plan Wave 4).
 - **M1:** Cloud Run migration; self-serve signup + guided onboarding; harden error states.
-  - 🔴 **AI guardrails (keep simple):** per-conversation/tenant **rate limit** (a counter, not a quota engine) to cap runaway cost/abuse; **high-stakes-field fallback** — for address, access codes, checkout, Alfred uses only confirmed Master-JSON data or says "let me confirm with your host" rather than guessing; lean on the **model provider's built-in safety filters** for moderation; basic system-prompt hardening against injection. *No ML moderation pipeline.*
+- 🔨 🔴 **M1 — AI guardrails (keep simple):** implemented 2026-07-08 in `backend/services/guardrails.py` + `messages.py` + prompt hardening — per-conversation **rate limit** (20/hr · 100/day, env-tunable counters, not a quota engine), **high-stakes-field fallback** (server-side backstop: address/access codes/wifi/check-times answered only from confirmed Master-JSON data, else "let me confirm with your host" + escalation), prompt-injection defense + 2000-char input cap. *No ML moderation pipeline.* Status: uncommitted → needs commit, staging deploy-test, then prod via the next `staging→main` merge.
 - ✅ **M2:** Telegram guest channel live (native port, `@AlfredHostW_bot`, live-tested end-to-end on staging 2026-07-05).
 - **M2:** 🔴 WhatsApp live. *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2).
 - **M3:** V2 scale stack — Redis cache + BullMQ queues, Sentry + Axiom, Resend, PostHog.
@@ -133,7 +133,8 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 ### Track 5 — Privacy, Security & Trust
 *Objective:* legally and technically trustworthy before real data flows.
 - **M0:** 🔴 Finalize ToS (`tos-draft.md` exists) — **include an AI-accuracy disclaimer** (R/R2).
-- **M1:** 🔴 Privacy Policy; cookie taxonomy (functional/analytics/marketing) + consent banner wired to the real stack (only non-essential cookies post-consent); document data protection (RLS, soft-delete + anonymization already built); security review (security-review + insecure-defaults skills); bucket/retention audit.
+- **M1:** 🔴 Privacy Policy; cookie taxonomy (functional/analytics/marketing) + consent banner wired to the real stack (only non-essential cookies post-consent); security review (security-review + insecure-defaults skills); bucket/retention audit (⚠️ start with the anon INSERT/SELECT policies on `Property_assets` + anon uploads on `chat_media`, found 2026-07-08).
+- ✅ **M1:** Document data protection — as-built RLS / booking-JWT / soft-delete write-up at `_Context/RLS_and_data_protection.md` (2026-07-08, from live `pg_policies`); feeds the security review + Privacy Policy.
 - **M2:** DPA / consent ops *if EU guests* (conditional — D4); basic incident-response runbook.
 - **M3:** SLA, compliance hardening.
 - 🔴 **M1 — Consent capture at signup:** a versioned ToS/Privacy "I agree" recorded per account (not just cookie consent).

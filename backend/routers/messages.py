@@ -4,10 +4,10 @@ import os
 import random
 import re
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import supabase_client, gemini_messenger, telegram_client, welcome
+from services import guardrails, supabase_client, gemini_messenger, telegram_client, welcome
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
 router = APIRouter()
@@ -60,6 +60,9 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
     caller surfaces these as HTTP errors; the Telegram caller catches them and
     sends a friendly message.
     """
+    # Guardrail: cap input length before it hits storage or the prompt.
+    message = guardrails.truncate_message(message)
+
     guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, booking_id)
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
@@ -104,6 +107,41 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
             "requires_escalation": False,
             "conversation_id": conversation["id"],
             "mode": "intervene",
+        }
+
+    # Guardrail: per-conversation rate limit (R3 — runaway cost/abuse). Checked
+    # after the guest message is stored (host always sees it) but before any
+    # Gemini spend. On breach the cooldown notice is posted at most once per
+    # streak — repeat breaches stay silent.
+    now = datetime.now(timezone.utc)
+    hourly = await asyncio.to_thread(
+        supabase_client.count_recent_guest_messages,
+        conversation["id"], (now - timedelta(hours=1)).isoformat(),
+    )
+    daily = hourly
+    if hourly <= guardrails.RATE_LIMIT_PER_HOUR:
+        daily = await asyncio.to_thread(
+            supabase_client.count_recent_guest_messages,
+            conversation["id"], (now - timedelta(hours=24)).isoformat(),
+        )
+    if hourly > guardrails.RATE_LIMIT_PER_HOUR or daily > guardrails.RATE_LIMIT_PER_DAY:
+        log.warning("rate limit tripped for booking=%s (hour=%s day=%s)",
+                    booking_id, hourly, daily)
+        notice = guardrails.rate_limit_reply(guest.get("preferred_language"))
+        last_ai = next(
+            (m for m in reversed(history) if m.get("sender_type") == "ai"), None
+        )
+        reply_out = None
+        if last_ai is None or last_ai.get("content") != notice:
+            await asyncio.to_thread(
+                supabase_client.insert_message, conversation["id"], "ai", notice
+            )
+            reply_out = notice
+        return {
+            "reply": reply_out,
+            "requires_escalation": False,
+            "conversation_id": conversation["id"],
+            "mode": conversation.get("mode") or "autopilot",
         }
 
     property_data = await asyncio.to_thread(
@@ -155,6 +193,28 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
         )
 
     requires_escalation = bool(first_result.get("requires_escalation"))
+    escalation_reason = first_result.get("escalation_reason")
+
+    # Guardrail: high-stakes backstop (R2). If the guest asked for an address,
+    # access code, wifi password, or check-in/out time that the Master JSON
+    # can't safely answer (missing or conflicted) and the model did NOT
+    # escalate, don't trust its reply — replace it with a safe holding line
+    # and force the escalation the prompt should have produced.
+    if not requires_escalation:
+        backstop = guardrails.high_stakes_backstop(
+            message, property_data["master_json"]
+        )
+        if backstop:
+            log.warning(
+                "high-stakes backstop tripped: intent=%s reason=%s booking=%s",
+                backstop["intent"], backstop["reason"], booking_id,
+            )
+            requires_escalation = True
+            escalation_reason = backstop["reason"]
+            reply = guardrails.holding_reply(
+                first_result.get("detected_language")
+                or guest.get("preferred_language")
+            )
 
     # Persist the language Alfred actually replied in, so the next turn has a
     # stable anchor instead of re-detecting (and possibly flip-flopping) from
@@ -179,7 +239,7 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
     if requires_escalation:
         update_fields["requires_attention"] = True
         update_fields["mode"] = "intervene"
-        update_fields["escalation_reason"] = first_result.get("escalation_reason")
+        update_fields["escalation_reason"] = escalation_reason
 
     await asyncio.to_thread(
         supabase_client.update_conversation,

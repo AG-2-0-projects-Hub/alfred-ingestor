@@ -392,6 +392,25 @@ def ensure_conversation_with_welcome(
     return conversation, True
 
 
+def count_recent_guest_messages(conversation_id: str, since_iso: str) -> int:
+    """Guest messages in this conversation since `since_iso` (rate limiting).
+
+    NOTE: `messages` currently has no index beyond its PK, so this filters via
+    a scan — fine at current volume. Index TODO (pending approval):
+    CREATE INDEX idx_messages_conversation_created ON messages (conversation_id, created_at);
+    """
+    client = get_client()
+    result = (
+        client.table("messages")
+        .select("id", count="exact")
+        .eq("conversation_id", conversation_id)
+        .eq("sender_type", "guest")
+        .gte("created_at", since_iso)
+        .execute()
+    )
+    return result.count or 0
+
+
 def get_conversation_messages(conversation_id: str) -> list[dict]:
     client = get_client()
     result = (
