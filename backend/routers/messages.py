@@ -7,7 +7,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import guardrails, supabase_client, gemini_messenger, telegram_client, welcome
+from services import guardrails, learning_triage, supabase_client, gemini_messenger, telegram_client, welcome
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
 router = APIRouter()
@@ -325,43 +325,90 @@ async def resolve_conversation(req: ResolveRequest):
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
-    conv_id, thread = await asyncio.to_thread(
+    conv_id, thread, escalation_reason = await asyncio.to_thread(
         supabase_client.get_conversation_thread_for_resolve,
         req.booking_id,
     )
     if not conv_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    property_id = guest["property_id"]
+
+    # ── Automated-learning triage ────────────────────────────────────────────
+    # Two layers decide whether this resolution becomes reusable knowledge; every
+    # outcome is recorded (pseudonymized) in the learning_events ledger.
     learned_entry = None
-    if thread:
+    event = None  # (disposition, skip_reason, summary-or-None) to record
+
+    if not thread:
+        # Nothing to learn from (manual resolve of an empty/pending thread).
+        event = ("dropped", "no_content", None)
+    elif learning_triage.reason_disposition(escalation_reason) == "drop":
+        # Layer 1: emergencies / hostility / financial / out-of-scope never
+        # learn — skip the summarizer entirely (cheaper + no PII exposure).
+        event = ("dropped", learning_triage.layer1_skip_reason(escalation_reason), None)
+    else:
+        # Layer 2: let the summarizer judge reusability.
         try:
             summary = await asyncio.wait_for(
                 gemini_messenger.summarize_escalation(thread),
                 timeout=GEMINI_TIMEOUT_S,
             )
-            learned_entry = {
-                "problem_summary": summary.get("problem_summary", ""),
-                "solution_summary": summary.get("solution_summary", ""),
-                "category": summary.get("category", "other"),
-                "language": summary.get("language", "en"),
-                "resolved_at": _now_iso(),
-                "booking_id": req.booking_id,
-                "reviewed": False,
-            }
+            reusable = bool(summary.get("is_reusable_knowledge"))
+            has_content = bool(
+                (summary.get("problem_summary") or "").strip()
+                or (summary.get("solution_summary") or "").strip()
+            )
+            if reusable and has_content:
+                learned_entry = {
+                    "problem_summary": summary.get("problem_summary", ""),
+                    "solution_summary": summary.get("solution_summary", ""),
+                    "category": summary.get("category", "other"),
+                    "language": summary.get("language", "en"),
+                    "resolved_at": _now_iso(),
+                    "booking_id": req.booking_id,
+                    "reviewed": False,
+                }
+                event = ("learned", None, summary)
+            else:
+                event = ("dropped", summary.get("skip_reason") or "not_reusable", summary)
         except asyncio.TimeoutError:
             log.warning(
                 "Gemini summarizer exceeded %ss for booking=%s; resolving without learning",
                 GEMINI_TIMEOUT_S, req.booking_id,
             )
+            event = ("dropped", "summarizer_timeout", None)
         except Exception as exc:
             log.exception("Summarizer failed for booking=%s: %s", req.booking_id, exc)
+            event = ("dropped", "summarizer_error", None)
 
     await asyncio.to_thread(
         supabase_client.resolve_conversation,
         conv_id,
-        guest["property_id"],
+        property_id,
         learned_entry,
     )
+
+    # Record the triage outcome in the permanent ledger. Best-effort — a ledger
+    # hiccup must never fail the resolve the host just performed.
+    if event:
+        disposition, skip_reason, summary = event
+        try:
+            await asyncio.to_thread(
+                supabase_client.record_learning_event,
+                property_id,
+                req.booking_id,
+                escalation_reason,
+                disposition,
+                skip_reason,
+                (summary or {}).get("problem_summary"),
+                (summary or {}).get("solution_summary"),
+                (summary or {}).get("category"),
+                (summary or {}).get("language"),
+            )
+        except Exception as exc:
+            log.warning("learning_events insert failed for booking=%s: %s",
+                        req.booking_id, exc)
 
     # Telegram guest gets the same "Alfred has resumed" notice the web shows.
     await _notify_tg_transition(guest, None, "resume")

@@ -470,21 +470,26 @@ def insert_message(
     return result.data[0] if result.data else {}
 
 
-def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, list[dict]]:
-    """Returns (conversation_id, messages) where messages are all rows since the
-    earliest unresolved escalated message, including host replies and guest follow-ups.
-    Returns (None, []) if no conversation found."""
+def get_conversation_thread_for_resolve(
+    booking_id: str,
+) -> tuple[str | None, list[dict], str | None]:
+    """Returns (conversation_id, messages, escalation_reason) where messages are
+    all rows since the earliest unresolved escalated message, including host
+    replies and guest follow-ups. `escalation_reason` is read here (before
+    resolve_conversation nulls it) so the learning triage can gate on it.
+    Returns (None, [], None) if no conversation found."""
     client = get_client()
     conv_result = (
         client.table("conversations")
-        .select("id")
+        .select("id, escalation_reason")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
     )
     if not (conv_result and conv_result.data):
-        return None, []
+        return None, [], None
     conv_id = conv_result.data["id"]
+    escalation_reason = conv_result.data.get("escalation_reason")
     first_esc = (
         client.table("messages")
         .select("created_at")
@@ -550,6 +555,35 @@ def resolve_conversation(
             "learned_knowledge": current_arr,
             "updated_at": _now(),
         }).eq("id", property_id).execute()
+
+
+def record_learning_event(
+    property_id: str | None,
+    booking_id: str | None,
+    escalation_reason: str | None,
+    disposition: str,
+    skip_reason: str | None = None,
+    problem_summary: str | None = None,
+    solution_summary: str | None = None,
+    category: str | None = None,
+    language: str | None = None,
+) -> None:
+    """Append one row to the pseudonymized learning_events ledger (permanent
+    internal record of every triage decision — learned or dropped). No guest
+    name/PII: the summarizer is instructed to omit it, and only property_id +
+    booking_id (opaque) are stored. Best-effort — never fail the resolve."""
+    client = get_client()
+    client.table("learning_events").insert({
+        "property_id": property_id,
+        "booking_id": booking_id,
+        "escalation_reason": escalation_reason,
+        "problem_summary": problem_summary,
+        "solution_summary": solution_summary,
+        "category": category,
+        "language": language,
+        "disposition": disposition,
+        "skip_reason": skip_reason,
+    }).execute()
 
 
 def update_conversation(conversation_id: str, **fields) -> None:
