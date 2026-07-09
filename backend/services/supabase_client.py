@@ -586,6 +586,29 @@ def record_learning_event(
     }).execute()
 
 
+def set_active_channel(conversation_id: str, channel: str) -> None:
+    """Record the channel the guest is currently using ('web' | 'telegram').
+    Guest-facing pushes route only to this channel."""
+    get_client().table("conversations").update(
+        {"active_channel": channel}
+    ).eq("id", conversation_id).execute()
+
+
+def get_active_channel(conversation_id: str) -> str:
+    """Current active channel for a conversation; defaults to 'web'."""
+    result = (
+        get_client()
+        .table("conversations")
+        .select("active_channel")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if result and result.data:
+        return result.data.get("active_channel") or "web"
+    return "web"
+
+
 def update_conversation(conversation_id: str, **fields) -> None:
     client = get_client()
     fields["last_message_at"] = _now()

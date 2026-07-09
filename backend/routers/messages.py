@@ -20,13 +20,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _notify_tg_transition(guest: dict | None, host_name: str | None, kind: str) -> None:
+async def _notify_tg_transition(
+    guest: dict | None, host_name: str | None, kind: str,
+    active_channel: str = "telegram",
+) -> None:
     """Push the same transition notice the web shows to a Telegram-linked guest.
 
     kind: 'intervene' (a human takes over) or 'resume' (Alfred is back). Copy
-    mirrors ChatSystemMessages.formatForGuest. No-op for web-only guests
-    (no telegram_chat_id). Best-effort — never fail the caller.
+    mirrors ChatSystemMessages.formatForGuest. No-op unless the guest's ACTIVE
+    channel is Telegram (a web guest sees the marker via realtime — don't ping
+    their Telegram) and they have a telegram_chat_id. Best-effort.
     """
+    if active_channel != "telegram":
+        return
     if not guest or not guest.get("telegram_chat_id"):
         return
     if kind == "intervene":
@@ -49,10 +55,14 @@ class HostSendRequest(BaseModel):
     message: str
 
 
-async def process_guest_message(booking_id: str, message: str) -> dict:
+async def process_guest_message(
+    booking_id: str, message: str, channel: str = "web",
+) -> dict:
     """Channel-agnostic guest pipeline shared by the web chat and the Telegram
-    bot. Runs the Brain (Gemini first pass → optional web-search second pass →
-    escalation) and persists everything.
+    bot. `channel` ('web' | 'telegram') is the channel this message arrived on;
+    it becomes the conversation's active_channel so guest-facing pushes follow
+    the guest. Runs the Brain (Gemini first pass → optional web-search second
+    pass → escalation) and persists everything.
 
     Returns {reply, requires_escalation, conversation_id, mode}. In intervene
     mode `reply` is None (the host answers). Raises HTTPException(404) if the
@@ -94,6 +104,13 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
             conversation["id"],
             "guest",
             message,
+        )
+
+    # Follow the guest: the channel this message arrived on becomes the active
+    # one, so host replies + transition notices route back to it (and only it).
+    if conversation.get("active_channel") != channel:
+        await asyncio.to_thread(
+            supabase_client.set_active_channel, conversation["id"], channel
         )
 
     if conversation.get("mode") == "intervene":
@@ -259,9 +276,10 @@ async def process_guest_message(booking_id: str, message: str) -> dict:
             "system",
             "__SYS_INTERVENE__",
         )
-        # Telegram guests don't render the web marker — push the same notice.
+        # Telegram guests don't render the web marker — push the same notice,
+        # but only when Telegram is the active channel.
         _, host_name = _resolve_identity(property_data)
-        await _notify_tg_transition(guest, host_name, "intervene")
+        await _notify_tg_transition(guest, host_name, "intervene", channel)
 
     return {
         "reply": reply,
@@ -297,15 +315,21 @@ async def host_send(req: HostSendRequest):
         ai_status="paused",
     )
 
-    # If the guest is on Telegram, deliver the host's reply there too. Web guests
-    # get it live via Supabase realtime; Telegram guests need an active push.
-    # Best-effort — never fail the host send if Telegram delivery hiccups.
+    # Deliver the host's reply to Telegram ONLY if Telegram is the guest's active
+    # channel. A web guest reads it live via Supabase realtime — don't also ping
+    # their Telegram. Best-effort — never fail the host send if delivery hiccups.
     try:
-        guest = await asyncio.to_thread(
-            supabase_client.get_guest_by_conversation_id, req.conversation_id
+        active_channel = await asyncio.to_thread(
+            supabase_client.get_active_channel, req.conversation_id
         )
-        if guest and guest.get("telegram_chat_id"):
-            await telegram_client.send_message(guest["telegram_chat_id"], req.message)
+        if active_channel == "telegram":
+            guest = await asyncio.to_thread(
+                supabase_client.get_guest_by_conversation_id, req.conversation_id
+            )
+            if guest and guest.get("telegram_chat_id"):
+                await telegram_client.send_message(
+                    guest["telegram_chat_id"], req.message
+                )
     except Exception as exc:
         log.warning("host_send: Telegram delivery failed for conv=%s: %s",
                     req.conversation_id, exc)
@@ -410,8 +434,12 @@ async def resolve_conversation(req: ResolveRequest):
             log.warning("learning_events insert failed for booking=%s: %s",
                         req.booking_id, exc)
 
-    # Telegram guest gets the same "Alfred has resumed" notice the web shows.
-    await _notify_tg_transition(guest, None, "resume")
+    # Telegram guest gets the same "Alfred has resumed" notice — only if TG is
+    # their active channel (a web guest sees the marker via realtime).
+    active_channel = await asyncio.to_thread(
+        supabase_client.get_active_channel, conv_id
+    )
+    await _notify_tg_transition(guest, None, "resume", active_channel)
 
     return {"status": "resolved", "learned": learned_entry}
 
@@ -446,13 +474,16 @@ async def announce_transition(req: TransitionRequest):
     guest = await asyncio.to_thread(
         supabase_client.get_guest_by_conversation_id, req.conversation_id
     )
+    active_channel = await asyncio.to_thread(
+        supabase_client.get_active_channel, req.conversation_id
+    )
     host_name = None
     if req.kind == "intervene" and guest:
         prop = await asyncio.to_thread(
             supabase_client.get_property_for_chat, guest["property_id"]
         )
         _, host_name = _resolve_identity(prop)
-    await _notify_tg_transition(guest, host_name, req.kind)
+    await _notify_tg_transition(guest, host_name, req.kind, active_channel)
     return {"status": "ok"}
 
 

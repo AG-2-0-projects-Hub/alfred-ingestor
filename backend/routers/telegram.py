@@ -161,7 +161,7 @@ async def _handle_guest_message(chat_id, text: str) -> None:
     await telegram_client.send_chat_action(chat_id, "typing")
 
     try:
-        result = await process_guest_message(guest["booking_id"], text)
+        result = await process_guest_message(guest["booking_id"], text, channel="telegram")
     except HTTPException as he:
         await telegram_client.send_message(
             chat_id, _TOO_LONG if he.status_code == 504 else _GENERIC_ERR
