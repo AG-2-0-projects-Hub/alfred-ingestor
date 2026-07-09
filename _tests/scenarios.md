@@ -664,6 +664,44 @@ mobile breakpoints so the web/desktop layout is unchanged.
 - **last_tested:** 2026-07-09 (user-verified live on staging — accept/undo/vault/delete all work)
 - **status:** passing
 
+### L8. Guest channel isolation (Tier 1)
+- **id:** channel-isolation-01
+- **touches:** `backend/routers/messages.py`, `backend/routers/telegram.py`, `backend/services/supabase_client.py`, migration `add_active_channel_to_conversations`
+- **layer:** 4
+- **setup:** a guest linked on both web + Telegram
+- **action:** guest messages via web (host replies from dashboard); then guest switches to Telegram (host replies again)
+- **guest_expected:** replies + escalation/resume notices reach ONLY the channel the guest is currently using (`conversations.active_channel`) — a web guest is NOT pinged on Telegram; after switching to TG, replies follow to TG
+- **host_expected:** one unified conversation, full thread visible, intervene from the dashboard — the "main renter / account-owner oversight" view (by design; guest-view per-channel filtering deferred to the WA/Airbnb work)
+- **last_tested:** 2026-07-09 (user-verified live — "perfectly working and isolated")
+- **status:** passing
+
+### L9. Host chat — Resolve button appears live during an open-chat escalation
+- **id:** chat-resolve-live-01
+- **touches:** `frontend/lib/widgets/chat_live_dialog.dart`
+- **layer:** 4
+- **action:** keep the host chat dialog open, then have the guest send a message that auto-escalates
+- **host_expected:** "Mark Issue as Resolved" appears without reopening the dialog (fallback scans all messages for an unresolved escalation + pulls authoritative conversation flags; robust to laggy/dropped realtime and the trailing `__SYS_INTERVENE__` marker)
+- **last_tested:** 2026-07-09 (user-verified live — "pass!")
+- **status:** passing
+
+### L10. Guest chat — web-search recommendation returns plain text
+- **id:** chat-websearch-plaintext-01
+- **touches:** `backend/services/gemini_messenger.py`
+- **layer:** 4
+- **action:** guest asks for a local recommendation (triggers the web-search 2nd pass), on web AND Telegram
+- **guest_expected:** a natural plain-text answer — never the raw first-pass JSON. (2nd pass uses `SECOND_PASS_SYSTEM` plain-text prompt + `_sanitize_second_pass` safety net; the old bug reused the JSON-mandating first-pass prompt.)
+- **last_tested:** 2026-07-09 (user-verified live on Telegram — "pass!")
+- **status:** passing
+
+### L11. Host chat — guest name in header
+- **id:** chat-guest-name-01
+- **touches:** `frontend/lib/widgets/chat_live_dialog.dart`
+- **layer:** 4
+- **action:** open any host chat dialog
+- **host_expected:** header shows the guest's name (person icon + name, then `· <booking_id>`); graceful fallback when no name is set
+- **last_tested:** 2026-07-09 (user-verified live — "pass!")
+- **status:** passing
+
 ---
 
 ## Index summary
@@ -680,8 +718,8 @@ mobile breakpoints so the web/desktop layout is unchanged.
 | H. Push | 1 | — | 1 | — |
 | J. Telegram | 11 | — | — | 11 |
 | K. Mobile / responsive | 1 | — | — | 1 |
-| L. AI guardrails & learning | 7 | 4 | — | 6 |
-| **Total** | **54** | **13** | **26** | **18** |
+| L. AI guardrails & learning | 11 | 4 | — | 10 |
+| **Total** | **58** | **13** | **26** | **22** |
 
 ---
 
@@ -692,10 +730,6 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
-| 2026-07-09 | uncommitted migration `add_active_channel_to_conversations` + `messages.py`, `telegram.py`, `supabase_client.py` | Guest channel isolation (Tier 1) | One unified conversation per booking (host sees everything, intervenes from the dashboard). `conversations.active_channel` follows the guest (set to `web`/`telegram` on each guest message). Assert: (1) guest messaging via WEB → host replies + escalation/resume notices are NOT pushed to Telegram (web reads via realtime); (2) guest messaging via TELEGRAM → host replies + notices DO push to TG; (3) guest switches web→TG → subsequent host replies follow to TG; (4) AI replies already route correctly per channel. Known limitation (deferred): the guest WEB app still shows the full thread via realtime — true per-channel filtering of the guest's view waits for the WA/Airbnb multi-channel work. | — |
-| 2026-07-09 | uncommitted `chat_live_dialog.dart` | Host chat — Resolve button appears live during an open-chat escalation | With the host chat dialog already OPEN when a guest message auto-escalates, the "Mark Issue as Resolved" button must appear **without reopening** the dialog. Root cause: the messages-stream fallback checked only `data.last['is_escalated_interaction']`, but the last row after escalation is the `__SYS_INTERVENE__` marker; and the conversations-stream event can lag/drop (free-tier). Fix: scan ALL messages for an unresolved escalated one, then pull `mode`+`escalation_reason`+`requires_attention` from the conversation row. | Host chat — whole escalation chain (L6) |
-| 2026-07-09 | uncommitted `gemini_messenger.py` | Guest chat — web-search recommendation returns plain text, never raw JSON | Asking Alfred for a local recommendation (triggers the web-search 2nd pass) must return a natural plain-text reply on BOTH web and Telegram — never the raw first-pass JSON. Root cause: the 2nd pass used the first-pass `SYSTEM_PROMPT` which mandates JSON output; now uses `SECOND_PASS_SYSTEM` (plain-text) + a `_sanitize_second_pass` safety net that recovers `reply_to_guest`/strips code fences if JSON ever leaks. | — |
-| 2026-07-09 | uncommitted `chat_live_dialog.dart` | Host chat — guest name in header | The host chat dialog header shows the **guest's name** (person icon + name, then `· <booking_id>`), so the host knows who they're talking to. Falls back gracefully when no name is set. | Host chat — Resolve button appears live |
 | 2026-06-08 | `4336ebd` + uncommitted `add_property_screen.dart` | Add-property — completion popup lifecycle | (1) After ingest completes: no popup shown, only inline panel + MERGE NOW button. (2) After no-conflict merge → status=`Merged`: "Alfred is now trained" popup appears, single "Back to Dashboard" button. (3) After conflict-resolved flow → status=`Trained`: same popup appears. | — |
 | 2026-06-08 | `feaf8fd` | Merge / edit-property UX | (1) Merge request does not time out before 120 s. (2) On `edit_property_screen`: conflict questionnaire section renders above JSON viewer. (3) Status badge on submit transitions correctly. (4) Resolved status surfaces in UI after merge completes. | — |
 | 2026-06-08 | `0f019f2` | Ingest error surfacing | Backend errors during ingest are shown inline to the user (not silently dropped); upload queue is preserved on failure so user can retry. | Add-property — completion popup lifecycle |
