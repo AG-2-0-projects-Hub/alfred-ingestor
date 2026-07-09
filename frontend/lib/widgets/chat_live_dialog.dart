@@ -201,10 +201,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           if (mounted) {
             setState(() => _messages = data);
             _scrollToBottom();
-            if (_mode == 'autopilot' &&
-                data.isNotEmpty &&
-                data.last['is_escalated_interaction'] == true) {
-              _setMode('intervene');
+            // An escalation can land while this dialog is open. Detect it from
+            // the messages themselves — scanning ALL rows, since the last one is
+            // usually the __SYS_INTERVENE__ marker, not the escalated reply —
+            // then pull the authoritative flags. This is the reliable fallback
+            // when the conversations realtime event lags or drops.
+            final hasUnresolvedEscalation = data.any((m) =>
+                m['is_escalated_interaction'] == true &&
+                m['resolution_status'] == null);
+            if (hasUnresolvedEscalation && !_isEscalated) {
               _refreshEscalationReason();
             }
           }
@@ -255,19 +260,22 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   // Targeted single-row refresh used when the conversations stream may have
   // missed an update (e.g. after a backgrounded tab, or a new escalation
-  // arriving right after a resolve). Cheap — fetches just the row we need.
+  // arriving while the dialog is open). Pulls the authoritative mode +
+  // escalation flags so the Resolve button appears live even if the
+  // conversations realtime event lagged or dropped (free-tier). Cheap.
   Future<void> _refreshEscalationReason() async {
     if (_conversationId == null) return;
     final row = await Supabase.instance.client
         .from('conversations')
-        .select('escalation_reason')
+        .select('mode, escalation_reason, requires_attention')
         .eq('id', _conversationId!)
         .maybeSingle();
     if (!mounted || row == null) return;
-    final reason = row['escalation_reason'] as String?;
-    if (_escalationReason != reason) {
-      setState(() => _escalationReason = reason);
-    }
+    setState(() {
+      _mode = row['mode'] as String? ?? _mode;
+      _escalationReason = row['escalation_reason'] as String?;
+      _requiresAttention = row['requires_attention'] == true;
+    });
   }
 
   Future<void> _resolveIssue() async {
@@ -481,9 +489,35 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  widget.bookingId,
-                  style: GoogleFonts.inter(fontSize: 11, color: palette.textMuted),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person_outline_rounded,
+                        size: 12, color: palette.textMuted),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        _guestName,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: palette.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '· ${widget.bookingId}',
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: palette.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

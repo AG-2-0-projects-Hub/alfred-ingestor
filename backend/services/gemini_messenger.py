@@ -432,6 +432,30 @@ You MUST output ONLY valid JSON. No markdown backticks, no text before or after 
 """
 
 
+# Second pass (web-search-grounded local recommendations) must return PLAIN
+# TEXT — so it gets its own system prompt WITHOUT the first pass's "output only
+# JSON" mandate. Using SYSTEM_PROMPT here made the model sometimes emit the raw
+# first-pass JSON to the guest (the Telegram "weird JSON" bug).
+SECOND_PASS_SYSTEM = """\
+You are Alfred, a warm, intelligent hospitality concierge for an Airbnb property. The guest asked about LOCAL recommendations (restaurants, things to do, transport, events) and you are answering using live web-search results.
+
+## OUTPUT
+Reply with a natural, friendly PLAIN-TEXT message in the guest's language. Do NOT output JSON, code fences, or any metadata — only the message the guest should read.
+
+## VOICE
+- Warm, concise, genuinely helpful — like a well-travelled local host. Vary your phrasing; never robotic or templated.
+- Match the property's vibe / the host's style if evident from the property context (luxury → polished; beach/surf → casual). Emojis sparingly (0–2), never for serious topics.
+
+## GROUNDING & ACCURACY
+- Use the web-search results together with the property's location for concrete, nearby suggestions — name a few good options with a short reason each.
+- Do NOT invent specifics you don't have (exact prices, hours). If unsure, keep it general or suggest the guest confirm.
+- For anything about the PROPERTY itself (codes, wifi, check-in), rely only on the provided property data; if it's missing, say you'll confirm with the host rather than guessing.
+
+## LANGUAGE
+Reply in the guest's established language from the conversation. Never switch unprompted.
+"""
+
+
 def _get_client() -> genai.Client:
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
@@ -602,12 +626,31 @@ async def second_pass_with_search(
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=SECOND_PASS_SYSTEM,
             temperature=0.3,
             tools=[types.Tool(google_search=types.GoogleSearch())],
         ),
     )
-    return response.text.strip()
+    return _sanitize_second_pass(response.text)
+
+
+def _sanitize_second_pass(text: str) -> str:
+    """Belt-and-suspenders: if the model still returns code-fenced or JSON output,
+    recover the human reply instead of leaking raw JSON to the guest."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else t
+        if "```" in t:
+            t = t[: t.rfind("```")]
+        t = t.strip()
+    if t.startswith("{") and "reply_to_guest" in t:
+        try:
+            obj = json.loads(t)
+            if isinstance(obj, dict) and obj.get("reply_to_guest"):
+                return str(obj["reply_to_guest"]).strip()
+        except Exception:
+            pass
+    return t
 
 
 # ─── Summarizer (knowledge base curator) ──────────────────────────────────────
