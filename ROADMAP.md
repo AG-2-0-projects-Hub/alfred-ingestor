@@ -1,7 +1,7 @@
 # Alfred / HostWhisperer — Launch Roadmap
 
 **Version:** 1.2
-**Created:** 2026-06-30 · **Updated:** 2026-07-08 (Wave-1 execution — AI guardrails implemented (uncommitted, pending deploy-test), DB-reset runbook + RLS/data-protection write-up done; dependency-ordered execution plan added at `_Context/Roadmap_tackle_plan.md`; see `_Context/session-digest.md`)
+**Created:** 2026-06-30 · **Updated:** 2026-07-09 (guardrails + self-learning triage/ledger + escalation-scope fix + learning-UX shipped & user-verified; chat fixes (live resolve button, plain-text web-search reply, guest name) + **channel isolation Tier 1** (`368128a`) shipped; next session planned: DB split + Cloud Run — see `_Context/session-digest.md`)
 **Owner:** Founder (decision-maker + direction) · Execution: AG agents (Claude Code / Gemini)
 **Status:** Active — pre-closed-beta
 **Structure:** Workstream tracks × launch milestones (matrix), sequenced by readiness (no hard dates)
@@ -94,9 +94,11 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 - **M0:** Merge `staging→main` — new batch pending (Telegram, roadmap, dashboard, feedback, prompt fixes), deferred until after mobile UI + further QA hardening.
 - ✅ **M0:** Prepare clean DB reset plan — runbook at `_Context/plans/db-reset-runbook.md` (2026-07-08). Execution stays destructive-gated (shared DB wipes prod: explicit CONFIRM + fresh verified backup; see tackle plan Wave 4).
 - **M1:** Cloud Run migration; self-serve signup + guided onboarding; harden error states.
-- 🔨 🔴 **M1 — AI guardrails (keep simple):** implemented 2026-07-08 in `backend/services/guardrails.py` + `messages.py` + prompt hardening — per-conversation **rate limit** (20/hr · 100/day, env-tunable counters, not a quota engine), **high-stakes-field fallback** (server-side backstop: address/access codes/wifi/check-times answered only from confirmed Master-JSON data, else "let me confirm with your host" + escalation), prompt-injection defense + 2000-char input cap. *No ML moderation pipeline.* Status: uncommitted → needs commit, staging deploy-test, then prod via the next `staging→main` merge.
+- 🔨 🔴 **M1 — AI guardrails (keep simple):** shipped to `staging` 2026-07-08 (`80d8ac6`, Render-deployed) in `backend/services/guardrails.py` + `messages.py` + prompt hardening — per-conversation **rate limit** (20/hr · 100/day, env-tunable counters, not a quota engine), **high-stakes-field fallback** (server-side backstop: address/access codes/wifi/check-times answered only from confirmed Master-JSON data, else "let me confirm with your host" + escalation — **user-verified live on Bungalito**), prompt-injection defense + 2000-char input cap. Backed by new index `idx_messages_conversation_created`. *No ML moderation pipeline.* Status: on staging → prod via the next `staging→main` merge.
+- 🔨 **M1 — Self-learning quality gate (2026-07-08, `33b955a`):** two-layer triage on the resolve loop so only genuinely reusable Q&A reaches the host's Accept/Discard queue (Layer 1 drops emergencies/hostility/financial/out-of-scope by `escalation_reason`; Layer 2 = summarizer reusability judgment). Every outcome recorded in the new **permanent pseudonymized `learning_events` ledger** (no guest name; property as UUID) — the durable dataset for the Track-6 eval set + product-gap insight. Also narrowed escalation scope so off-topic/nonsensical guest messages redirect instead of escalating. Staging → prod via next merge.
 - ✅ **M2:** Telegram guest channel live (native port, `@AlfredHostW_bot`, live-tested end-to-end on staging 2026-07-05).
-- **M2:** 🔴 WhatsApp live. *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2).
+- 🔨 **M1/M2 — Channel isolation (Tier 1 shipped 2026-07-09, `368128a`):** one unified conversation per booking (host's eagle-eye view + intervene from dashboard); `conversations.active_channel` follows the guest so host replies + transition notices route only to the channel the guest is actually using. **Deferred to the WA/Airbnb multi-channel work:** true per-channel filtering of the guest's *own* view (tag each message with its channel) — only needed once guests routinely use more than one channel.
+- **M2:** 🔴 WhatsApp live. *Dependency:* WhatsApp Business API needs Meta verification — **start in M1** (R/D2). *Slots into the active-channel model — becomes another `active_channel` value; keep the conversation unified, add per-channel guest-view filtering here.*
 - **M3:** V2 scale stack — Redis cache + BullMQ queues, Sentry + Axiom, Resend, PostHog.
 - 🔴 **M1 — Transactional email for beta (buy-not-build):** confirm what sends auth mail today (Supabase Auth?); wire the minimum set — welcome, password reset, guest-link delivery. Full Resend template suite stays V2/M3.
 
@@ -139,6 +141,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 - **M3:** SLA, compliance hardening.
 - 🔴 **M1 — Consent capture at signup:** a versioned ToS/Privacy "I agree" recorded per account (not just cookie consent).
 - 🔴 **M1 — Sub-processor list:** enumerate PII processors (Gemini/Vertex, Supabase, Apify/Firecrawl, hosting) for the Privacy Policy.
+- 🔴 **M1 — Cover the `learning_events` ledger (added 2026-07-08):** the self-learning triage now writes a **permanent** row per resolved escalation. It's pseudonymized (no guest name; property as UUID) but is the first durable guest-derived store — the Privacy Policy must disclose it, and D4 must set its lawful basis + retention. See `_Context/RLS_and_data_protection.md`.
 - 🔴 **M1/M2 — Data-subject rights:** self-serve account deletion + data export (host-side soft-delete exists; user-level does not). Necessary if EU (D4).
 
 ### Track 6 — QA, Maintenance & Reliability
@@ -147,7 +150,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 - ✅ **M0:** Uptime monitors live (UptimeRobot, prod + staging backend/scraper).
 - **M0:** Promote pending-intake entries → `_tests/scenarios.md` (partial — B10/C8/D5 done 2026-07-01; J6–J9 Telegram fixes + older popup/merge/RLS rows still queued).
 - **M1:** Layer 2 Playwright; **dedicated QA agent** (§8); evolve `scenarios.md` into the spec-first QA matrix; error monitoring.
-  - 🟡 **AI answer eval set (keep small):** ~20–30 fixed guest questions with expected-good answers; re-run on model changes to catch drift. Manual-to-start; this is distinct from UI QA.
+  - 🟡 **AI answer eval set (keep small):** ~20–30 fixed guest questions with expected-good answers; re-run on model changes to catch drift. Manual-to-start; this is distinct from UI QA. **Seed it from the `learning_events` ledger (added 2026-07-08)** — real escalations Alfred couldn't answer are the best eval cases; also mine it for systematic master_json gaps.
 - **M2:** Beta monitoring + triage loop.
 - **M3:** Regression suite; load test (200 concurrent, p95 < 5s).
 
