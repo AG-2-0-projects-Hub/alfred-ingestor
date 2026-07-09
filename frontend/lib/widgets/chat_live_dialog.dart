@@ -251,6 +251,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             'conversation_id': _conversationId,
             'kind': mode == 'intervene' ? 'intervene' : 'resume',
           },
+          bearer: Supabase.instance.client.auth.currentSession?.accessToken,
         );
       } catch (_) {
         // Best-effort — never let a notice failure break the mode switch.
@@ -285,6 +286,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await ApiClient.postJson(
         '/api/conversations/resolve',
         {'booking_id': widget.bookingId},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
       if (mounted) {
         setState(() {
@@ -348,6 +350,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await ApiClient.postJson(
         '/api/conversations/archive',
         {'conversation_id': _conversationId},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
       // Reuse the dashboard's optimistic-refresh callback so the archived
       // conversation drops off the active list immediately.
@@ -398,6 +401,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await ApiClient.postJson(
         '/api/messages/host-send',
         {'conversation_id': _conversationId, 'message': text},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
     } on ApiException catch (e) {
       if (mounted) {

@@ -5,7 +5,7 @@ import random
 import re
 import string
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 from services import guardrails, learning_triage, supabase_client, gemini_messenger, telegram_client, welcome
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
@@ -14,6 +14,20 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 GEMINI_TIMEOUT_S = 45
+
+
+async def _require_host(authorization: str | None) -> str:
+    """Validate the host's Supabase access token (Authorization: Bearer <token>)
+    and return the host user id. These endpoints run as service-role (bypassing
+    RLS), so the caller must be authenticated here; per-object ownership is then
+    checked by the caller via supabase_client.host_owns_*."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    host_id = await asyncio.to_thread(supabase_client.get_user_id_from_token, token)
+    if not host_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return host_id
 
 
 def _now_iso() -> str:
@@ -302,7 +316,12 @@ async def web_incoming(req: WebIncomingRequest):
 
 
 @router.post("/messages/host-send")
-async def host_send(req: HostSendRequest):
+async def host_send(req: HostSendRequest, authorization: str | None = Header(default=None)):
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_conversation, host_id, req.conversation_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
     await asyncio.to_thread(
         supabase_client.insert_message,
         req.conversation_id,
@@ -344,7 +363,12 @@ class ResolveRequest(BaseModel):
 
 
 @router.post("/conversations/resolve")
-async def resolve_conversation(req: ResolveRequest):
+async def resolve_conversation(req: ResolveRequest, authorization: str | None = Header(default=None)):
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_booking, host_id, req.booking_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
     guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, req.booking_id)
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
@@ -449,12 +473,17 @@ class ArchiveRequest(BaseModel):
 
 
 @router.post("/conversations/archive")
-async def archive_conversation(req: ArchiveRequest):
+async def archive_conversation(req: ArchiveRequest, authorization: str | None = Header(default=None)):
     """Manually archive a conversation (host "delete conversation" action).
 
     Non-destructive: it drops off the dashboard active list but keeps messages
     and returns to active if the guest sends a new message (see
     supabase_client.insert_message)."""
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_conversation, host_id, req.conversation_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
     await asyncio.to_thread(
         supabase_client.archive_conversation, req.conversation_id
     )
@@ -467,10 +496,15 @@ class TransitionRequest(BaseModel):
 
 
 @router.post("/conversations/announce-transition")
-async def announce_transition(req: TransitionRequest):
+async def announce_transition(req: TransitionRequest, authorization: str | None = Header(default=None)):
     """Called by the host dashboard right after it inserts a manual mode-change
     marker (Intervene / Resume). Pushes the matching notice to the guest's
     Telegram if linked. No-op for web-only guests. Best-effort."""
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_conversation, host_id, req.conversation_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
     guest = await asyncio.to_thread(
         supabase_client.get_guest_by_conversation_id, req.conversation_id
     )
@@ -506,7 +540,12 @@ def _random_suffix(n: int = 6) -> str:
 
 
 @router.post("/guests")
-async def create_guest(req: CreateGuestRequest):
+async def create_guest(req: CreateGuestRequest, authorization: str | None = Header(default=None)):
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_property, host_id, req.property_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your property")
     # Fetch property name for the slug
     prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
     if not prop:

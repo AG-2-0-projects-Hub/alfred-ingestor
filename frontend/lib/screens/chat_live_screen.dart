@@ -191,6 +191,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
       await ApiClient.postJson(
         '/api/conversations/resolve',
         {'booking_id': widget.bookingId},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
       if (mounted) {
         setState(() {
@@ -250,6 +251,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
       await ApiClient.postJson(
         '/api/messages/host-send',
         {'conversation_id': _conversationId, 'message': text},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
       // Real-time stream will replace _messages on next tick; optimistic row drops naturally
     } on ApiException catch (e) {

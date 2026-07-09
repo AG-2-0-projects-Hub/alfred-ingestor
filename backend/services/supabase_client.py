@@ -699,6 +699,55 @@ def get_user_id_from_token(access_token: str) -> str | None:
     return None
 
 
+# ── Host authorization helpers ──────────────────────────────────────────────
+# The backend uses the service-role key (bypasses RLS), so every host-initiated,
+# state-changing endpoint must verify ownership itself. Each helper resolves the
+# target down to its owning property and checks properties.owner_id == host uid.
+
+def host_owns_property(host_id: str, property_id: str) -> bool:
+    """True if the property exists and is owned by this host."""
+    client = get_client()
+    res = (
+        client.table("properties")
+        .select("id")
+        .eq("id", property_id)
+        .eq("owner_id", host_id)
+        .maybe_single()
+        .execute()
+    )
+    return bool(res and res.data)
+
+
+def host_owns_conversation(host_id: str, conversation_id: str) -> bool:
+    """True if the conversation's property is owned by this host."""
+    client = get_client()
+    conv = (
+        client.table("conversations")
+        .select("property_id")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv and conv.data and conv.data.get("property_id")):
+        return False
+    return host_owns_property(host_id, conv.data["property_id"])
+
+
+def host_owns_booking(host_id: str, booking_id: str) -> bool:
+    """True if the booking's guest belongs to a property owned by this host."""
+    client = get_client()
+    guest = (
+        client.table("guests")
+        .select("property_id")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (guest and guest.data and guest.data.get("property_id")):
+        return False
+    return host_owns_property(host_id, guest.data["property_id"])
+
+
 def soft_delete_property(property_id: str, owner_id: str) -> str:
     """Soft-delete a property: blank its ingested/scraped/master data, drop its
     storage files, anonymize its guests' names, and stamp deleted_at — while
