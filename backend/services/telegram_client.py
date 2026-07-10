@@ -81,3 +81,26 @@ async def send_italic(chat_id, text: str) -> dict | None:
 async def send_chat_action(chat_id, action: str = "typing") -> dict | None:
     """Show a transient status (e.g. 'typing…') while Gemini composes a reply."""
     return await _post("sendChatAction", {"chat_id": chat_id, "action": action})
+
+
+async def download_file(file_id: str) -> bytes | None:
+    """Fetch a Telegram file's raw bytes by file_id (two steps: getFile resolves
+    the file_path, then the file endpoint serves the bytes). Returns None on any
+    failure — the caller falls back to the text-only "please type" reply."""
+    try:
+        info = await _post("getFile", {"file_id": file_id})
+        if not info or not info.get("ok"):
+            return None
+        file_path = (info.get("result") or {}).get("file_path")
+        if not file_path:
+            return None
+        url = f"{_API}/file/bot{_token()}/{file_path}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            log.warning("telegram download_file: HTTP %s for %s", resp.status_code, file_path)
+            return None
+        return resp.content
+    except Exception as exc:
+        log.warning("telegram download_file error: %s", exc)
+        return None

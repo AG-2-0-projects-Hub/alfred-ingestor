@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 
@@ -87,18 +90,27 @@ class _ProfileDialogState extends State<ProfileDialog> {
     final bytes = file.bytes;
     if (bytes == null) return;
     final ext = file.extension?.toLowerCase() ?? 'jpg';
-    final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
-    // Folder is the host's uid so the storage RLS write policy allows it.
-    final path = '$uid/avatar_${DateTime.now().millisecondsSinceEpoch}.$ext';
     setState(() => _uploading = true);
     try {
-      await _db.storage.from('host_avatars').uploadBinary(
-            path,
-            bytes,
-            fileOptions: FileOptions(contentType: contentType, upsert: true),
-          );
-      final url = _db.storage.from('host_avatars').getPublicUrl(path);
-      if (mounted) setState(() => _avatarUrl = url);
+      // Brokered through the backend (service role): the Flutter web client
+      // can't satisfy the host_avatars storage RLS write policy directly, so the
+      // backend validates the host token and writes under the host's uid folder.
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+      final token = _db.auth.currentSession?.accessToken;
+      final req = http.MultipartRequest(
+        'POST', Uri.parse('$backendUrl/api/host/avatar'),
+      );
+      if (token != null) req.headers['Authorization'] = 'Bearer $token';
+      req.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: 'avatar.$ext'),
+      );
+      final resp = await http.Response.fromStream(await req.send());
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        if (mounted) setState(() => _avatarUrl = data['url'] as String?);
+      } else {
+        throw Exception('${resp.statusCode}: ${resp.body}');
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

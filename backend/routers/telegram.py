@@ -16,7 +16,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from services import supabase_client, telegram_client, welcome
-from routers.messages import process_guest_message
+from routers.messages import process_guest_message, _notify_tg_transition
 from routers.guest_auth import _resolve_identity
 
 router = APIRouter()
@@ -101,15 +101,32 @@ async def _handle_update(update: dict) -> None:
     if chat_id is None:
         return
     text = message.get("text")
+    caption = message.get("caption") or ""
 
     try:
-        # Non-text (photo, voice, document, sticker, …)
-        if not text:
-            await telegram_client.send_message(chat_id, _MEDIA_ONLY)
+        if text and text.startswith("/start"):
+            await _handle_start(chat_id, text)
             return
 
-        if text.startswith("/start"):
-            await _handle_start(chat_id, text)
+        # Photo → analyze as an image. Telegram sends a list of sizes; the last
+        # is the largest.
+        photo = message.get("photo")
+        if isinstance(photo, list) and photo:
+            file_id = photo[-1].get("file_id")
+            if file_id:
+                await _handle_guest_media(chat_id, file_id, "image", "image/jpeg", caption)
+                return
+
+        # Voice note / audio → transcribe + answer.
+        voice = message.get("voice") or message.get("audio")
+        if isinstance(voice, dict) and voice.get("file_id"):
+            mime = voice.get("mime_type") or "audio/ogg"
+            await _handle_guest_media(chat_id, voice["file_id"], "audio", mime, caption)
+            return
+
+        if not text:
+            # Other non-text (sticker, document, location, …) — unchanged.
+            await telegram_client.send_message(chat_id, _MEDIA_ONLY)
             return
 
         await _handle_guest_message(chat_id, text)
@@ -173,3 +190,53 @@ async def _handle_guest_message(chat_id, text: str) -> None:
     reply = result.get("reply")
     if reply:
         await telegram_client.send_message(chat_id, reply)
+
+    await _emit_escalation_notice(guest, result)
+
+
+async def _handle_guest_media(
+    chat_id, file_id: str, kind: str, mime: str, caption: str,
+) -> None:
+    """A photo or voice note from a linked guest → download it, run the shared
+    Brain with the media attached (Alfred analyzes the image / transcribes the
+    voice), and reply. The media is also saved to chat_media so the host sees it."""
+    guest = await asyncio.to_thread(
+        supabase_client.get_guest_by_telegram_chat_id, chat_id
+    )
+    if not guest:
+        await telegram_client.send_message(chat_id, _NOT_LINKED)
+        return
+
+    data = await telegram_client.download_file(file_id)
+    if not data:
+        await telegram_client.send_message(chat_id, _GENERIC_ERR)
+        return
+
+    await telegram_client.send_chat_action(chat_id, "typing")
+    try:
+        result = await process_guest_message(
+            guest["booking_id"], caption, channel="telegram",
+            media={"kind": kind, "mime": mime, "bytes": data},
+        )
+    except HTTPException as he:
+        await telegram_client.send_message(
+            chat_id, _TOO_LONG if he.status_code == 504 else _GENERIC_ERR
+        )
+        return
+
+    reply = result.get("reply")
+    if reply:
+        await telegram_client.send_message(chat_id, reply)
+
+    await _emit_escalation_notice(guest, result)
+
+
+async def _emit_escalation_notice(guest: dict, result: dict) -> None:
+    # On auto-escalation, send the "You are now speaking with <host>" notice
+    # AFTER Alfred's reply, so the guest reads the acknowledgement first and the
+    # notice doesn't make the reply look like the host wrote it. (A web guest
+    # renders the __SYS_INTERVENE__ marker via realtime; this is Telegram-only.)
+    if result.get("requires_escalation"):
+        await _notify_tg_transition(
+            guest, result.get("host_name"), "intervene", "telegram"
+        )

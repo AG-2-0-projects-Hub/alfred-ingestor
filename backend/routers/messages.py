@@ -61,7 +61,12 @@ async def _notify_tg_transition(
 
 class WebIncomingRequest(BaseModel):
     booking_id: str
-    message: str
+    message: str = ""
+    # Optional media the web client already uploaded to chat_media. When set, the
+    # Brain fetches the bytes and analyzes them (image or voice note).
+    media_url: str | None = None
+    media_kind: str | None = None  # 'image' | 'audio'
+    media_mime: str | None = None
 
 
 class HostSendRequest(BaseModel):
@@ -71,6 +76,7 @@ class HostSendRequest(BaseModel):
 
 async def process_guest_message(
     booking_id: str, message: str, channel: str = "web",
+    media: dict | None = None,
 ) -> dict:
     """Channel-agnostic guest pipeline shared by the web chat and the Telegram
     bot. `channel` ('web' | 'telegram') is the channel this message arrived on;
@@ -111,7 +117,53 @@ async def process_guest_message(
         (m for m in reversed(history) if m.get("sender_type") == "guest"), None
     )
     is_duplicate = last_guest is not None and last_guest.get("content") == message
-    if not is_duplicate:
+
+    # Media (image / voice) vs plain text. For media we attach the raw bytes to
+    # the Gemini call below so Alfred actually analyzes the photo / voice note.
+    media_bytes: bytes | None = None
+    media_mime: str | None = None
+    media_kind: str | None = None  # 'image' | 'audio'
+    if media:
+        media_kind = media.get("kind")
+        media_mime = media.get("mime") or (
+            "image/jpeg" if media_kind == "image" else "audio/ogg"
+        )
+        if media.get("bytes") is not None:
+            # Telegram: persist to chat_media so the host sees it in the dashboard,
+            # then log the guest row here (the web client does its own upload+insert).
+            media_bytes = media["bytes"]
+            ext = (media_mime.split("/")[-1].split(";")[0]
+                   or ("jpg" if media_kind == "image" else "ogg"))
+            ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+            storage_path: str | None = (
+                f"{conversation['id']}/chat_media/{media_kind}_{ts}.{ext}"
+            )
+            try:
+                await asyncio.to_thread(
+                    supabase_client.upload_chat_media,
+                    storage_path, media_bytes, media_mime,
+                )
+            except Exception as exc:
+                log.warning("chat_media upload failed for booking=%s: %s", booking_id, exc)
+                storage_path = None
+            await asyncio.to_thread(
+                supabase_client.insert_message,
+                conversation["id"],
+                "guest",
+                message or ("[image]" if media_kind == "image" else "[voice message]"),
+                message_type=media_kind,
+                media_url=storage_path,
+            )
+        elif media.get("url"):
+            # Web: the client already uploaded to chat_media and inserted the
+            # message row — just fetch the bytes for analysis.
+            try:
+                media_bytes = await asyncio.to_thread(
+                    supabase_client.download_chat_media, media["url"]
+                )
+            except Exception as exc:
+                log.warning("chat_media download failed for booking=%s: %s", booking_id, exc)
+    elif not is_duplicate:
         # Always log the guest message so the host can see it even in intervene mode.
         await asyncio.to_thread(
             supabase_client.insert_message,
@@ -182,14 +234,23 @@ async def process_guest_message(
     if not property_data or not property_data.get("master_json"):
         raise HTTPException(status_code=404, detail="Property data not found")
 
+    # Attach the guest's media (if any) to the first pass, with a short text
+    # anchor so a caption-less photo/voice note still has a prompt.
+    media_parts = [(media_bytes, media_mime)] if (media_bytes and media_mime) else None
+    prompt_message = message or (
+        "[image]" if media_kind == "image"
+        else "[voice message]" if media_kind == "audio" else message
+    )
+
     try:
         first_result = await asyncio.wait_for(
             gemini_messenger.first_pass(
                 master_json=property_data["master_json"],
                 conversation_history=history,
                 preferred_language=guest.get("preferred_language") or "not_set",
-                guest_message=message,
+                guest_message=prompt_message,
                 learned_knowledge=property_data.get("learned_knowledge") or [],
+                media=media_parts,
             ),
             timeout=GEMINI_TIMEOUT_S,
         )
@@ -247,6 +308,21 @@ async def process_guest_message(
                 or guest.get("preferred_language")
             )
 
+    # Media-burst escalation: a guest sending several photos / voice notes usually
+    # wants a human to look. On the Nth media message (default 2) escalate to the
+    # host — Alfred's analysis still goes out as the reply.
+    if media_kind and not requires_escalation:
+        media_count = await asyncio.to_thread(
+            supabase_client.count_recent_guest_media,
+            conversation["id"],
+            (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
+        )
+        if media_count >= guardrails.MEDIA_ESCALATE_COUNT:
+            log.info("media-burst escalation for booking=%s (media_count=%s)",
+                     booking_id, media_count)
+            requires_escalation = True
+            escalation_reason = "media_needs_host_review"
+
     # Persist the language Alfred actually replied in, so the next turn has a
     # stable anchor instead of re-detecting (and possibly flip-flopping) from
     # scratch. The prompt only reports a real, deliberate switch.
@@ -283,6 +359,7 @@ async def process_guest_message(
     # opened the chat dialog yet. Frontend renderers expand the marker
     # per-viewer (guest vs host). Marker kept in sync with
     # frontend/lib/utils/chat_system_messages.dart.
+    host_name = None
     if requires_escalation:
         await asyncio.to_thread(
             supabase_client.insert_message,
@@ -290,22 +367,28 @@ async def process_guest_message(
             "system",
             "__SYS_INTERVENE__",
         )
-        # Telegram guests don't render the web marker — push the same notice,
-        # but only when Telegram is the active channel.
+        # A web guest renders the marker via realtime. A Telegram guest can't,
+        # so the "You are now speaking with <host>" notice is pushed by the
+        # Telegram caller AFTER it delivers Alfred's reply — otherwise the notice
+        # arrives first and Alfred's reply reads as if the host wrote it. Return
+        # the host name so the caller can send it in the right order.
         _, host_name = _resolve_identity(property_data)
-        await _notify_tg_transition(guest, host_name, "intervene", channel)
 
     return {
         "reply": reply,
         "requires_escalation": requires_escalation,
         "conversation_id": conversation["id"],
         "mode": conversation.get("mode") or "autopilot",
+        "host_name": host_name,
     }
 
 
 @router.post("/messages/web-incoming")
 async def web_incoming(req: WebIncomingRequest):
-    result = await process_guest_message(req.booking_id, req.message)
+    media = None
+    if req.media_url and req.media_kind:
+        media = {"kind": req.media_kind, "url": req.media_url, "mime": req.media_mime}
+    result = await process_guest_message(req.booking_id, req.message, media=media)
     if result["mode"] == "intervene":
         return {"status": "intervene_mode", "reply": None}
     return {

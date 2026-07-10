@@ -49,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen>
   String? _guestToken;
   int _guestTokenExpiry = 0; // unix seconds
   AudioRecorder? _recorder;
+  AudioEncoder _recordEncoder = AudioEncoder.wav;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
@@ -362,6 +363,18 @@ class _ChatScreenState extends State<ChatScreen>
         'media_url': storagePath,
         'status': 'delivered',
       });
+      // Ask Alfred to analyze the image + respond (skipped server-side if the
+      // host has taken over). The reply arrives via the realtime messages stream.
+      try {
+        await ApiClient.postJson('/api/messages/web-incoming', {
+          'booking_id': widget.bookingId,
+          'media_url': storagePath,
+          'media_kind': 'image',
+          'media_mime': contentType,
+        });
+      } catch (_) {
+        // Non-fatal — the image is delivered; only the auto-reply is missed.
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -372,9 +385,37 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _startRecording() async {
-    if (_recorder == null || !await _recorder!.hasPermission()) return;
-    await _recorder!.start(const RecordConfig(encoder: AudioEncoder.wav), path: 'recording.wav');
-    if (mounted) setState(() => _isRecording = true);
+    if (_recorder == null) return;
+    if (_conversationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Send a text message first to start the conversation.')),
+      );
+      return;
+    }
+    try {
+      if (!await _recorder!.hasPermission()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone access is needed to record a voice message.')),
+          );
+        }
+        return;
+      }
+      // Prefer WAV (which Gemini reads directly); fall back to opus if the
+      // browser can't encode WAV. Errors are surfaced instead of silently
+      // doing nothing (the old behaviour when permission/encoder failed).
+      _recordEncoder = await _recorder!.isEncoderSupported(AudioEncoder.wav)
+          ? AudioEncoder.wav
+          : AudioEncoder.opus;
+      await _recorder!.start(RecordConfig(encoder: _recordEncoder), path: 'recording');
+      if (mounted) setState(() => _isRecording = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start recording: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _stopAndSendVoice() async {
@@ -382,17 +423,20 @@ class _ChatScreenState extends State<ChatScreen>
     final path = await _recorder!.stop();
     if (mounted) setState(() => _isRecording = false);
     if (path == null || _conversationId == null) return;
+    final isWav = _recordEncoder == AudioEncoder.wav;
+    final mime = isWav ? 'audio/wav' : 'audio/ogg';
+    final ext = isWav ? 'wav' : 'ogg';
     try {
       final response = await http.get(Uri.parse(path));
       final bytes = response.bodyBytes;
-      final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
+      final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final storagePath = '$_conversationId/chat_media/$filename';
       await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
-            fileOptions: const FileOptions(contentType: 'audio/wav', upsert: false),
+            fileOptions: FileOptions(contentType: mime, upsert: false),
           );
       await _db.from('messages').insert({
         'conversation_id': _conversationId,
@@ -402,6 +446,18 @@ class _ChatScreenState extends State<ChatScreen>
         'media_url': storagePath,
         'status': 'delivered',
       });
+      // Ask Alfred to transcribe + respond (skipped server-side if the host has
+      // taken over). The reply arrives via the realtime messages stream.
+      try {
+        await ApiClient.postJson('/api/messages/web-incoming', {
+          'booking_id': widget.bookingId,
+          'media_url': storagePath,
+          'media_kind': 'audio',
+          'media_mime': mime,
+        });
+      } catch (_) {
+        // Non-fatal — the voice note is delivered; only the auto-reply is missed.
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

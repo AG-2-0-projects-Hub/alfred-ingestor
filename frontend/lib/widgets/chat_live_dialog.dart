@@ -125,12 +125,31 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
 
+    // One-shot fetch of the conversation row so _conversationId (and the mode /
+    // escalation flags) are available immediately, instead of only when the
+    // free-tier realtime stream first fires. Without this, opening a conversation
+    // and quickly tapping Archive/Resolve could silently no-op (those handlers
+    // bail while _conversationId is still null) — the intermittent "nothing
+    // happens on archive" bug, most visible on not-yet-engaged conversations.
+    final conv = await Supabase.instance.client
+        .from('conversations')
+        .select('id, mode, escalation_reason, requires_attention')
+        .eq('booking_id', widget.bookingId)
+        .maybeSingle();
+
     if (mounted) {
       setState(() {
         _guestChatUrl = guest?['guest_chat_url'] as String?;
         final gn = guest?['name'] as String?;
         if (gn != null && gn.isNotEmpty) _guestName = gn;
+        if (conv != null) {
+          _mode = conv['mode'] as String? ?? _mode;
+          _escalationReason = conv['escalation_reason'] as String?;
+          _requiresAttention = conv['requires_attention'] == true;
+          _conversationId ??= conv['id'] as String?;
+        }
       });
+      if (_conversationId != null) _subscribeToMessages(_conversationId!);
       _watchConversation();
     }
   }

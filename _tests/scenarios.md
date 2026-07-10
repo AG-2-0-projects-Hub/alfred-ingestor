@@ -764,6 +764,32 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 
 ---
 
+## Gate-1 staging verification — 2026-07-10 (security commit `14ed3c0` + follow-up fixes)
+
+Founder ran a live Gate-1 pass on staging after the security-hardening commit, before the infra cutover's `staging→main` merge. **The security change broke nothing** — all host actions still work. Failures below are pre-existing behaviour surfaced during testing.
+
+| # | Area | Result | Notes |
+|---|---|---|---|
+| G1-1 | Host auth — reply / resolve / archive / toggle / generate link (web + TG) | ✅ PASS | Token attaches; 401/403 guards don't block the owning host. |
+| G1-2 | Guest chat — web + Telegram (normal flow) | ✅ PASS | |
+| G1-3 | Guest image upload (web) → host receives it | ✅ PASS | `chat_media` booking-scoped policy works. |
+| G1-4 | Escalation → live resolve button → resolve | ✅ PASS | |
+| G1-5 | Telegram escalation-notice ordering | ❌ FAIL → **FIXED** | "You are now speaking with «host»" arrived **before** Alfred's reply, so the reply read as host-written. Fixed: the notice is now sent **after** the reply (`messages.py` returns `host_name`; `telegram.py` sends it post-reply). Retest pending. |
+| G1-6 | Archive a not-yet-engaged ("Awaiting reply") conversation | ❌ FAIL → **FIXED** | Intermittent "nothing happens" + conversation reappeared. Causes: (a) `_conversationId` was only set by the laggy realtime stream → archive no-op if clicked early; (b) `property_expanded_view._applyConversations` didn't filter `archived_at`. Both fixed. Retest pending. |
+| G1-7 | Conversations overview (popup) matches the property card | ❌ FAIL → **FIXED** | Popup listed archived + extra rows the card omitted. Same `_applyConversations` archived filter. Retest pending. |
+| G1-8 | Guest voice note — web | ❌ FAIL → **FIXED** (deploy-to-test) | Mic did nothing (silent permission/encoder failure). Recorder now surfaces permission/encoder errors, prefers a Gemini-readable WAV (opus fallback), and routes the note through the Brain. Web-audio format support varies by browser — verify live. |
+| G1-9 | Guest image — Telegram | ❌ FAIL → **FIXED** (multimodal) | The bot now downloads the photo, saves it to `chat_media` (host sees it), and Alfred analyzes it via Gemini vision + replies; escalates if it can't resolve it. |
+| G1-10 | Guest voice — Telegram | ❌ FAIL → **FIXED** (multimodal) | Voice note is downloaded + transcribed/understood by Gemini and answered. |
+| G1-11 | Duplicate Telegram transition notices under rapid manual toggling | ⚠️ MINOR | Several "resumed / now speaking" notices stacked during rapid Intervene↔Resume toggling. Likely a test artifact; re-verify after the G1-5 fix. |
+| G1-12 | Host profile — avatar upload | ❌ FAIL → **FIXED** | Direct upload returned `403 RLS` on `host_avatars`. Now brokered through `POST /api/host/avatar` (host-token verified → service-role write under `{uid}/`). The app-bar profile glyph now shows the avatar once set. |
+| G1-13 | Media-burst escalation | ✅ NEW | A guest sending ≥2 photos/voice notes (env `GUEST_MEDIA_ESCALATE_COUNT`, default 2) escalates to the host; Alfred's analysis still goes out. Verify live. |
+
+**Broader-pass items — founder-verified PASS (2026-07-10):** guardrails rate-limit (20+/hr → cooldown), prompt-injection refusal/escalation, high-stakes wifi/door-code fallback; learning loop (Accept → Vault → delete with undo); escalation triage (emergency/hostile not learned; off-topic → friendly redirect); channel isolation (web escalation not pinged on TG); language stability + localized welcome. → promote to passing scenarios (L-series + relevant A–H) at the pre-merge promotion.
+
+**Fix/feature commit (pending):** G1-5/6/7 + G1-8/9/10/12/13 — backend `messages.py`, `telegram.py`, `telegram_client.py`, `gemini_messenger.py`, `guardrails.py`, `supabase_client.py`, `properties.py`; frontend `chat_live_dialog.dart`, `property_expanded_view.dart`, `chat_screen.dart`, `profile_dialog.dart`, `dashboard_screen.dart`.
+
+---
+
 ## To do (out of scope for v1 draft)
 
 - **Mobile breakpoint scenarios** — deferred to next phase

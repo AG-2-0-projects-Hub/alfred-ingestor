@@ -590,7 +590,13 @@ async def first_pass(
     preferred_language: str,
     guest_message: str,
     learned_knowledge: list[dict] | None = None,
+    media: list[tuple[bytes, str]] | None = None,
 ) -> dict:
+    """`media` = optional list of (raw_bytes, mime_type) the guest sent (image or
+    audio). Gemini 2.5 Pro is natively multimodal, so the bytes are attached as
+    extra parts and the model analyzes them alongside the (synthesized) text
+    prompt. The same anti-hallucination + escalation rules apply to whatever the
+    media shows."""
     client = _get_client()
     user_prompt = _build_user_prompt(
         master_json,
@@ -599,9 +605,22 @@ async def first_pass(
         guest_message,
         learned_knowledge,
     )
+    if media:
+        # Trusted instruction (outside the untrusted-guest-text markers).
+        user_prompt += (
+            "\n\n## ATTACHED MEDIA\n"
+            "The guest attached the media shown below. Analyze it and reply per all "
+            "your rules (same anti-hallucination + high-stakes limits). If it shows a "
+            "problem you cannot resolve from the property data — damage, a safety "
+            "issue, or anything that needs the host — escalate with an appropriate "
+            "reason instead of guessing."
+        )
+    parts: list = [types.Part(text=user_prompt)]
+    for data, mime in (media or []):
+        parts.append(types.Part.from_bytes(data=data, mime_type=mime))
     response = await client.aio.models.generate_content(
         model=MODEL,
-        contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+        contents=[types.Content(role="user", parts=parts)],
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             temperature=0.3,

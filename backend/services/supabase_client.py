@@ -172,6 +172,56 @@ def download_file(property_id: str, filename: str) -> bytes:
     return client.storage.from_(BUCKET).download(path)
 
 
+_CHAT_MEDIA_BUCKET = "chat_media"
+
+
+def upload_chat_media(path: str, data: bytes, content_type: str) -> None:
+    """Upload guest media (from Telegram) into the chat_media bucket so the host
+    sees it in the dashboard, just like web-uploaded media. Path convention
+    matches the web client: "{conversation_id}/chat_media/{filename}"."""
+    client = get_client()
+    client.storage.from_(_CHAT_MEDIA_BUCKET).upload(
+        path, data, {"content-type": content_type, "upsert": "false"}
+    )
+
+
+def download_chat_media(path: str) -> bytes:
+    """Download raw bytes of a chat_media object (for Gemini analysis)."""
+    client = get_client()
+    return client.storage.from_(_CHAT_MEDIA_BUCKET).download(path)
+
+
+def upload_host_avatar(uid: str, data: bytes, content_type: str, ext: str) -> str:
+    """Upload a host's avatar to host_avatars/{uid}/ under the SERVICE role and
+    return its public URL. The caller (backend) authenticates the host token and
+    scopes the path to their own uid, so this is a safe bypass of the storage
+    RLS write policy — which the Flutter web client couldn't satisfy directly."""
+    client = get_client()
+    ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    path = f"{uid}/avatar_{ts}.{ext}"
+    client.storage.from_("host_avatars").upload(
+        path, data, {"content-type": content_type, "upsert": "true"}
+    )
+    return client.storage.from_("host_avatars").get_public_url(path)
+
+
+def count_recent_guest_media(conversation_id: str, since_iso: str) -> int:
+    """Guest image/voice messages in this conversation since `since_iso` — feeds
+    the media-burst escalation (a guest sending several photos/notes usually
+    wants a human to look)."""
+    client = get_client()
+    result = (
+        client.table("messages")
+        .select("id", count="exact")
+        .eq("conversation_id", conversation_id)
+        .eq("sender_type", "guest")
+        .in_("message_type", ["image", "audio"])
+        .gte("created_at", since_iso)
+        .execute()
+    )
+    return result.count or 0
+
+
 def move_files_in_storage(src_id: str, dest_id: str) -> None:
     """Move all user_uploads from src_id folder to dest_id folder. (REQ-01, REQ-19)"""
     client = get_client()

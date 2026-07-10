@@ -36,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // Host impact stats (get_host_stats RPC). Null until first load.
   Map<String, dynamic>? _hostStats;
+  String? _hostAvatarUrl;
 
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
@@ -53,6 +54,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.addObserver(this);
     _notifPermission = PushNotificationService.permissionState;
     _loadHostStats();
+    _loadHostAvatar();
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
@@ -320,8 +322,39 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  void _openProfile() {
-    ProfileDialog.show(context, propertyCount: _properties.length);
+  Future<void> _loadHostAvatar() async {
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      final row = await Supabase.instance.client
+          .from('host_profiles')
+          .select('avatar_url')
+          .eq('id', uid)
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _hostAvatarUrl = row?['avatar_url'] as String?);
+      }
+    } catch (_) {
+      // Ignore — fall back to the default person glyph.
+    }
+  }
+
+  Widget _profileGlyph(double size, Color color) {
+    final url = _hostAvatarUrl;
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: size / 2,
+        backgroundColor: Colors.transparent,
+        backgroundImage: NetworkImage(url),
+      );
+    }
+    return Icon(Icons.person_outline_rounded, size: size, color: color);
+  }
+
+  Future<void> _openProfile() async {
+    await ProfileDialog.show(context, propertyCount: _properties.length);
+    // The host may have changed their avatar — refresh the app-bar glyph.
+    _loadHostAvatar();
   }
 
   Future<void> _logout() async {
@@ -570,7 +603,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 if (!isNarrow)
                   IconButton(
                     tooltip: 'Profile',
-                    icon: const Icon(Icons.person_outline_rounded, size: 20),
+                    icon: _profileGlyph(22, palette.textSecondary),
                     onPressed: _openProfile,
                   ),
                 IconButton(
@@ -606,8 +639,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   // so surface identity + logout together behind an account menu.
                   PopupMenuButton<String>(
                     tooltip: 'Account',
-                    icon: Icon(Icons.account_circle_outlined,
-                        size: 22, color: palette.textSecondary),
+                    icon: _profileGlyph(24, palette.textSecondary),
                     color: palette.surface,
                     onSelected: (v) {
                       if (v == 'logout') _logout();

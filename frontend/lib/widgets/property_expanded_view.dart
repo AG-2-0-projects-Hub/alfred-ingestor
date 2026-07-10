@@ -83,11 +83,16 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
   void _applyConversations(List<Map<String, dynamic>> rows) {
     final merged = <Map<String, dynamic>>[
       for (final c in rows)
-        <String, dynamic>{
-          ...c,
-          'guestName':
-              _guestNamesByBooking[c['booking_id'] as String? ?? ''] ?? 'Guest',
-        }
+        // Archived conversations belong under the Archived section, not the
+        // active list — mirror the dashboard card's filter so the overview and
+        // the card agree, and so a just-archived conversation doesn't reappear
+        // when this one-shot refresh (which reads all rows) runs after archive.
+        if (c['archived_at'] == null)
+          <String, dynamic>{
+            ...c,
+            'guestName':
+                _guestNamesByBooking[c['booking_id'] as String? ?? ''] ?? 'Guest',
+          }
     ];
     merged.sort((a, b) {
       int priority(Map<String, dynamic> x) {
