@@ -393,10 +393,19 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
     try {
+      // A browser that has already stored a "block" for this origin returns
+      // false here without ever re-prompting, so tell the guest how to undo it
+      // rather than leaving them tapping a mic that does nothing.
       if (!await _recorder!.hasPermission()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Microphone access is needed to record a voice message.')),
+            const SnackBar(
+              duration: Duration(seconds: 6),
+              content: Text(
+                'Microphone blocked. Open the padlock in your browser\'s address bar, '
+                'set Microphone to "Allow", then reload and try again.',
+              ),
+            ),
           );
         }
         return;

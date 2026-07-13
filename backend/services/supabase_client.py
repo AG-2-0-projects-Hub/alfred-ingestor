@@ -205,9 +205,13 @@ def upload_host_avatar(uid: str, data: bytes, content_type: str, ext: str) -> st
     return client.storage.from_("host_avatars").get_public_url(path)
 
 
-def count_recent_guest_media(conversation_id: str, since_iso: str) -> int:
-    """Guest image/voice messages in this conversation since `since_iso` — feeds
-    the media-burst escalation (a guest sending several photos/notes usually
+def count_recent_guest_media(
+    conversation_id: str,
+    since_iso: str,
+    kinds: tuple[str, ...] = ("image", "audio"),
+) -> int:
+    """Guest media messages of `kinds` in this conversation since `since_iso` —
+    feeds the media-burst escalation (a guest sending several photos usually
     wants a human to look)."""
     client = get_client()
     result = (
@@ -215,7 +219,7 @@ def count_recent_guest_media(conversation_id: str, since_iso: str) -> int:
         .select("id", count="exact")
         .eq("conversation_id", conversation_id)
         .eq("sender_type", "guest")
-        .in_("message_type", ["image", "audio"])
+        .in_("message_type", list(kinds))
         .gte("created_at", since_iso)
         .execute()
     )

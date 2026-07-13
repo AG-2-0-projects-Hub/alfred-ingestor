@@ -76,7 +76,7 @@ class HostSendRequest(BaseModel):
 
 async def process_guest_message(
     booking_id: str, message: str, channel: str = "web",
-    media: dict | None = None,
+    media: dict | list[dict] | None = None,
 ) -> dict:
     """Channel-agnostic guest pipeline shared by the web chat and the Telegram
     bot. `channel` ('web' | 'telegram') is the channel this message arrived on;
@@ -120,28 +120,34 @@ async def process_guest_message(
 
     # Media (image / voice) vs plain text. For media we attach the raw bytes to
     # the Gemini call below so Alfred actually analyzes the photo / voice note.
-    media_bytes: bytes | None = None
-    media_mime: str | None = None
-    media_kind: str | None = None  # 'image' | 'audio'
-    if media:
-        media_kind = media.get("kind")
-        media_mime = media.get("mime") or (
-            "image/jpeg" if media_kind == "image" else "audio/ogg"
-        )
-        if media.get("bytes") is not None:
+    # `media` is a list because a Telegram album arrives as several photos that
+    # must produce ONE reply, not one per photo. A single dict is still accepted.
+    media_items = [media] if isinstance(media, dict) else list(media or [])
+    media_parts: list[tuple[bytes, str]] = []
+    media_kind: str | None = None  # 'image' | 'audio' — what this turn carried
+    image_count = 0
+    for item in media_items:
+        kind = item.get("kind")
+        mime = item.get("mime") or ("image/jpeg" if kind == "image" else "audio/ogg")
+        media_kind = media_kind or kind
+        if kind == "image":
+            image_count += 1
+
+        item_bytes: bytes | None = None
+        if item.get("bytes") is not None:
             # Telegram: persist to chat_media so the host sees it in the dashboard,
             # then log the guest row here (the web client does its own upload+insert).
-            media_bytes = media["bytes"]
-            ext = (media_mime.split("/")[-1].split(";")[0]
-                   or ("jpg" if media_kind == "image" else "ogg"))
+            item_bytes = item["bytes"]
+            ext = (mime.split("/")[-1].split(";")[0]
+                   or ("jpg" if kind == "image" else "ogg"))
             ts = int(datetime.now(timezone.utc).timestamp() * 1000)
             storage_path: str | None = (
-                f"{conversation['id']}/chat_media/{media_kind}_{ts}.{ext}"
+                f"{conversation['id']}/chat_media/{kind}_{ts}_{len(media_parts)}.{ext}"
             )
             try:
                 await asyncio.to_thread(
                     supabase_client.upload_chat_media,
-                    storage_path, media_bytes, media_mime,
+                    storage_path, item_bytes, mime,
                 )
             except Exception as exc:
                 log.warning("chat_media upload failed for booking=%s: %s", booking_id, exc)
@@ -150,20 +156,24 @@ async def process_guest_message(
                 supabase_client.insert_message,
                 conversation["id"],
                 "guest",
-                message or ("[image]" if media_kind == "image" else "[voice message]"),
-                message_type=media_kind,
+                message or ("[image]" if kind == "image" else "[voice message]"),
+                message_type=kind,
                 media_url=storage_path,
             )
-        elif media.get("url"):
+        elif item.get("url"):
             # Web: the client already uploaded to chat_media and inserted the
             # message row — just fetch the bytes for analysis.
             try:
-                media_bytes = await asyncio.to_thread(
-                    supabase_client.download_chat_media, media["url"]
+                item_bytes = await asyncio.to_thread(
+                    supabase_client.download_chat_media, item["url"]
                 )
             except Exception as exc:
                 log.warning("chat_media download failed for booking=%s: %s", booking_id, exc)
-    elif not is_duplicate:
+
+        if item_bytes:
+            media_parts.append((item_bytes, mime))
+
+    if not media_items and not is_duplicate:
         # Always log the guest message so the host can see it even in intervene mode.
         await asyncio.to_thread(
             supabase_client.insert_message,
@@ -235,12 +245,16 @@ async def process_guest_message(
         raise HTTPException(status_code=404, detail="Property data not found")
 
     # Attach the guest's media (if any) to the first pass, with a short text
-    # anchor so a caption-less photo/voice note still has a prompt.
-    media_parts = [(media_bytes, media_mime)] if (media_bytes and media_mime) else None
-    prompt_message = message or (
-        "[image]" if media_kind == "image"
-        else "[voice message]" if media_kind == "audio" else message
-    )
+    # anchor so a caption-less photo/voice note still has a prompt. An album is
+    # announced as one prompt so Alfred addresses the photos together.
+    if message:
+        prompt_message = message
+    elif media_kind == "image":
+        prompt_message = "[image]" if image_count <= 1 else f"[{image_count} images]"
+    elif media_kind == "audio":
+        prompt_message = "[voice message]"
+    else:
+        prompt_message = message
 
     try:
         first_result = await asyncio.wait_for(
@@ -250,7 +264,7 @@ async def process_guest_message(
                 preferred_language=guest.get("preferred_language") or "not_set",
                 guest_message=prompt_message,
                 learned_knowledge=property_data.get("learned_knowledge") or [],
-                media=media_parts,
+                media=media_parts or None,
             ),
             timeout=GEMINI_TIMEOUT_S,
         )
@@ -308,18 +322,22 @@ async def process_guest_message(
                 or guest.get("preferred_language")
             )
 
-    # Media-burst escalation: a guest sending several photos / voice notes usually
-    # wants a human to look. On the Nth media message (default 2) escalate to the
-    # host — Alfred's analysis still goes out as the reply.
-    if media_kind and not requires_escalation:
-        media_count = await asyncio.to_thread(
+    # Media-burst escalation: a guest sending several PHOTOS in a short burst
+    # usually wants a human to look, so escalate — Alfred's analysis still goes
+    # out as the reply. Only photos count and only within the burst window: a
+    # single photo, or a voice note, is ordinary conversation and must not
+    # escalate on volume alone.
+    if image_count and not requires_escalation:
+        recent_images = await asyncio.to_thread(
             supabase_client.count_recent_guest_media,
             conversation["id"],
-            (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
+            (datetime.now(timezone.utc)
+             - timedelta(minutes=guardrails.MEDIA_BURST_WINDOW_MIN)).isoformat(),
+            ("image",),
         )
-        if media_count >= guardrails.MEDIA_ESCALATE_COUNT:
-            log.info("media-burst escalation for booking=%s (media_count=%s)",
-                     booking_id, media_count)
+        if recent_images >= guardrails.MEDIA_ESCALATE_COUNT:
+            log.info("media-burst escalation for booking=%s (images=%s in %smin)",
+                     booking_id, recent_images, guardrails.MEDIA_BURST_WINDOW_MIN)
             requires_escalation = True
             escalation_reason = "media_needs_host_review"
 

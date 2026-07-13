@@ -18,10 +18,12 @@ RATE_LIMIT_PER_DAY = int(os.getenv("GUEST_RATE_LIMIT_PER_DAY", "100"))
 # Hard cap on what a single guest message can feed into the prompt.
 MAX_GUEST_MESSAGE_CHARS = int(os.getenv("GUEST_MAX_MESSAGE_CHARS", "2000"))
 
-# Media-burst escalation: a guest sending several photos/voice notes in a short
-# window usually wants a human to look. On the Nth media message the conversation
-# escalates to the host regardless of what the model replied. Env-tunable.
+# Media-burst escalation: a guest sending several PHOTOS in a short burst usually
+# wants a human to look, so the conversation escalates to the host regardless of
+# what the model replied. Only photos count — a voice note is ordinary
+# conversation and never escalates on volume alone. Both values env-tunable.
 MEDIA_ESCALATE_COUNT = int(os.getenv("GUEST_MEDIA_ESCALATE_COUNT", "2"))
+MEDIA_BURST_WINDOW_MIN = int(os.getenv("GUEST_MEDIA_BURST_WINDOW_MINUTES", "10"))
 
 
 def truncate_message(text: str) -> str:

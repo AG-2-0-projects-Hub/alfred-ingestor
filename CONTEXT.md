@@ -1,6 +1,8 @@
 # Session Context
 **Created:** 2026-04-14
-**Last Session:** 2026-07-08→09 (**AI guardrails + self-learning triage/ledger + escalation-scope fix + learning-UX + chat fixes + channel isolation** — `staging` @ `368128a`, still ahead of `origin/main` (`d0a092e`), nothing on `main`. Seven commits: `80d8ac6` (guardrails), `33b955a` (learning triage + `learning_events` ledger + escalation-scope), `024752c` (fix: resolve 500), `29967e8` (learning-UX: chain highlight + vault/undo), `cc5c5a8` (fixes: live resolve button + plain-text web-search reply + guest name in header), `368128a` (channel isolation Tier 1). 3 additive migrations (`add_messages_conversation_created_index`, `create_learning_events_ledger`, `add_active_channel_to_conversations`). ⚠️ `learning_events` = first permanent guest-derived (pseudonymized) store → Privacy/GDPR (D4). User live-verified guardrails/triage/escalation-scope/learning-UX (L1–L7 passing); the `cc5c5a8`+`368128a` fixes are **deploy-to-test** (Render auto for backend; **manual Vercel redeploy** for the `cc5c5a8` frontend bits). **Next session (planned, not started): DB split (fresh prod DB) + Render→Cloud Run — see plan section below.** See "Session 2026-07-08" below.)
+**Last Session:** 2026-07-12 (**INFRA CUTOVER EXECUTED — new prod stack is live; awaiting Gate 2** — Gate 1 **passed** ("staging approved"). Prod is now fully isolated from staging on every axis: **new Supabase project `alfred-prod`** (`ylaooctefesedrecshic`, eu-central-1), schema reproduced from staging at **zero-delta parity** via `_Context/plans/prod-schema.sql` (built by *introspecting* staging and applied in the SQL Editor — the `supabase-prod` MCP's OAuth fails in the VSCode extension ("resource must be a valid MCP endpoint") and psql/pg_dump aren't installed, so this path avoided ever handling the DB connection string); **backend + scraper on Cloud Run** (`europe-west3`, GCP project **`alfred-prod-502215`**, new Gmail `alfred.bnb.host@gmail.com` for the $300 credit) — backend **`min-instances=1`**, scraper scale-to-zero; **6 secrets in Secret Manager**, none ever exposed in chat; prod bot **`@AlwaysAlfred_bot`**, webhook registered; **own Gemini key** on the prod project so Gemini bills the credit (the new secure-by-default org blocks key creation in the *AI Studio UI*, but `gcloud services api-keys create` works — **no org policy was lifted**; do NOT touch `iam.disableServiceAccountKeyCreation`, that's SA keys, unrelated); prod frontend = new Vercel project **`alwaysalfred.vercel.app`**, temporarily building from **`staging`** so Gate 2 tests approved code **without merging** (merging would wake Render-prod's `autoDeploy` and disturb the rollback). Org quirk: auto-IAM-grants to default SAs are disabled → had to grant the compute SA `cloudbuild.builds.builder` + `secretmanager.secretAccessor` by hand. Also fixed the 3 Gate-1 bugs: **over-eager media escalation** (the "burst" window was **6 hours** and counted voice+images together → a lone happy voice note escalated; now photos-only within a short window), **Telegram album duplicate replies** (albums arrive as one update *per photo* sharing `media_group_id` → now debounced into one reply + one transition notice), and an actionable web-mic error. **Old Render prod + the old shared DB remain fully live as rollback — nothing is merged to `main`.** Two new 🔴 M1 items: **staging/prod platform parity** (staging still on Render — that mismatch hides Cloud-Run-only bugs like the CPU-freeze) and a **Cloud Build trigger on `main`** (Cloud Run does **not** auto-deploy on merge). NEXT: Gate 2 e2e → merge `staging→main` → retire Render prod → move staging to Cloud Run → CI/CD. Plan: `C:\Users\San_8\.claude\plans\warm-wishing-beaver.md`.)
+**Prior Session:** 2026-07-10 (**Infra-cutover START: security hardening + Gate-1 fixes + full multimodal + Cloud Run/DB-split prep** — `staging` ahead of `origin/main` (`d0a092e`), nothing on `main`. Three commits: `14ed3c0` (security: host-endpoint auth + ownership on host-send/resolve/archive/announce/guests → 401/403; drop `Property_assets` anon policies; scope `chat_media` anon INSERT to own conversation + drop its listing policy — 3 additive storage migrations), `90faaa9` (Gate-1 fixes G1-5/6/7 [TG escalation-notice ordering, archive-pending no-op, overview vs card] + **full multimodal**: Alfred analyzes guest images [Gemini vision] + transcribes voice on web AND Telegram, media saved to `chat_media`, media-burst escalation ≥`GUEST_MEDIA_ESCALATE_COUNT`=2; + avatar upload fix via new `POST /api/host/avatar` service-role broker + app-bar profile glyph), `4fbc48b` (Cloud Run Dockerfiles for backend[min-instances=1] + scraper). No multimodal schema change (reused `message_type`/`media_url`). Founder ran **Gate 1** and verified guardrails/injection/learning-loop/escalation-triage/channel-isolation/language + host-auth actions PASS; G1-5/6/7/12/13 fixed, **awaiting founder retest next session**. Prep artifact (local, gitignored): `_Context/plans/prod-db-setup.sql`. **CUTOVER PAUSED at the founder-gated boundary** — needs: Gate-1 retest → "staging approved"; create new prod Supabase project (+ URL/anon/service_role/Legacy-JWT-secret/DB-conn-string); GCP APIs + gcloud auth + new prod Telegram bot. Plan: `C:\Users\San_8\.claude\plans\warm-wishing-beaver.md`. Full detail in `_Context/session-digest.md`.)
+**Prior Session:** 2026-07-08→09 (**AI guardrails + self-learning triage/ledger + escalation-scope fix + learning-UX + chat fixes + channel isolation** — `staging` @ `368128a`, still ahead of `origin/main` (`d0a092e`), nothing on `main`. Seven commits: `80d8ac6` (guardrails), `33b955a` (learning triage + `learning_events` ledger + escalation-scope), `024752c` (fix: resolve 500), `29967e8` (learning-UX: chain highlight + vault/undo), `cc5c5a8` (fixes: live resolve button + plain-text web-search reply + guest name in header), `368128a` (channel isolation Tier 1). 3 additive migrations (`add_messages_conversation_created_index`, `create_learning_events_ledger`, `add_active_channel_to_conversations`). ⚠️ `learning_events` = first permanent guest-derived (pseudonymized) store → Privacy/GDPR (D4). User live-verified guardrails/triage/escalation-scope/learning-UX (L1–L7 passing); the `cc5c5a8`+`368128a` fixes are **deploy-to-test** (Render auto for backend; **manual Vercel redeploy** for the `cc5c5a8` frontend bits). **Next session (planned, not started): DB split (fresh prod DB) + Render→Cloud Run — see plan section below.** See "Session 2026-07-08" below.)
 **Prior Session:** 2026-07-07 evening (**Host profile + dashboard stats + escalation-gated resolve + conversation archive lifecycle** — `staging` @ `96ce00a`, still ahead of `origin/main` (`d0a092e`), nothing on `main`. Three features shipped in one plan-mode pass: (1) "Mark Issue as Resolved" now shows only on a real escalation, not a manual Intervene; (2) full conversation archive lifecycle — `conversations.archived_at`, hourly `pg_cron` auto-archive once `guests.check_out` passes (new `check_in/check_out` cols, testing default now+96h), manual "Archive conversation", auto-reactivate on a new guest message; (3) host profile menu + dashboard stats strip (`host_profiles` table, `host_avatars` bucket, `get_host_stats` RPC). 6 additive migrations, inert for existing data. `flutter analyze` + `py_compile` clean. **Not yet runtime-verified — deploy-to-test on staging pending.** See "Session 2026-07-07 (evening)" below.)
 **Prior Session:** 2026-07-07 (**Mobile UI stopgap fixes + doc/status sync + design brief** — `staging` @ `2883f12`. Six mobile-only layout fixes, all gated behind mobile breakpoints so web is unchanged; fixes 1–5 user-verified on staging, fix 6 awaiting live verification. Scenario K1 passing. New `_Context/Alfred_core_description.md` design brief (canonical deep-obsidian + AI-aurora brand). **Password incident:** `a1test@test.com` password changed without permission then reverted to `Test123!`. See "Session 2026-07-07 — Mobile" below.)
 **Prior Session:** 2026-07-05 (**Native Telegram guest channel + launch roadmap + command dashboard + feedback box**, all staging-only — Telegram live-tested end-to-end by user and confirmed working. See "Session 2026-07-05" below.)
@@ -13,24 +15,41 @@
 
 ---
 
-## Live URLs
-| Service | Prod | Staging |
-|---|---|---|
-| Backend | https://the-ingestor.onrender.com | https://the-ingestor-staging.onrender.com |
-| Scraper | https://scraper-ojux.onrender.com | https://scraper-staging-bn7w.onrender.com |
-| Frontend | https://alfred-ingestor.vercel.app | https://alfred-ingestor-git-staging-sanslighthouse-6079s-projects.vercel.app |
-| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor | (branch `staging`) |
-| Auto-deploy | Render + Vercel on push to `main` | Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed) |
+## Live URLs (post-cutover, 2026-07-12)
+| Service | **PROD — new (Cloud Run)** | Staging (Render) | Old prod (Render — rollback, to retire) |
+|---|---|---|---|
+| Backend | https://alfred-backend-798387479883.europe-west3.run.app | https://the-ingestor-staging.onrender.com | https://the-ingestor.onrender.com |
+| Scraper | https://alfred-scraper-798387479883.europe-west3.run.app | https://scraper-staging-bn7w.onrender.com | https://scraper-ojux.onrender.com |
+| Frontend | https://alwaysalfred.vercel.app | https://alfred-ingestor-git-staging-sanslighthouse-6079s-projects.vercel.app | https://alfred-ingestor.vercel.app |
+| Telegram bot | `@AlwaysAlfred_bot` | `@AlfredHostW_bot` | `@AlfredHostW_bot` |
+| GitHub | https://github.com/AG-2-0-projects-Hub/alfred-ingestor · branch `main` | branch `staging` | `main` |
 
-## Supabase Project
-| Key | Value |
-|---|---|
-| MCP name | `supabase-the-ingestor` |
-| project_ref | `gcxxilzfhwlsjcvtpsvj` |
-| Project URL | `https://gcxxilzfhwlsjcvtpsvj.supabase.co` |
-| Anon key | in `frontend/.env` |
-| Service role key | in `backend/.env` |
-| Bucket | `Property_assets` (private) |
+**Deploy behaviour — read before merging:**
+- ⚠️ **Cloud Run does NOT auto-deploy on merge.** Prod was deployed manually (`gcloud run deploy --source`). Until a **Cloud Build trigger on `main`** exists, merging `staging→main` will *not* update prod.
+- ⚠️ **Render prod has `autoDeploy: true` on `main`** (`render.yaml`) — **disable it before the merge**, or the old prod stack redeploys the new code against the **old DB**.
+- Vercel `alwaysalfred` currently builds from **`staging`** (temporary, so Gate 2 can test approved code pre-merge). **Flip it to `main` after the merge.**
+- Staging: Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed).
+
+## Supabase Projects — TWO since the 2026-07-12 split
+
+> ⚠️ **POST-SPLIT RULE (permanent): every migration must be applied to BOTH projects.**
+> The MCP (`supabase-the-ingestor`) is scoped to **staging only**. Prod schema changes go through the
+> **Supabase SQL Editor** (the `supabase-prod` MCP's OAuth does not complete in the VSCode extension).
+
+| Key | **PROD** (new) | **STAGING** (the old shared project) |
+|---|---|---|
+| Name | `alfred-prod` | the original project |
+| project_ref | `ylaooctefesedrecshic` | `gcxxilzfhwlsjcvtpsvj` |
+| Project URL | `https://ylaooctefesedrecshic.supabase.co` | `https://gcxxilzfhwlsjcvtpsvj.supabase.co` |
+| Region | `eu-central-1` (Cloud Run co-located in `europe-west3`) | — |
+| MCP | ❌ none (use SQL Editor) | ✅ `supabase-the-ingestor` |
+| Keys | **Legacy** anon / service_role / JWT secret (NOT the new `sb_*` keys — staging's contract) | same |
+| Secrets live in | GCP **Secret Manager** (`alfred-prod-502215`) | Render/Vercel env vars |
+| Data | **empty** — founder re-signs-up fresh | test-polluted (fine — it's staging) |
+| Buckets | `Property_assets` (private), `chat_media` (public, 10 MB), `host_avatars` (public) | same |
+
+**Never wipe the staging project** — it *is* the old shared DB, and it's now the rollback/staging environment.
+Schema parity was verified zero-delta on 2026-07-12 (8 tables · 84 cols · 15 policies · 7 storage policies · 15 indexes · 2 functions · 1 trigger · 3 buckets · 1 cron job).
 
 ### RLS (enabled 2026-06-10 — shared prod+staging DB)
 - `properties`: `owner_only` (ALL, `owner_id = auth.uid()`) — pre-existing.

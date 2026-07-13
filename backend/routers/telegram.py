@@ -20,6 +20,13 @@ from routers.messages import process_guest_message, _notify_tg_transition
 from routers.guest_auth import _resolve_identity
 
 router = APIRouter()
+
+# Telegram splits an album (several photos sent at once) into one update per
+# photo, all sharing a media_group_id. `_albums` buffers a group for this long
+# so it can be answered as a single turn. Safe as process state: the backend runs
+# with min-instances=1, and a lost buffer only costs one album's grouping.
+_ALBUM_WINDOW_S = 2.0
+_albums: dict[str, dict] = {}
 log = logging.getLogger(__name__)
 
 _STRANGER = (
@@ -109,19 +116,28 @@ async def _handle_update(update: dict) -> None:
             return
 
         # Photo → analyze as an image. Telegram sends a list of sizes; the last
-        # is the largest.
+        # is the largest. An album shares a media_group_id across updates, so
+        # buffer those and answer the whole group once.
         photo = message.get("photo")
         if isinstance(photo, list) and photo:
             file_id = photo[-1].get("file_id")
             if file_id:
-                await _handle_guest_media(chat_id, file_id, "image", "image/jpeg", caption)
+                group_id = message.get("media_group_id")
+                if group_id:
+                    await _buffer_album_photo(chat_id, group_id, file_id, caption)
+                else:
+                    await _handle_guest_media(
+                        chat_id, [(file_id, "image", "image/jpeg")], caption
+                    )
                 return
 
         # Voice note / audio → transcribe + answer.
         voice = message.get("voice") or message.get("audio")
         if isinstance(voice, dict) and voice.get("file_id"):
             mime = voice.get("mime_type") or "audio/ogg"
-            await _handle_guest_media(chat_id, voice["file_id"], "audio", mime, caption)
+            await _handle_guest_media(
+                chat_id, [(voice["file_id"], "audio", mime)], caption
+            )
             return
 
         if not text:
@@ -194,12 +210,38 @@ async def _handle_guest_message(chat_id, text: str) -> None:
     await _emit_escalation_notice(guest, result)
 
 
-async def _handle_guest_media(
-    chat_id, file_id: str, kind: str, mime: str, caption: str,
+async def _buffer_album_photo(
+    chat_id, group_id: str, file_id: str, caption: str,
 ) -> None:
-    """A photo or voice note from a linked guest → download it, run the shared
-    Brain with the media attached (Alfred analyzes the image / transcribes the
-    voice), and reply. The media is also saved to chat_media so the host sees it."""
+    """Collect the photos of one Telegram album, then handle them as a single turn.
+
+    Telegram delivers an album as one update PER PHOTO, all sharing a
+    media_group_id. Without this, each photo ran the Brain separately — the guest
+    got one reply per photo and a "now speaking with <host>" notice per photo.
+    The first photo of a group waits briefly for its siblings, then flushes once.
+    """
+    entry = _albums.get(group_id)
+    if entry is not None:
+        entry["items"].append((file_id, "image", "image/jpeg"))
+        if caption and not entry["caption"]:
+            entry["caption"] = caption
+        return
+
+    _albums[group_id] = {"items": [(file_id, "image", "image/jpeg")], "caption": caption}
+    await asyncio.sleep(_ALBUM_WINDOW_S)
+    entry = _albums.pop(group_id, None)
+    if entry:
+        await _handle_guest_media(chat_id, entry["items"], entry["caption"])
+
+
+async def _handle_guest_media(
+    chat_id, items: list[tuple[str, str, str]], caption: str,
+) -> None:
+    """Photos / a voice note from a linked guest → download them, run the shared
+    Brain ONCE with all the media attached (Alfred analyzes the images / transcribes
+    the voice), and send a single reply. An album therefore yields one reply and one
+    transition notice, not one per photo. The media is also saved to chat_media so
+    the host sees it. `items` is a list of (file_id, kind, mime)."""
     guest = await asyncio.to_thread(
         supabase_client.get_guest_by_telegram_chat_id, chat_id
     )
@@ -207,16 +249,19 @@ async def _handle_guest_media(
         await telegram_client.send_message(chat_id, _NOT_LINKED)
         return
 
-    data = await telegram_client.download_file(file_id)
-    if not data:
+    media: list[dict] = []
+    for file_id, kind, mime in items:
+        data = await telegram_client.download_file(file_id)
+        if data:
+            media.append({"kind": kind, "mime": mime, "bytes": data})
+    if not media:
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
         return
 
     await telegram_client.send_chat_action(chat_id, "typing")
     try:
         result = await process_guest_message(
-            guest["booking_id"], caption, channel="telegram",
-            media={"kind": kind, "mime": mime, "bytes": data},
+            guest["booking_id"], caption, channel="telegram", media=media,
         )
     except HTTPException as he:
         await telegram_client.send_message(
