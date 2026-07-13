@@ -3,11 +3,13 @@ import os
 from google import genai
 from google.genai import types
 
+from services import genai_factory
+
 MODEL = "gemini-2.5-pro"
 
 
 def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return genai_factory.make_client()
 
 
 def _fill(template: str, **kwargs: str) -> str:

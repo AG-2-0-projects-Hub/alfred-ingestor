@@ -9,10 +9,11 @@ spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
 """
 
 import asyncio
-import io
 import os
 from google import genai
 from google.genai import types
+
+from services import genai_factory
 
 MODEL = "gemini-2.5-pro"
 
@@ -221,58 +222,60 @@ REMEMBER: Structured data often contains implicit rules. A pricing table with we
 
 
 def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return genai_factory.make_client()
 
 
-async def upload_file(data: bytes, filename: str, mime_type: str) -> str:
-    """Upload bytes to the Gemini File API. Returns the file URI."""
-    client = _get_client()
-    response = await client.aio.files.upload(
-        file=io.BytesIO(data),
-        config=types.UploadFileConfig(
-            display_name=filename,
-            mime_type=mime_type,
-        ),
-    )
-    # Wait until file is ACTIVE
-    file_name = response.name
-    for _ in range(30):
-        file_info = await client.aio.files.get(name=file_name)
-        if file_info.state == types.FileState.ACTIVE:
-            return file_info.uri
-        await asyncio.sleep(2)
-    raise RuntimeError(f"Gemini file {file_name} did not become ACTIVE in time.")
+# The Gemini File API (client.files.upload) exists ONLY on the Developer API —
+# Vertex rejects it with "This method is only supported in the Gemini Developer
+# client" — so file bytes go inline instead, which both transports accept.
+# Inline data rides in the request body, so keep it clear of the ~20 MB cap.
+_MAX_INLINE_BYTES = 15 * 1024 * 1024
+
+# Vertex serves Gemini from a *dynamic shared* quota rather than a fixed
+# per-project one, so a burst (an ingest fans out over every uploaded file) can
+# transiently 429. Back off and retry rather than failing the file.
+_RETRY_ATTEMPTS = 4
 
 
-async def delete_file(uri: str) -> None:
-    """Delete a file from the Gemini File API by URI."""
-    client = _get_client()
-    # Extract name from URI e.g. "https://generativelanguage.googleapis.com/v1beta/files/abc123"
-    name = uri.rstrip("/").split("/")[-1]
-    try:
-        await client.aio.files.delete(name=f"files/{name}")
-    except Exception:
-        pass  # Best-effort cleanup
+def _inline_part(data: bytes, mime_type: str) -> types.Part:
+    if len(data) > _MAX_INLINE_BYTES:
+        raise ValueError(
+            f"File is {len(data) // (1024 * 1024)} MB — the limit is "
+            f"{_MAX_INLINE_BYTES // (1024 * 1024)} MB."
+        )
+    return types.Part.from_bytes(data=data, mime_type=mime_type)
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = str(exc)
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
-    response = await client.aio.models.generate_content(
-        model=MODEL,
-        contents=[types.Content(role="user", parts=parts)],
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-        ),
-    )
-    return response.text
+    last_exc: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            response = await client.aio.models.generate_content(
+                model=MODEL,
+                contents=[types.Content(role="user", parts=parts)],
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                ),
+            )
+            return response.text
+        except Exception as exc:
+            if not _is_rate_limited(exc):
+                raise
+            last_exc = exc
+            if attempt < _RETRY_ATTEMPTS - 1:
+                await asyncio.sleep(2 * (2 ** attempt))  # 2s, 4s, 8s
+    raise last_exc
 
 
-async def process_with_prompt_a(file_uri: str, mime_type: str) -> str:
-    """Prompt A: PDF uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_A),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_a(data: bytes, mime_type: str) -> str:
+    """Prompt A: PDF / document, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_A), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
@@ -282,21 +285,15 @@ async def process_with_prompt_a_text(extracted_text: str) -> str:
     return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
-async def process_with_prompt_b(file_uri: str, mime_type: str) -> str:
-    """Prompt B: Image uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_B),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_b(data: bytes, mime_type: str) -> str:
+    """Prompt B: image, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_B), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
 
 
-async def process_with_prompt_c(file_uri: str, mime_type: str) -> str:
-    """Prompt C: Audio uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_C),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_c(data: bytes, mime_type: str) -> str:
+    """Prompt C: audio, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_C), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
 
 

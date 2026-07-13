@@ -296,8 +296,7 @@ async def add_knowledge(req: AddKnowledgeRequest, request: Request):
             data = await asyncio.to_thread(
                 supabase_client.download_file, prop_id_from_path, filename
             )
-            uri = await gemini_client.upload_file(data, filename, mime)
-            knowledge_text = await gemini_client.process_with_prompt_c(uri, mime)
+            knowledge_text = await gemini_client.process_with_prompt_c(data, mime)
 
     # Fetch current master_json
     row = await asyncio.to_thread(supabase_client.get_property_for_merge, req.property_id)

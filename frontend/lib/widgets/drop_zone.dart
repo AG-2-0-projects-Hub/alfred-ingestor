@@ -46,11 +46,23 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
   bool _isDragging = false;
   String? _inlineError;
 
+  /// Gemini reads uploaded files from the request body, which caps out around
+  /// 20 MB — so anything larger can never be analysed. Reject it here, with a
+  /// clear reason, instead of letting the ingest fail further downstream.
+  static const _maxFileBytes = 15 * 1024 * 1024;
+
   String _sanitizeFilename(String filename) =>
       filename.replaceAll(RegExp(r'[^\w.\- ]'), '_');
 
   Future<void> _uploadBytes(String filename, Uint8List bytes) async {
     final safeFilename = _sanitizeFilename(filename);
+
+    if (bytes.length > _maxFileBytes) {
+      final mb = (bytes.length / (1024 * 1024)).toStringAsFixed(1);
+      setState(() => _inlineError =
+          '$safeFilename — $mb MB exceeds the 15 MB limit per file');
+      return;
+    }
 
     // Reject a file already in the queue rather than re-uploading it (which
     // would add a second list entry that never leaves the "processing" state).
@@ -178,7 +190,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'PDF · DOCX · Images · Sheets · Audio',
+                        'PDF · DOCX · Images · Sheets · Audio — up to 15 MB per file',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: palette.textMuted,

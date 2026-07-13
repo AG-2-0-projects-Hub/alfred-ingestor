@@ -3,6 +3,8 @@ import os
 from google import genai
 from google.genai import types
 
+from services import genai_factory
+
 MODEL = "gemini-2.5-pro"
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
@@ -457,7 +459,7 @@ Reply in the guest's established language from the conversation. Never switch un
 
 
 def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return genai_factory.make_client()
 
 
 def _format_conversation_history(messages: list[dict]) -> str:

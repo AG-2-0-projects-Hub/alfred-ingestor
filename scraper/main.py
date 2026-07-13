@@ -23,7 +23,20 @@ def get_firecrawl_client():
     return FirecrawlApp(api_key=key)
 
 
+_TRUE = {"1", "true", "yes", "on"}
+
+
 def get_gemini_client():
+    """Vertex (prod) authenticates with the Cloud Run service account via ADC and
+    bills through Cloud Billing, so Google Cloud credits apply to it. Otherwise
+    fall back to an AI Studio API key (staging / local), which they do not cover.
+    The scraper is a standalone service, so this mirrors backend genai_factory."""
+    if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in _TRUE:
+        return genai.Client(
+            vertexai=True,
+            project=os.environ["GOOGLE_CLOUD_PROJECT"],
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"),
+        )
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")

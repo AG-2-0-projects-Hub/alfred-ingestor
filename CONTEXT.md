@@ -30,6 +30,36 @@
 - Vercel `alwaysalfred` currently builds from **`staging`** (temporary, so Gate 2 can test approved code pre-merge). **Flip it to `main` after the merge.**
 - Staging: Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed).
 
+## Gemini: Vertex AI (prod) vs AI Studio (staging) — read before touching billing
+
+Google bills Gemini **two different ways**, and this cost us a debugging cycle on 2026-07-12:
+
+| | **Vertex AI** (`aiplatform.googleapis.com`) | **AI Studio / Gemini Developer API** (`generativelanguage.googleapis.com`) |
+|---|---|---|
+| Auth | **Service account (ADC)** — no API key exists | `GEMINI_API_KEY` |
+| Billing | Cloud Billing account | **Its own** prepay/postpay plan, per project |
+| GCP free credits (the €263) | ✅ **apply** | ❌ **excluded** ("prepayment credits are depleted" 429) |
+| Used by | **PROD** (Cloud Run) | **STAGING** (Render) + local |
+
+**Prod runs on Vertex.** `backend/services/genai_factory.py` (and the mirrored branch in `scraper/main.py`) picks the transport from env:
+`GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT=alfred-prod-502215` + `GOOGLE_CLOUD_LOCATION=global` → Vertex. Unset → the API-key path (staging, unchanged).
+Requires `aiplatform.googleapis.com` enabled + the Cloud Run SA holding `roles/aiplatform.user` (both done). Model ids are identical on both transports.
+
+⚠️ **Do not "fix" a Gemini 429 by topping up AI Studio prepay** — that's separate money and does *not* draw on the Cloud credits. And note: staging still uses the API-key path, so the Gemini transport is the one remaining staging/prod gap until **Phase 8** puts staging on Cloud Run + Vertex too.
+`GEMINI_API_KEY` is still mounted on the prod services as an unused fallback lever (flip `GOOGLE_GENAI_USE_VERTEXAI=false` to revert instantly).
+
+### Vertex incompatibilities already hit (and fixed) — expect more
+1. **No File API.** `client.files.upload()` is Developer-API-only; Vertex answers *"This method is only supported in the Gemini Developer client."* Ingest now sends file bytes **inline** (`Part.from_bytes`), which both transports accept. **Consequence: a hard ~15 MB per-file limit** (`_MAX_INLINE_BYTES` in `gemini_client.py`, surfaced in the drop zone UI). If big PDFs ever matter, the fix is a GCS bucket + `from_uri`.
+2. **Dynamic shared quota → transient 429s.** Vertex has no fixed per-project Gemini quota; an ingest that fans out over many files burst-throttles. `gemini_client._generate` now **retries 429/RESOURCE_EXHAUSTED with backoff** (2s/4s/8s, 4 attempts).
+
+🔎 **Still to watch (Vertex ≠ AI Studio at runtime, same prompts notwithstanding):**
+- **Safety-filter defaults differ** between the two transports — a reply that passed on AI Studio can be blocked/filtered on Vertex. Watch guest chat for empty/refused replies.
+- **429s under real load** — the retry may not be enough; may need a concurrency cap on ingest fan-out.
+- `gemini_messenger` / `gemini_merge_resolve` do **not** yet have the 429 retry (only `gemini_client`) — add if chat/merge starts throttling.
+- Region/model availability if `GOOGLE_CLOUD_LOCATION` moves off `global` (e.g. for EU data residency — D4).
+
+---
+
 ## Supabase Projects — TWO since the 2026-07-12 split
 
 > ⚠️ **POST-SPLIT RULE (permanent): every migration must be applied to BOTH projects.**
