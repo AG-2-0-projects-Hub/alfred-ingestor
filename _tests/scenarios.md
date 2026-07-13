@@ -734,23 +734,39 @@ mobile breakpoints so the web/desktop layout is unchanged.
 > chat path (Telegram replied "something went wrong"); and the Realtime publication was
 > never copied to the new DB (host dashboard didn't live-update).
 
+> **2026-07-13 API sweep (Claude):** rows marked ✅ were exercised end-to-end against the
+> live prod stack through the same HTTP contracts the frontend uses (throwaway host
+> `a.vazquez.san+gate2claude@gmail.com`, test properties "Casa Gate2 Test" +
+> "Loft Gate2 Fallback"). Rows marked **◐** are verified server-side but keep a UI or
+> real-Telegram leg only the founder can close — the exact remaining checks are listed
+> under "Founder checklist" below the table. Evidence: `/tmp/gate2/` harness (WSL).
+
 | # | Area | Assert | Status |
 |---|---|---|---|
-| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ☐ |
-| P-2 | Ingest — all types | pdf · docx · image · sheet · audio all reach `Done` (Vertex has **no File API**; bytes go inline) | ☐ |
-| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ☐ |
-| P-4 | Ingest — burst | A multi-file ingest does **not** 429 (retry/backoff absorbs Vertex's dynamic shared quota) | ☐ |
-| P-5 | Merge + conflicts | Discrepancies detected, questionnaire answered, master JSON updated | ✅ 2026-07-13 |
-| P-6 | Welcome language | Mexican property → **Spanish** welcome (country reads from `location.address.country`) | ☐ |
-| P-7 | Guest chat — web | Guest link → message → Alfred replies; reply is **not empty/refused** (Vertex safety defaults differ from AI Studio) | ☐ |
-| P-8 | Guest chat — Telegram | `/start` → message → Alfred replies. **The `min-instances=1` CPU-freeze check.** No "something went wrong" (429s now retried on every Gemini path) | ☐ |
-| P-9 | **Realtime** | Host dashboard shows a new guest message **without refreshing** (requires `messages` in the `supabase_realtime` publication) | ☐ |
-| P-10 | Escalation → resolve | Escalate → Intervene → host reply lands on the guest's channel → Mark Resolved → learning card | ☐ |
-| P-11 | Media rules | 1 photo → no escalation · 2-photo TG album → **one** reply + **one** notice + escalation · voice note → answered, escalates only on **content** | ☐ |
-| P-12 | Stats + ledger | Dashboard stats strip populates; learning vault accept/undo works | ☐ |
-| P-13 | Guardrails | Rate limit, high-stakes fallback (wifi/door code), prompt-injection attempt | ☐ |
-| P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ☐ |
-| P-15 | No cold start | Reload / idle → first response is immediate (`min-instances=1`) | ☐ |
+| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ◐ 2026-07-13 — signup 200 + confirm-email ON (email sent); link-click UX = founder's own signup |
+| P-2 | Ingest — all types | pdf · docx · image · sheet · audio all reach `Done` (Vertex has **no File API**; bytes go inline) | ✅ 2026-07-13 — all 5 types `done` in one 80s run |
+| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ◐ 2026-07-13 — guard + reject copy confirmed in deployed bundle; founder drags one big file |
+| P-4 | Ingest — burst | A multi-file ingest does **not** 429 (retry/backoff absorbs Vertex's dynamic shared quota) | ✅ 2026-07-13 — 5-file burst, zero surfaced 429s |
+| P-5 | Merge + conflicts | Discrepancies detected, questionnaire answered, master JSON updated | ✅ 2026-07-13 (founder) + re-verified via API: 9 conflicts → resolve → `Trained`, 0 remaining |
+| P-6 | Welcome language | Mexican property → **Spanish** welcome (country reads from `location.address.country`) | ✅ 2026-07-13 — "Bienvenido a Casa Gate2 Test…" with country only at `location.address.country` |
+| P-7 | Guest chat — web | Guest link → message → Alfred replies; reply is **not empty/refused** (Vertex safety defaults differ from AI Studio) | ✅ 2026-07-13 — multiple ES+EN turns, correct wifi/checkout/parking answers, no empty/refused reply |
+| P-8 | Guest chat — Telegram | `/start` → message → Alfred replies. **The `min-instances=1` CPU-freeze check.** No "something went wrong" (429s now retried on every Gemini path) | ◐ 2026-07-13 — root cause found & fixed (CPU throttling, see below); simulated webhook: `/start` links + reply row lands ~15s with **zero** follow-up traffic. Founder retests from a real device |
+| P-9 | **Realtime** | Host dashboard shows a new guest message **without refreshing** (requires `messages` in the `supabase_realtime` publication) | ✅ 2026-07-13 — guest + ai INSERTs streamed live over a booking-JWT socket |
+| P-10 | Escalation → resolve | Escalate → Intervene → host reply lands on the guest's channel → Mark Resolved → learning card | ✅ 2026-07-13 — `information_not_in_database` → intervene → host-send → resolve → learning card + ledger row (pseudonymized) |
+| P-11 | Media rules | 1 photo → no escalation · 2-photo TG album → **one** reply + **one** notice + escalation · voice note → answered, escalates only on **content** | ☐ founder — needs real Telegram media (file_ids can't be simulated) |
+| P-12 | Stats + ledger | Dashboard stats strip populates; learning vault accept/undo works | ◐ 2026-07-13 — `get_host_stats` RPC + `learned_knowledge` + `learning_events` all correct via API; vault accept/undo UI = founder |
+| P-13 | Guardrails | Rate limit, high-stakes fallback (wifi/door code), prompt-injection attempt | ✅ 2026-07-13 — cooldown at >20/h (Gemini skipped, msgs stored) · wifi-missing → holding line + escalation · injection refused, no prompt/JSON leak |
+| P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ◐ 2026-07-13 — server-side both branches proven via logs (TG-active → delivery attempted; web-active → no attempt); founder cross-device sanity |
+| P-15 | No cold start | Reload / idle → first response is immediate (`min-instances=1`) | ✅ 2026-07-13 — 0.09–0.24s first response after ~10 min idle |
+
+### Founder checklist — what's left to turn every ◐/☐ green
+1. **P-8:** chat with `@AlwaysAlfred_bot` from your phone — replies should now be prompt and in order, no stacking, no "something went wrong". (Root cause was Cloud Run CPU throttling after the webhook's instant 200 — fixed on rev 00006 with `--no-cpu-throttling`; `min-instances=1` alone never prevented the freeze.)
+2. **P-11:** 1 photo (no escalation) · 2-photo album (ONE reply + ONE notice + escalation) · voice note (answered, no volume-escalation).
+3. **P-1:** your real signup on `alwaysalfred.vercel.app` — the confirm-email click.
+4. **P-3:** drag a >15 MB file into the drop zone — inline rejection.
+5. **P-12:** accept a learning card → "Saved to Vault ✓/Undo" → vault shows it.
+6. **P-14:** while chatting on web, confirm your phone's Telegram stays silent (and vice-versa).
+7. Afterwards: delete the two test properties ("Casa Gate2 Test", "Loft Gate2 Fallback") + the throwaway host `…+gate2claude@gmail.com` from prod, or say the word and Claude removes them.
 
 ---
 
@@ -761,7 +777,9 @@ Lightweight queue. Each row is a fix or group of related fixes on the same flow.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
-| 2026-07-12 | (pending) | **Vertex-transport watch** (prod only) | Regression sweep after moving prod's Gemini to Vertex. (1) Ingest every file type — **pdf, docx, image, sheet, audio** — all succeed (the File API is gone; bytes go inline). (2) A **>15 MB** file is rejected in the drop zone with "exceeds the 15 MB limit per file", never reaching the backend. (3) A multi-file ingest does **not** fail with 429 (retry/backoff absorbs the burst). (4) **Guest chat replies are not empty/refused** — Vertex's safety-filter defaults differ from AI Studio's, so a reply that passed before could be blocked now. (5) Merge/conflict-resolve still returns valid JSON. ⚠️ `gemini_messenger`/`gemini_merge_resolve` have **no** 429 retry yet — watch for throttling there. | Vertex transport |
+| 2026-07-13 | (infra — Cloud Run rev 00006, no code) | **Telegram background replies — CPU always allocated** | With no follow-up traffic at all, a Telegram message gets its reply within normal Gemini latency (~15s), never minutes later or "stacked" behind the next request. Root cause of the 2026-07-13 flakiness: Cloud Run request-based billing throttles CPU to ~0 after the webhook's immediate 200, freezing `BackgroundTasks` (and idling HTTP/2 conns into `ConnectionTerminated` errors, + stretching 429 backoffs). `min-instances=1` does NOT prevent this — the service needs `--no-cpu-throttling` (annotation `run.googleapis.com/cpu-throttling: false`). Re-assert whenever the service is redeployed from scratch or staging moves to Cloud Run (Phase 8). | Telegram guest channel |
+| 2026-07-13 | (pending — working tree) | **Scraper: Make.com webhook removed** | `POST /scrape` still returns `{"status":"success","data":…}` and still upserts `scraped_markdown` to the properties row; a full property ingest with an Airbnb URL completes end-to-end. The deprecated `fire_make_webhook` BackgroundTask (+ its `MAKE_WEBHOOK_URL` env var, never set on prod) is gone, so `/scrape` now runs nothing after the response — the scraper is safe to keep on request-based billing / scale-to-zero. | B0 (scraper health) |
+| 2026-07-13 | (pending — working tree) | **Guest JWT `ref` claim per environment** | `/api/guest-token` on prod mints a JWT whose `ref` claim is the PROD project ref (`ylaooctefesedrecshic`), not the staging one — previously hardcoded to staging in `guest_auth.py`. Functionally harmless today (Supabase validates signature, not `ref`) but wrong-by-construction; now derived from `SUPABASE_URL`. Assert guest chat + realtime still work on BOTH environments after deploy. | RLS + guest JWT — isolation | Regression sweep after moving prod's Gemini to Vertex. (1) Ingest every file type — **pdf, docx, image, sheet, audio** — all succeed (the File API is gone; bytes go inline). (2) A **>15 MB** file is rejected in the drop zone with "exceeds the 15 MB limit per file", never reaching the backend. (3) A multi-file ingest does **not** fail with 429 (retry/backoff absorbs the burst). (4) **Guest chat replies are not empty/refused** — Vertex's safety-filter defaults differ from AI Studio's, so a reply that passed before could be blocked now. (5) Merge/conflict-resolve still returns valid JSON. ⚠️ `gemini_messenger`/`gemini_merge_resolve` have **no** 429 retry yet — watch for throttling there. | Vertex transport |
 | 2026-07-12 | (pending) | Welcome language | A property whose `master_json.location.country` resolves to a Spanish-speaking country (e.g. `Mexico`) gets the **Spanish** welcome; an unrecognised/missing country falls back to English. Regression: a Mexican property greeted in English because `location.country` was absent/unmapped (e.g. `"MX"`). | — |
 | 2026-07-12 | (pending) | Guest media — escalation threshold | (1) A guest sending **one** photo → Alfred analyzes + replies, conversation does **NOT** escalate. (2) A **voice note** (any number) → Alfred transcribes + replies, **never** escalates on volume alone. (3) **Two photos within the burst window** (`GUEST_MEDIA_BURST_WINDOW_MINUTES`, default 10) → escalates with reason `media_needs_host_review`, and Alfred's analysis still goes out. (4) Two photos **further apart than the window** → no escalation. Regression: the old code used a **6-hour** window and counted voice+images together, so a lone benign voice note escalated. | Guest multimodal chat |
 | 2026-07-12 | (pending) | Telegram album (multi-photo) | Sending **2+ photos in one Telegram send** produces exactly **one** Alfred reply addressing all of them and exactly **one** "You are now speaking with «host»" notice — not one per photo. All photos still appear to the host in the dashboard. (Albums arrive as one update per photo sharing `media_group_id`; now debounced.) | Guest multimodal chat |

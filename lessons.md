@@ -129,3 +129,29 @@ inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
 - Preserved historical brain step executions for past utility scripts like `decode.py`.
 
 **Global Candidate:** Yes — the safety discovery regarding the `.gemini/config/` plugin path and the clean, selective decommissioning process applies directly to the entire AG ecosystem.
+
+---
+
+## 2026-07-13 — Cloud Run BackgroundTasks freeze: min-instances does NOT keep CPU allocated
+**Context:** Prod Telegram replies were flaky ("sometimes no answer, or 3 messages later, all stacked"). The webhook acks 200 immediately and runs all Gemini/DB work in FastAPI `BackgroundTasks`.
+
+**Discovery:**
+1. **Under Cloud Run request-based billing, CPU is throttled to ~0 the instant the response is sent.** Background work after the ack freezes and only resumes when the next request grants CPU — replies then flush "stacked". `min-instances=1` only keeps the *instance* alive; it does nothing about CPU between requests. The needed flag is `--no-cpu-throttling` (annotation `run.googleapis.com/cpu-throttling: false`).
+2. **The freeze has misleading side-effects** that masquerade as other bugs: pooled HTTP/2 connections (supabase postgrest httpx) idle past keepalive and die with `ConnectionTerminated`, and `asyncio.sleep` retry backoffs stretch/burst, so quota errors exhaust their retries.
+3. **Debugging trap:** a conversation whose host has sent a message flips to `intervene` mode and Alfred stays silent BY DESIGN — a "frozen background task" probe on such a conversation is a false negative. Probe on a clean autopilot conversation.
+4. **Verification method that needs no real Telegram client:** POST a crafted update to `/api/telegram/webhook` (with the real secret header, fake chat_id), then poll ONLY Supabase for the ai reply row — zero Cloud Run traffic, so a frozen task cannot be accidentally woken by your own polling.
+5. **Tooling trap (how this entry originally got mangled):** appending markdown with backticks via a `wsl bash -c` heredoc command-substitutes the backticked phrases. Write files with the Write/Edit tools or a Python script instead.
+
+**Impact:** Root cause fixed with one flag (rev 00006); Gate-2 P-8 probe shows replies in ~15s with zero follow-up traffic.
+
+**⚠️ The flag is a STOPGAP, not the answer — it costs ~$55/mo (2026-07-13 founder decision: mitigate, don't accept).** `--no-cpu-throttling` switches Cloud Run to **instance-based billing**: the container is billed 24/7 whether or not a single message arrives. That charge is unrelated to traffic — a Gemini reply burns ~15 vCPU-seconds against a 180,000 vCPU-s/month free tier, so the *work* is effectively free; you are paying purely to keep an idle CPU switched on. (Also note `europe-west3`/Frankfurt is **Tier 2** pricing, ~20–25% above the headline Tier 1 rates.)
+
+**The correct fix is to do the work INSIDE a request, then go back to request-based billing** (~$10–12/mo with `min-instances=1`; ~$0 with `min-instances=0`, since Cloud Run does **not** charge for idle instances that aren't minimum instances — so an external 5-min ping, e.g. UptimeRobot, buys warmth for free).
+
+Two traps when designing that fix:
+1. **Do NOT just make the webhook synchronous.** Telegram **serialises updates per chat — it does not send the next update until you answer the previous one.** The album debounce (buffer photos of one `media_group_id` for 2s) therefore deadlocks: photo 1 blocks waiting for siblings Telegram is holding back until photo 1 responds → the group flushes with one photo and each sibling arrives as a fresh group → one reply + one escalation notice PER PHOTO, i.e. the exact bug fixed in `c82b419`.
+2. **An uptime ping does NOT substitute for the fix.** Pinging keeps the *instance* warm but not the *CPU* allocated between requests; each ping would merely lurch the frozen background task forward, so replies would still arrive minutes late and stacked. It is only useful *after* the work moves inside a request.
+
+**Planned:** Cloud Tasks — webhook validates + enqueues + acks in ms (Telegram stays happy, album updates keep flowing); Cloud Tasks calls back a worker endpoint as a **fresh HTTP request**, so CPU is allocated for its full duration with no 60s ceiling. Albums are grouped via Cloud Tasks' **named-task dedup** (task named after `media_group_id`, ~3s schedule delay) with the group's file_ids persisted in the DB, which also makes it survive instance recycles. Cloud Tasks itself is free (1M ops/month).
+
+**Global Candidate:** Yes — "min-instances ≠ CPU-always-allocated" applies to every Cloud Run service in AG that does post-response background work.
