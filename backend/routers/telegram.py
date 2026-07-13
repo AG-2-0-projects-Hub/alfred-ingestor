@@ -4,8 +4,19 @@ Guests chat with Alfred over Telegram exactly like the web messenger; the host
 keeps using the dashboard (escalations surface there, and the host's reply is
 delivered back to the guest's Telegram via messages.host_send).
 
-Flow: validate the secret header → ack 200 immediately → process in the
-background (Gemini can take up to ~45s; a slow webhook makes Telegram retry).
+Flow: validate the secret header → ack 200 immediately → do the real work
+(Gemini can take ~15-45s) in a SEPARATE request dispatched by Cloud Tasks.
+
+The ack must be immediate for two reasons: a slow webhook makes Telegram retry,
+and Telegram serialises updates per chat — it withholds the next update for a
+chat until the current one is answered, so blocking here would stall an incoming
+album mid-delivery. But the work cannot simply continue after the response
+either: Cloud Run throttles the CPU to ~0 once a response is sent, which froze
+the old BackgroundTasks reply until the next request thawed it (guests saw
+answers arrive minutes late, stacked). Cloud Tasks resolves both — see
+services/task_queue.py. Where it is not configured (staging on Render, local),
+we fall back to BackgroundTasks, which is safe on a non-throttled host.
+
 Host-side Telegram (relay + inline buttons) is intentionally out of scope.
 """
 import asyncio
@@ -15,17 +26,17 @@ import os
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from services import supabase_client, telegram_client, welcome
+from services import supabase_client, task_queue, telegram_client, welcome
 from routers.messages import process_guest_message, _notify_tg_transition
 from routers.guest_auth import _resolve_identity
 
 router = APIRouter()
 
 # Telegram splits an album (several photos sent at once) into one update per
-# photo, all sharing a media_group_id. `_albums` buffers a group for this long
-# so it can be answered as a single turn. Safe as process state: the backend runs
-# with min-instances=1, and a lost buffer only costs one album's grouping.
-_ALBUM_WINDOW_S = 2.0
+# photo, all sharing a media_group_id. `_albums` collects a group so it can be
+# answered as a single turn; the flush is scheduled once, by media_group_id, and
+# runs a few seconds later once the siblings have landed.
+_ALBUM_WINDOW_S = 3
 _albums: dict[str, dict] = {}
 log = logging.getLogger(__name__)
 
@@ -46,22 +57,120 @@ _TOO_LONG = "Sorry, that took a little too long. Please send your message again.
 _GENERIC_ERR = "Sorry, something went wrong on my side. Please try again in a moment."
 
 
-@router.post("/telegram/webhook")
-async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
-    # Telegram sends this header when the webhook was registered with a
-    # secret_token. Reject anything that doesn't match.
+def _check_secret(request: Request) -> None:
+    """Telegram sends this header when the webhook was registered with a
+    secret_token; Cloud Tasks sends the same one back on the worker callback.
+    The service must stay publicly reachable (Telegram calls it), so this shared
+    secret — not IAM — is what guards both endpoints."""
     expected = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
     provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if not expected or provided != expected:
         raise HTTPException(status_code=403, detail="forbidden")
+
+
+@router.post("/telegram/webhook")
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    _check_secret(request)
 
     try:
         update = await request.json()
     except Exception:
         return {"ok": True}
 
-    background_tasks.add_task(_handle_update, update)
+    await _dispatch(update, background_tasks)
     return {"ok": True}
+
+
+@router.post("/telegram/process")
+async def telegram_process(request: Request):
+    """Worker endpoint — only Cloud Tasks calls this, a few seconds after the
+    webhook already answered Telegram. Being a request of its own is the whole
+    point: Cloud Run allocates CPU for its full duration, so the Gemini call can
+    take its time without being throttled mid-flight."""
+    _check_secret(request)
+
+    try:
+        job = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    kind = job.get("kind")
+    if kind == "album":
+        await _flush_album(
+            job.get("chat_id"), job.get("group_id"),
+            job.get("seed_items") or [], job.get("caption") or "",
+        )
+    elif kind == "update":
+        await _handle_update(job.get("update") or {})
+    return {"ok": True}
+
+
+async def _dispatch(update: dict, background_tasks: BackgroundTasks) -> None:
+    """Hand the update to whatever can run it with a CPU: Cloud Tasks in prod,
+    an in-process BackgroundTask on a host that doesn't throttle (staging/local).
+
+    An album is the one case that can't be dispatched per-update: Telegram sends
+    one update per photo, so we collect the group and schedule a SINGLE flush,
+    named after the media_group_id — Cloud Tasks rejects the duplicate name, so
+    the siblings ride along instead of each triggering their own reply.
+    """
+    message = update.get("message") or update.get("edited_message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    group_id = message.get("media_group_id")
+    photo = message.get("photo")
+
+    if group_id and isinstance(photo, list) and photo and chat_id is not None:
+        file_id = photo[-1].get("file_id")
+        caption = message.get("caption") or ""
+        item = [file_id, "image", "image/jpeg"]
+
+        entry = _albums.setdefault(group_id, {"items": [], "caption": ""})
+        entry["items"].append(item)
+        if caption and not entry["caption"]:
+            entry["caption"] = caption
+
+        if not task_queue.enabled():
+            # Non-throttled host: the classic debounce still works.
+            if len(entry["items"]) == 1:
+                background_tasks.add_task(
+                    _sleep_then_flush_album, chat_id, group_id
+                )
+            return
+
+        # `seed_items` is a safety net: the flush lands on whichever instance
+        # Cloud Run routes it to, and only the enqueueing one holds `_albums`.
+        # In practice that is the same instance, but if it ever isn't, the guest
+        # still gets an answer about the first photo rather than silence.
+        task_queue.enqueue(
+            "/api/telegram/process",
+            {"kind": "album", "group_id": group_id, "chat_id": chat_id,
+             "seed_items": [item], "caption": caption},
+            delay_seconds=_ALBUM_WINDOW_S,
+            name=f"album-{task_queue.sanitize_task_name(group_id)}",
+        )
+        return
+
+    if task_queue.enabled():
+        task_queue.enqueue("/api/telegram/process",
+                           {"kind": "update", "update": update})
+    else:
+        background_tasks.add_task(_handle_update, update)
+
+
+async def _sleep_then_flush_album(chat_id, group_id: str) -> None:
+    await asyncio.sleep(_ALBUM_WINDOW_S)
+    await _flush_album(chat_id, group_id, [], "")
+
+
+async def _flush_album(
+    chat_id, group_id: str, seed_items: list, seed_caption: str,
+) -> None:
+    entry = _albums.pop(group_id, None) if group_id else None
+    items = entry["items"] if entry and entry["items"] else seed_items
+    caption = (entry or {}).get("caption") or seed_caption
+    if not items or chat_id is None:
+        return
+    await _handle_guest_media(chat_id, [tuple(i) for i in items], caption)
 
 
 @router.post("/telegram/set-webhook")
@@ -116,19 +225,15 @@ async def _handle_update(update: dict) -> None:
             return
 
         # Photo → analyze as an image. Telegram sends a list of sizes; the last
-        # is the largest. An album shares a media_group_id across updates, so
-        # buffer those and answer the whole group once.
+        # is the largest. Album photos never reach here — _dispatch groups them
+        # by media_group_id and routes the group to _flush_album instead.
         photo = message.get("photo")
         if isinstance(photo, list) and photo:
             file_id = photo[-1].get("file_id")
             if file_id:
-                group_id = message.get("media_group_id")
-                if group_id:
-                    await _buffer_album_photo(chat_id, group_id, file_id, caption)
-                else:
-                    await _handle_guest_media(
-                        chat_id, [(file_id, "image", "image/jpeg")], caption
-                    )
+                await _handle_guest_media(
+                    chat_id, [(file_id, "image", "image/jpeg")], caption
+                )
                 return
 
         # Voice note / audio → transcribe + answer.
@@ -208,30 +313,6 @@ async def _handle_guest_message(chat_id, text: str) -> None:
         await telegram_client.send_message(chat_id, reply)
 
     await _emit_escalation_notice(guest, result)
-
-
-async def _buffer_album_photo(
-    chat_id, group_id: str, file_id: str, caption: str,
-) -> None:
-    """Collect the photos of one Telegram album, then handle them as a single turn.
-
-    Telegram delivers an album as one update PER PHOTO, all sharing a
-    media_group_id. Without this, each photo ran the Brain separately — the guest
-    got one reply per photo and a "now speaking with <host>" notice per photo.
-    The first photo of a group waits briefly for its siblings, then flushes once.
-    """
-    entry = _albums.get(group_id)
-    if entry is not None:
-        entry["items"].append((file_id, "image", "image/jpeg"))
-        if caption and not entry["caption"]:
-            entry["caption"] = caption
-        return
-
-    _albums[group_id] = {"items": [(file_id, "image", "image/jpeg")], "caption": caption}
-    await asyncio.sleep(_ALBUM_WINDOW_S)
-    entry = _albums.pop(group_id, None)
-    if entry:
-        await _handle_guest_media(chat_id, entry["items"], entry["caption"])
 
 
 async def _handle_guest_media(
