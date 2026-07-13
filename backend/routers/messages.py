@@ -655,6 +655,12 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
     slug = _slugify(prop.get("name") or "property")
     frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0].strip().rstrip("/")
     bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@").strip()
+    # t.me and telegram.me are interchangeable official front-ends for the same
+    # deep link. Keep the domain configurable: on 2026-07-13 t.me stopped
+    # resolving worldwide (NXDOMAIN from three independent networks) while
+    # telegram.me stayed up, which would otherwise have left every guest unable
+    # to reach the bot with no lever on our side.
+    tg_domain = os.environ.get("TELEGRAM_LINK_DOMAIN", "t.me").strip().strip("/")
 
     # Retry on booking_id collision (very unlikely but safe)
     for _ in range(5):
@@ -664,7 +670,8 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
         # Telegram deep link: tapping it opens the bot and sends `/start <booking_id>`,
         # which links this guest's chat. booking_ids are [a-z0-9-] → Telegram-safe.
         telegram_link = (
-            f"https://t.me/{bot_username}?start={booking_id}" if bot_username else None
+            f"https://{tg_domain}/{bot_username}?start={booking_id}"
+            if bot_username else None
         )
         try:
             await asyncio.to_thread(

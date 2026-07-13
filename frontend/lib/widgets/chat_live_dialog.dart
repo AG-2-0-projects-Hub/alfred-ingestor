@@ -79,10 +79,17 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   /// Telegram deep link for this booking, built from the bot username env var.
   /// Null when the app wasn't configured with a bot username.
+  ///
+  /// t.me and telegram.me are interchangeable official front-ends for the same
+  /// deep link, so the domain is configurable: on 2026-07-13 t.me stopped
+  /// resolving worldwide while telegram.me stayed up.
   String? get _telegramUrl {
     final u = dotenv.env['TELEGRAM_BOT_USERNAME']?.trim();
     if (u == null || u.isEmpty) return null;
-    return 'https://t.me/${u.replaceFirst('@', '')}?start=${widget.bookingId}';
+    final domain = (dotenv.env['TELEGRAM_LINK_DOMAIN']?.trim().isNotEmpty ?? false)
+        ? dotenv.env['TELEGRAM_LINK_DOMAIN']!.trim()
+        : 't.me';
+    return 'https://$domain/${u.replaceFirst('@', '')}?start=${widget.bookingId}';
   }
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
