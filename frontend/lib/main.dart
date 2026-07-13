@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,14 +13,44 @@ import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'widgets/inactivity_wrapper.dart';
 
+/// Everything in `.env` is compiled into the web bundle and served publicly at
+/// /assets/.env — so the ONLY Supabase key that may ever appear there is the
+/// anon key, which is designed to be public and constrained by RLS.
+///
+/// On 2026-07-13 the prod Vercel project had the **service_role** key pasted
+/// into SUPABASE_ANON_KEY. That key bypasses RLS and can read, delete or
+/// rewrite any table and reset any user's password — and the live site was
+/// handing it to every visitor. This refuses to boot rather than ever ship that
+/// again: a misconfigured deploy must fail loudly, not silently expose the DB.
+void _assertNotAServiceRoleKey(String key) {
+  try {
+    final parts = key.split('.');
+    if (parts.length != 3) return; // not a JWT (e.g. a new-style sb_publishable key)
+    var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    payload = payload.padRight((payload.length + 3) ~/ 4 * 4, '=');
+    final role = (jsonDecode(utf8.decode(base64.decode(payload)))
+        as Map<String, dynamic>)['role'];
+    if (role == 'anon') return;
+
+    debugPrint('FATAL: SUPABASE_ANON_KEY carries role="$role". Refusing to '
+        'start — a non-anon key in the web bundle is public and omnipotent.');
+    throw StateError('SUPABASE_ANON_KEY must be the anon key, got role="$role"');
+  } on FormatException {
+    return; // unparseable: leave it to Supabase to reject
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await dotenv.load(fileName: '.env');
 
+  final anonKey = dotenv.env['SUPABASE_ANON_KEY']!;
+  _assertNotAServiceRoleKey(anonKey);
+
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    anonKey: anonKey,
   );
 
   await themeController.load();

@@ -132,6 +132,23 @@ inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
 
 ---
 
+## 2026-07-13 — 🔴 The prod website publicly served the `service_role` key (and a misdiagnosis on the way)
+**Context:** Gate-2 testing. The founder signed up with a second email and saw a dashboard containing *another host's* properties, with "Email: —" and zero stats.
+
+**Discovery:**
+1. **`SUPABASE_ANON_KEY` on the prod Vercel project held the `service_role` key.** Flutter compiles `.env` into the web bundle and serves it at **`/assets/.env`**, so the live site handed an omnipotent key — bypasses all RLS, can read/delete/rewrite any table, can reset any user's password via the admin auth API — to **every visitor**, for ~1 day. Only the new prod was affected; old prod and staging correctly shipped `anon` (verified by decoding all three bundles).
+2. **Cause:** the cutover loaded six secrets by hand; `anon` and `service_role` are both long opaque JWTs that look identical at a glance, and nothing validated which one landed where.
+3. **⚠️ Fixing the env var is NOT enough — you must ROTATE.** Vercel keeps every past deployment live at its own immutable URL, each still serving the old bundle. Legacy `anon`/`service_role` are both signed with the project JWT secret, so revoking one means rotating the secret (which also reissues the other, invalidates host sessions, and invalidates the guest booking JWTs → update `SUPABASE_SERVICE_ROLE_KEY` **and** `SUPABASE_JWT_SECRET`, redeploy backend, then fix the Vercel var). Runbook: `_Context/plans/prod-key-rotation.md`.
+4. **🚨 THE DEBUGGING LESSON — I misdiagnosed this first.** My "is RLS enforced?" probe queried prod with what I *believed* was the anon key and got rows back from every table, so I declared "RLS is not enforced, P0 data leak" and had the founder run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on prod. Harmless (idempotent), but **wrong**: the probe was using the leaked **service_role** key, which bypasses RLS *by design*. RLS was almost certainly fine all along. **Always verify which credential a security probe is actually authenticating as — decode the JWT — before concluding the database is open.** A probe that "proves" a catastrophic finding deserves more scepticism, not less.
+
+**Impact:** guard added in `main.dart` — the app now **refuses to boot** if `SUPABASE_ANON_KEY`'s `role` claim isn't `anon`, so a misconfigured deploy fails loudly instead of silently exposing the DB. Add `key_audit.py` (decode every deployed frontend's key) to the checklist for any new environment (e.g. Phase-8 staging→Cloud Run).
+
+**Wider point:** the "zero-delta parity" probe from the DB split has now missed three things — the `supabase_realtime` publication, `relrowsecurity`, and which credentials each environment actually ships. **Parity must compare switches and secrets, not just objects** (tables/policies/indexes).
+
+**Global Candidate:** Yes — "never let a non-anon key reach a client bundle", "rotate, don't just re-point", and "decode the credential your probe is using" all generalise to every AG project on Supabase/Vercel.
+
+---
+
 ## 2026-07-13 — Cloud Run BackgroundTasks freeze: min-instances does NOT keep CPU allocated
 **Context:** Prod Telegram replies were flaky ("sometimes no answer, or 3 messages later, all stacked"). The webhook acks 200 immediately and runs all Gemini/DB work in FastAPI `BackgroundTasks`.
 
