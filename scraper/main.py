@@ -1,8 +1,7 @@
 import os
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import httpx
 from firecrawl import FirecrawlApp
 from google import genai
 
@@ -57,19 +56,6 @@ class ScrapeRequest(BaseModel):
     url: str
 
 
-def fire_make_webhook(url: str, result: str):
-    """Fire-and-forget webhook to Make.com. Non-critical path. (REQ-29)"""
-    webhook_url = os.environ.get("MAKE_WEBHOOK_URL")
-    if not webhook_url:
-        print("Warning: MAKE_WEBHOOK_URL not set. Skipping webhook.")
-        return
-    payload = {"url": url, "output_markdown": result, "status": "success"}
-    try:
-        httpx.post(webhook_url, json=payload, timeout=5.0)
-    except Exception as e:
-        print(f"Make.com webhook failed (non-critical): {e}")
-
-
 def upsert_to_ingestor_supabase(url: str, structured_output: str):
     """Write scraped_markdown to Ingestor Supabase via UPSERT on airbnb_url. (REQ-27)"""
     try:
@@ -99,13 +85,12 @@ def get_gemini_prompt(markdown_data: str) -> str:
 
 
 @app.post("/scrape")
-async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
+async def scrape_airbnb(req: ScrapeRequest):
     """
     1. Firecrawl scrapes the Airbnb listing → raw markdown.
     2. Gemini structures the markdown into the canonical format.
     3. Upserts scraped_markdown to Ingestor Supabase directly (REQ-27).
-    4. Fires Make.com webhook in background (REQ-29, non-critical).
-    5. Returns structured output to caller.
+    4. Returns structured output to caller.
     """
     url = req.url
     print(f"Starting scrape for URL: {url}")
@@ -148,10 +133,7 @@ async def scrape_airbnb(req: ScrapeRequest, background_tasks: BackgroundTasks):
     # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged
     upsert_to_ingestor_supabase(url, structured_output)
 
-    # 4. Make.com webhook in background (REQ-29)
-    background_tasks.add_task(fire_make_webhook, url, structured_output)
-
-    # 5. Return to caller
+    # 4. Return to caller
     return {"status": "success", "data": structured_output}
 
 

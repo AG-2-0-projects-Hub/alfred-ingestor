@@ -12,9 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# The /scrape work (Firecrawl → Gemini → Supabase upsert → return) is synchronous,
-# so this service can scale to zero (--min-instances=0). The only BackgroundTasks
-# call is the non-critical, deprecated Make.com webhook — safe to lose on a
-# scaled-to-zero cold path.
+# The /scrape work (Firecrawl → Gemini → Supabase upsert → return) is fully
+# synchronous — nothing runs after the response — so this service can scale to
+# zero (--min-instances=0) and keep request-based (CPU-throttled) billing.
 ENV PORT=8080
 CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT}"]

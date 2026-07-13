@@ -9,7 +9,6 @@ from services import supabase_client, welcome
 
 router = APIRouter()
 
-_PROJECT_REF = "gcxxilzfhwlsjcvtpsvj"
 _TOKEN_TTL = 86_400  # 24 hours
 
 _SENTENCE_PUNCT = (",", ";", ":", ".", "!", "?")
@@ -110,10 +109,18 @@ async def guest_token(req: GuestTokenRequest):
         req.booking_id, guest["property_id"], welcome_text,
     )
 
+    # Project ref comes from the environment's own SUPABASE_URL
+    # (https://<ref>.supabase.co) so staging and prod each stamp their own —
+    # this was previously hardcoded to the staging ref and leaked into prod JWTs.
+    project_ref = (
+        os.environ.get("SUPABASE_URL", "")
+        .removeprefix("https://").removeprefix("http://")
+        .split(".")[0]
+    )
     now = int(time.time())
     payload = {
         "iss": "supabase",
-        "ref": _PROJECT_REF,
+        "ref": project_ref,
         "role": "anon",
         "booking_id": req.booking_id,
         "iat": now,
