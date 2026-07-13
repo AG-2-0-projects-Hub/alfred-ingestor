@@ -23,18 +23,27 @@ import 'widgets/inactivity_wrapper.dart';
 /// handing it to every visitor. This refuses to boot rather than ever ship that
 /// again: a misconfigured deploy must fail loudly, not silently expose the DB.
 void _assertNotAServiceRoleKey(String key) {
+  // New-style keys announce themselves by prefix. `sb_secret_` is the
+  // service-role successor and must never reach a browser. (Checked before the
+  // JWT branch below: a secret key is not a JWT, so decoding alone misses it —
+  // which is exactly how one briefly reached a public deploy on 2026-07-13.)
+  if (key.startsWith('sb_secret_')) {
+    throw StateError('SUPABASE_ANON_KEY is an sb_secret_ key. Refusing to start '
+        '— the web bundle is public; use the sb_publishable_ key.');
+  }
+  if (key.startsWith('sb_publishable_')) return;
+
   try {
     final parts = key.split('.');
-    if (parts.length != 3) return; // not a JWT (e.g. a new-style sb_publishable key)
+    if (parts.length != 3) return; // not a JWT and not a known prefix
     var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
     payload = payload.padRight((payload.length + 3) ~/ 4 * 4, '=');
     final role = (jsonDecode(utf8.decode(base64.decode(payload)))
         as Map<String, dynamic>)['role'];
     if (role == 'anon') return;
 
-    debugPrint('FATAL: SUPABASE_ANON_KEY carries role="$role". Refusing to '
-        'start — a non-anon key in the web bundle is public and omnipotent.');
-    throw StateError('SUPABASE_ANON_KEY must be the anon key, got role="$role"');
+    throw StateError('SUPABASE_ANON_KEY must be the anon/publishable key, '
+        'got role="$role". Refusing to start.');
   } on FormatException {
     return; // unparseable: leave it to Supabase to reject
   }
