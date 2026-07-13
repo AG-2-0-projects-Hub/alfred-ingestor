@@ -1,5 +1,4 @@
 import json
-import os
 from google import genai
 from google.genai import types
 
@@ -618,7 +617,8 @@ async def run_merger(scraped_markdown: str, ingested_markdown: str) -> dict:
         scraped_markdown=scraped_markdown or "(no data)",
         ingested_markdown=ingested_markdown or "(no data)",
     )
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(system_instruction=MERGER_SYSTEM_PROMPT),
@@ -648,7 +648,8 @@ async def run_resolver(master_json: dict, resolutions: list) -> dict:
         master_json=master_json_str,
         resolutions=resolutions_str,
     )
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(system_instruction=system_prompt),
@@ -688,7 +689,8 @@ async def run_knowledge_injection(
     client = _get_client()
     master_json_str = json.dumps(master_json, ensure_ascii=False, indent=2)
     user_prompt = _fill(_INJECTOR_USER, master_json=master_json_str, new_text=new_text)
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(system_instruction=_INJECTOR_SYSTEM),

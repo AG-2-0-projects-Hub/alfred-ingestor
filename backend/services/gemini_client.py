@@ -8,8 +8,6 @@ and adapted for audio and tabular data — originals not present in any
 spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
 """
 
-import asyncio
-import os
 from google import genai
 from google.genai import types
 
@@ -231,12 +229,6 @@ def _get_client() -> genai.Client:
 # Inline data rides in the request body, so keep it clear of the ~20 MB cap.
 _MAX_INLINE_BYTES = 15 * 1024 * 1024
 
-# Vertex serves Gemini from a *dynamic shared* quota rather than a fixed
-# per-project one, so a burst (an ingest fans out over every uploaded file) can
-# transiently 429. Back off and retry rather than failing the file.
-_RETRY_ATTEMPTS = 4
-
-
 def _inline_part(data: bytes, mime_type: str) -> types.Part:
     if len(data) > _MAX_INLINE_BYTES:
         raise ValueError(
@@ -246,31 +238,17 @@ def _inline_part(data: bytes, mime_type: str) -> types.Part:
     return types.Part.from_bytes(data=data, mime_type=mime_type)
 
 
-def _is_rate_limited(exc: Exception) -> bool:
-    text = str(exc)
-    return "429" in text or "RESOURCE_EXHAUSTED" in text
-
-
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
-    last_exc: Exception | None = None
-    for attempt in range(_RETRY_ATTEMPTS):
-        try:
-            response = await client.aio.models.generate_content(
-                model=MODEL,
-                contents=[types.Content(role="user", parts=parts)],
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                ),
-            )
-            return response.text
-        except Exception as exc:
-            if not _is_rate_limited(exc):
-                raise
-            last_exc = exc
-            if attempt < _RETRY_ATTEMPTS - 1:
-                await asyncio.sleep(2 * (2 ** attempt))  # 2s, 4s, 8s
-    raise last_exc
+    response = await genai_factory.generate_with_retry(
+        client,
+        model=MODEL,
+        contents=[types.Content(role="user", parts=parts)],
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
+    )
+    return response.text
 
 
 async def process_with_prompt_a(data: bytes, mime_type: str) -> str:

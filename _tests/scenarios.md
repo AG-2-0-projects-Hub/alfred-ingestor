@@ -723,6 +723,37 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 ---
 
+## GATE 2 — new-prod full sweep (`alwaysalfred.vercel.app` + `@AlwaysAlfred_bot`)
+
+> **Why this exists (2026-07-13):** the new prod stack changed **four** things at once —
+> new DB, new host (Cloud Run), new Gemini transport (Vertex), new bot. Bugs were being
+> found one at a time by the founder, in production, by hand. That is exactly what the QA
+> workflow exists to prevent. **Nothing merges to `main` until every row below passes.**
+> Three real bugs already came out of this stack and would have shipped otherwise:
+> Vertex has no File API (all image ingests failed); Vertex 429s were unretried on the
+> chat path (Telegram replied "something went wrong"); and the Realtime publication was
+> never copied to the new DB (host dashboard didn't live-update).
+
+| # | Area | Assert | Status |
+|---|---|---|---|
+| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ☐ |
+| P-2 | Ingest — all types | pdf · docx · image · sheet · audio all reach `Done` (Vertex has **no File API**; bytes go inline) | ☐ |
+| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ☐ |
+| P-4 | Ingest — burst | A multi-file ingest does **not** 429 (retry/backoff absorbs Vertex's dynamic shared quota) | ☐ |
+| P-5 | Merge + conflicts | Discrepancies detected, questionnaire answered, master JSON updated | ✅ 2026-07-13 |
+| P-6 | Welcome language | Mexican property → **Spanish** welcome (country reads from `location.address.country`) | ☐ |
+| P-7 | Guest chat — web | Guest link → message → Alfred replies; reply is **not empty/refused** (Vertex safety defaults differ from AI Studio) | ☐ |
+| P-8 | Guest chat — Telegram | `/start` → message → Alfred replies. **The `min-instances=1` CPU-freeze check.** No "something went wrong" (429s now retried on every Gemini path) | ☐ |
+| P-9 | **Realtime** | Host dashboard shows a new guest message **without refreshing** (requires `messages` in the `supabase_realtime` publication) | ☐ |
+| P-10 | Escalation → resolve | Escalate → Intervene → host reply lands on the guest's channel → Mark Resolved → learning card | ☐ |
+| P-11 | Media rules | 1 photo → no escalation · 2-photo TG album → **one** reply + **one** notice + escalation · voice note → answered, escalates only on **content** | ☐ |
+| P-12 | Stats + ledger | Dashboard stats strip populates; learning vault accept/undo works | ☐ |
+| P-13 | Guardrails | Rate limit, high-stakes fallback (wifi/door code), prompt-injection attempt | ☐ |
+| P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ☐ |
+| P-15 | No cold start | Reload / idle → first response is immediate (`min-instances=1`) | ☐ |
+
+---
+
 ## Pending intake
 
 Lightweight queue. Each row is a fix or group of related fixes on the same flow.

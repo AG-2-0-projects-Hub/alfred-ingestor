@@ -79,7 +79,19 @@ Requires `aiplatform.googleapis.com` enabled + the Cloud Run SA holding `roles/a
 | Buckets | `Property_assets` (private), `chat_media` (public, 10 MB), `host_avatars` (public) | same |
 
 **Never wipe the staging project** — it *is* the old shared DB, and it's now the rollback/staging environment.
-Schema parity was verified zero-delta on 2026-07-12 (8 tables · 84 cols · 15 policies · 7 storage policies · 15 indexes · 2 functions · 1 trigger · 3 buckets · 1 cron job).
+Schema parity was verified on 2026-07-12 (8 tables · 84 cols · 15 policies · 7 storage policies · 15 indexes · 2 functions · 1 trigger · 3 buckets · 1 cron job).
+
+### ⚠️ Realtime — the gap that "zero-delta parity" missed
+Supabase Realtime only streams tables in the **`supabase_realtime` publication**. That is **not** part of table/policy/index DDL, so the schema copy silently omitted it and the **host dashboard never live-updated** (the host had to refresh to see a guest's message). Staging publishes `public.messages`; prod must too:
+```sql
+alter publication supabase_realtime add table public.messages;
+-- verify (must list 'messages'):
+select tablename from pg_publication_tables where pubname='supabase_realtime';
+```
+**Any future schema copy must diff PUBLICATIONS as well** — the original parity probe compared tables/policies/indexes/functions/triggers/buckets/cron and reported a clean "zero delta" while Realtime was entirely absent. Fixed in `_Context/plans/prod-schema.sql` §7b.
+
+### 🔴 Gate 2 must be a FULL sweep, not spot-checks
+The new prod stack changed **four things at once** (DB, host, Gemini transport, bot), and bugs were surfacing one at a time in production by hand. **`_tests/scenarios.md` → "GATE 2 — new-prod full sweep" (P-1…P-15) must be fully green before anything merges to `main`.** Three real bugs already came out of it that would otherwise have shipped: Vertex has no File API (every image ingest failed), Vertex 429s were unretried on the chat path (Telegram answered "something went wrong"), and Realtime was missing.
 
 ### RLS (enabled 2026-06-10 — shared prod+staging DB)
 - `properties`: `owner_only` (ALL, `owner_id = auth.uid()`) — pre-existing.

@@ -1,5 +1,4 @@
 import json
-import os
 from google import genai
 from google.genai import types
 
@@ -620,7 +619,8 @@ async def first_pass(
     parts: list = [types.Part(text=user_prompt)]
     for data, mime in (media or []):
         parts.append(types.Part.from_bytes(data=data, mime_type=mime))
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=parts)],
         config=types.GenerateContentConfig(
@@ -643,7 +643,8 @@ async def second_pass_with_search(
     user_prompt = _build_second_pass_prompt(
         master_json, conversation_history, preferred_language, guest_message, search_query
     )
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(
@@ -761,7 +762,8 @@ async def summarize_escalation(messages: list[dict]) -> dict:
     prompt_text = SUMMARIZER_PROMPT.replace("__TRANSCRIPT__", transcript)
 
     client = _get_client()
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=SUMMARIZER_MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=prompt_text)])],
         config=types.GenerateContentConfig(
