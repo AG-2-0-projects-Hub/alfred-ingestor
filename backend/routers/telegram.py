@@ -28,7 +28,8 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from services import (
-    burst_buffer, supabase_client, task_queue, telegram_client, welcome,
+    burst_buffer, guardrails, supabase_client, task_queue, telegram_client,
+    welcome,
 )
 from routers import messages as messages_router
 from routers.messages import process_guest_message, _notify_tg_transition
@@ -318,6 +319,20 @@ async def _handle_update(update: dict) -> None:
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
 
 
+def _error_reply(he: HTTPException) -> str:
+    """Map a process_guest_message failure to what the guest should read.
+
+    410 carries its own guest-facing, already-localized text (the listing is
+    gone) — showing "something went wrong" there would be a lie, and the guest
+    would keep retrying a conversation that is never coming back.
+    """
+    if he.status_code == 504:
+        return _TOO_LONG
+    if he.status_code == 410 and isinstance(he.detail, dict):
+        return he.detail.get("message") or _GENERIC_ERR
+    return _GENERIC_ERR
+
+
 async def _handle_start(chat_id, text: str) -> None:
     """`/start <booking_id>` links this Telegram chat to the guest booking."""
     payload = text[len("/start"):].strip()
@@ -330,10 +345,20 @@ async def _handle_start(chat_id, text: str) -> None:
         await telegram_client.send_message(chat_id, _STRANGER)
         return
 
-    await asyncio.to_thread(supabase_client.link_guest_telegram, payload, chat_id)
     prop = await asyncio.to_thread(
         supabase_client.get_property_for_chat, guest["property_id"]
     )
+    # Don't link a chat to a listing that no longer exists — the guest would be
+    # greeted by a property whose knowledge has been wiped, and every message
+    # after it would bounce. Refuse the link and say so.
+    if prop and prop.get("deleted_at"):
+        await telegram_client.send_message(
+            chat_id,
+            guardrails.closed_conversation_notice(guest.get("preferred_language")),
+        )
+        return
+
+    await asyncio.to_thread(supabase_client.link_guest_telegram, payload, chat_id)
     property_name, _ = _resolve_identity(prop)
     welcome_text = welcome.build_welcome(
         property_name or (prop or {}).get("name"),
@@ -368,9 +393,7 @@ async def _handle_guest_message(
             already_stored=already_stored,
         )
     except HTTPException as he:
-        await telegram_client.send_message(
-            chat_id, _TOO_LONG if he.status_code == 504 else _GENERIC_ERR
-        )
+        await telegram_client.send_message(chat_id, _error_reply(he))
         return
 
     # In intervene mode `reply` is None — the host answers from the dashboard and
@@ -412,9 +435,7 @@ async def _handle_guest_media(
             guest["booking_id"], caption, channel="telegram", media=media,
         )
     except HTTPException as he:
-        await telegram_client.send_message(
-            chat_id, _TOO_LONG if he.status_code == 504 else _GENERIC_ERR
-        )
+        await telegram_client.send_message(chat_id, _error_reply(he))
         return
 
     reply = result.get("reply")

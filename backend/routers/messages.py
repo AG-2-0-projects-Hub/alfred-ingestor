@@ -111,6 +111,29 @@ async def process_guest_message(
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
+    # The listing may be gone — soft-deleted, or its host deleted their account.
+    # A web guest is already stopped at /api/guest-token (410), but a Telegram
+    # guest holds no token and would otherwise keep chatting onto a tombstone.
+    # This must run BEFORE the guest message is stored: insert_message clears
+    # archived_at, which would resurrect the conversation into a dashboard nobody
+    # owns. (Until now the only thing stopping Telegram was the master_json check
+    # further down — incidental, since soft-delete happens to blank it, and it
+    # fired only after the message had already been written.)
+    property_data = await asyncio.to_thread(
+        supabase_client.get_property_for_chat,
+        guest["property_id"],
+    )
+    if property_data and property_data.get("deleted_at"):
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "conversation_closed",
+                "message": guardrails.closed_conversation_notice(
+                    guest.get("preferred_language")
+                ),
+            },
+        )
+
     conversation = await asyncio.to_thread(
         supabase_client.find_or_create_conversation,
         booking_id,
@@ -259,10 +282,8 @@ async def process_guest_message(
             "mode": conversation.get("mode") or "autopilot",
         }
 
-    property_data = await asyncio.to_thread(
-        supabase_client.get_property_for_chat,
-        guest["property_id"],
-    )
+    # (property_data was fetched above, before the first write, so the
+    # deleted-listing guard could run ahead of it.)
     if not property_data or not property_data.get("master_json"):
         raise HTTPException(status_code=404, detail="Property data not found")
 

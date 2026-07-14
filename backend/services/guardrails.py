@@ -54,6 +54,21 @@ def transition_notice(
     return "Alfred has resumed the conversation."
 
 
+def closed_conversation_notice(language: str | None) -> str:
+    """The listing is gone (soft-deleted, or its host deleted their account).
+    The web guest is stopped at /api/guest-token with a 410; Telegram guests hold
+    no token, so they are stopped in process_guest_message and read this."""
+    if _is_spanish(language):
+        return (
+            "Esta conversación ya no está disponible — el anfitrión ha cerrado "
+            "este alojamiento. Gracias por haber hablado conmigo."
+        )
+    return (
+        "This conversation is no longer available — the host has closed this "
+        "listing. Thank you for chatting with me."
+    )
+
+
 def rate_limit_reply(language: str | None) -> str:
     if _is_spanish(language):
         return (
