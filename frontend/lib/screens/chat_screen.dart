@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -54,6 +57,8 @@ class _ChatScreenState extends State<ChatScreen>
   AudioEncoder _recordEncoder = AudioEncoder.wav;
   Timer? _recordTimer;
   int _recordSeconds = 0;
+  /// A finished take, held for review. Non-null == "recorded, not yet sent".
+  String? _pendingVoicePath;
   final _controller = TextEditingController();
   final _inputFocus = FocusNode();
 
@@ -463,28 +468,79 @@ class _ChatScreenState extends State<ChatScreen>
     return 'Couldn\'t send that $what. Please check your connection and try again.';
   }
 
-  /// The rate the browser will actually run its microphone at.
+  /// The sample rate `record_web` will actually run its AudioContext at.
   ///
-  /// `record_web` hands every buffer to a hand-rolled JS resampler
-  /// (`record.worklet.js`) unless the requested rate already matches the source,
-  /// in which case the resampler takes an identity bypass. That resampler is
-  /// lossy by construction: on a downsample it resets its carry-over state
-  /// (`tailExists`, `lastWeight`) on EVERY call, so it drops samples on each
-  /// ~43ms flush — which is why ten seconds of speech came back as seven.
+  /// Why this exists: record_web hands every buffer to a hand-rolled JS
+  /// resampler (`record.worklet.js`) unless the requested rate already equals
+  /// the source rate, in which case it takes an identity bypass. That resampler
+  /// is lossy by construction — on a downsample it resets its carry-over state
+  /// (`tailExists`, `lastWeight`) on EVERY call, dropping samples on each ~43ms
+  /// flush. That is the ~10% (compounding) loss, not a missing tail.
   ///
-  /// The catch: it builds its AudioContext from the mic track's REAL rate, not
-  /// from the rate we ask for. So the bypass triggers only when our requested
-  /// rate equals the hardware's. Hardcoding 48000 would fix Chrome/Android but
-  /// keep resampling on 44.1kHz devices (common on macOS and iOS Safari). Ask
-  /// the browser instead of guessing.
-  int _browserSampleRate() {
+  /// The rate it compares against is NOT one we choose and NOT the output
+  /// device's. `recorder_delegate.dart:_adjustContext` builds the AudioContext
+  /// from the MIC TRACK's own settings:
+  ///
+  ///     settings.hasProperty('sampleRate')
+  ///         ? AudioContext(sampleRate: settings.sampleRate)   // Chrome, Safari
+  ///         : AudioContext()                                  // Firefox
+  ///
+  /// So we reproduce exactly that decision. Reading `AudioContext().sampleRate`
+  /// instead — as a first pass here did — reads the OUTPUT device, which on a
+  /// machine with a 44.1kHz output and a 48kHz mic asks for a downsample and
+  /// walks straight back into the bug.
+  Future<int> _recorderSampleRate() async {
+    try {
+      final stream = await web.window.navigator.mediaDevices
+          .getUserMedia(web.MediaStreamConstraints(audio: true.toJS))
+          .toDart;
+      final tracks = stream.getAudioTracks().toDart;
+      int? rate;
+      if (tracks.isNotEmpty) {
+        final settings = tracks.first.getSettings();
+        if (settings.hasProperty('sampleRate'.toJS).toDart) {
+          rate = settings.sampleRate;
+        }
+      }
+      // Release the probe's handle on the mic before record_web opens its own.
+      for (final t in tracks) {
+        t.stop();
+      }
+      if (rate != null && rate > 0) return rate;
+    } catch (_) {
+      // Permission denied / no device — _startRecording surfaces it properly.
+    }
+    // Firefox: the track exposes no sampleRate, so record_web falls back to a
+    // default AudioContext. Match that fallback.
     try {
       final ctx = web.AudioContext();
       final rate = ctx.sampleRate.toInt();
       ctx.close();
       return rate;
     } catch (_) {
-      return 48000; // Overwhelmingly the common case if the probe is blocked.
+      return 48000;
+    }
+  }
+
+  /// Ground truth for the truncation bug: what the WAV header actually claims,
+  /// against the wall clock we counted. If audio < wallclock, samples are still
+  /// being dropped and the resampler is still engaged — so say so out loud
+  /// rather than shipping another silent 10% loss.
+  void _auditWav(Uint8List bytes, int wallClockSeconds) {
+    if (bytes.length < 44) return;
+    final bd = ByteData.sublistView(bytes);
+    final channels = bd.getUint16(22, Endian.little);
+    final rate = bd.getUint32(24, Endian.little);
+    final byteRate = bd.getUint32(28, Endian.little);
+    final dataLen = bd.getUint32(40, Endian.little);
+    if (byteRate == 0) return;
+    final audioSeconds = dataLen / byteRate;
+    debugPrint(
+      'voice: ${rate}Hz ${channels}ch — audio ${audioSeconds.toStringAsFixed(2)}s '
+      'vs wallclock ${wallClockSeconds}s',
+    );
+    if (wallClockSeconds > 2 && audioSeconds < wallClockSeconds * 0.95) {
+      debugPrint('voice: STILL TRUNCATED — the resampler did not bypass.');
     }
   }
 
@@ -493,14 +549,33 @@ class _ChatScreenState extends State<ChatScreen>
     _recordTimer = null;
   }
 
-  Future<void> _cancelRecording() async {
+  /// Stop recording and hold the take for review — do NOT send it.
+  ///
+  /// Stopping and sending used to be the same tap, which meant the only control
+  /// next to a live recording was a destructive one. It sat where the mic button
+  /// had been, so the obvious "I'm done" tap threw the recording away instead.
+  /// Now: mic → stop → review (discard | send).
+  Future<void> _stopRecording() async {
+    // Re-entrancy: the 60s auto-stop can fire at the same moment the guest taps
+    // stop. Clear the flag synchronously, before the first await.
+    if (_recorder == null || !_isRecording) return;
     _stopRecordTimer();
-    try {
-      await _recorder?.cancel();
-    } catch (_) {
-      // Nothing to salvage — we're throwing the take away regardless.
-    }
-    if (mounted) setState(() => _isRecording = false);
+    _isRecording = false;
+    if (mounted) setState(() {});
+
+    final path = await _recorder!.stop();
+    if (!mounted) return;
+    setState(() => _pendingVoicePath = path);
+  }
+
+  /// Throw the take away. Only reachable from the review state — never while
+  /// recording, where it would be one mis-tap away from destroying the message.
+  void _discardPendingVoice() {
+    if (!mounted) return;
+    setState(() {
+      _pendingVoicePath = null;
+      _recordSeconds = 0;
+    });
   }
 
   Future<void> _startRecording() async {
@@ -540,7 +615,7 @@ class _ChatScreenState extends State<ChatScreen>
       await _recorder!.start(
         RecordConfig(
           encoder: _recordEncoder,
-          sampleRate: _browserSampleRate(),
+          sampleRate: await _recorderSampleRate(),
           numChannels: 1,
         ),
         path: 'recording',
@@ -548,6 +623,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       setState(() {
         _isRecording = true;
+        _pendingVoicePath = null;
         _recordSeconds = 0;
       });
       _stopRecordTimer();
@@ -555,7 +631,9 @@ class _ChatScreenState extends State<ChatScreen>
         if (!mounted || !_isRecording) return;
         setState(() => _recordSeconds++);
         if (_recordSeconds >= _maxRecordSeconds) {
-          _stopAndSendVoice(); // Hard cap — send what we have rather than lose it.
+          // Hard cap. Stop into the review state — never auto-send: the guest
+          // must still get to hear what the cap caught and decide.
+          _stopRecording();
         }
       });
     } catch (e) {
@@ -586,23 +664,22 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  Future<void> _stopAndSendVoice() async {
-    // Re-entrancy: the 60s auto-stop fires from the timer at the same moment the
-    // guest may be tapping stop. Clear the flag SYNCHRONOUSLY, before the first
-    // await — clearing it after would leave a window in which both callers pass
-    // the guard and we stop() a recorder that is already stopped.
-    if (_recorder == null || !_isRecording) return;
-    _stopRecordTimer();
-    _isRecording = false;
-    if (mounted) setState(() {});
-    final path = await _recorder!.stop();
+  /// Upload and send the take the guest reviewed and approved.
+  Future<void> _sendPendingVoice() async {
+    final path = _pendingVoicePath;
     if (path == null || _conversationId == null) return;
+    final recordedSeconds = _recordSeconds;
+    setState(() {
+      _pendingVoicePath = null;
+      _recordSeconds = 0;
+    });
     final isWav = _recordEncoder == AudioEncoder.wav;
     final mime = isWav ? 'audio/wav' : 'audio/ogg';
     final ext = isWav ? 'wav' : 'ogg';
     try {
       final response = await http.get(Uri.parse(path));
       final bytes = response.bodyBytes;
+      if (isWav) _auditWav(bytes, recordedSeconds);
       if (bytes.length > _maxMediaBytes) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1030,10 +1107,10 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  /// Replaces the text field while recording: a glowing dot, a live counter, and
-  /// an explicit choice between discarding the take and sending it. The text
-  /// field is deliberately gone — you cannot type and record at once, and
-  /// leaving it there made it ambiguous which one the send button would act on.
+  /// While recording. The ONLY control is Stop, and it sits exactly where the
+  /// mic button was — so the tap that started the recording is the same tap that
+  /// ends it. Nothing destructive is reachable here: an X in the mic's position
+  /// meant the instinctive "I'm done" tap deleted the message instead.
   Widget _buildRecordingBar() {
     final remaining = _maxRecordSeconds - _recordSeconds;
     final nearLimit = remaining <= 10;
@@ -1066,22 +1143,55 @@ class _ChatScreenState extends State<ChatScreen>
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        _StopRecordingButton(onPressed: _stopRecording),
+      ],
+    );
+  }
+
+  /// After Stop: the take is held, not sent. Discard sits to the LEFT of Send,
+  /// away from where the guest's finger already is.
+  Widget _buildVoiceReviewBar() {
+    return Row(
+      children: [
+        const SizedBox(width: 10),
+        Icon(Icons.graphic_eq_rounded,
+            size: 18, color: context.palette.primary),
+        const SizedBox(width: 10),
+        Text(
+          _clock(_recordSeconds),
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Voice note ready',
+            style: GoogleFonts.inter(
+                fontSize: 12, color: context.palette.textMuted),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
         IconButton(
-          onPressed: _cancelRecording,
-          tooltip: 'Discard',
-          icon: const Icon(Icons.close_rounded, size: 20),
-          color: context.palette.textSecondary,
+          onPressed: _discardPendingVoice,
+          tooltip: 'Delete recording',
+          icon: const Icon(Icons.delete_outline_rounded, size: 20),
+          color: context.palette.danger,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         ),
         const SizedBox(width: 4),
         IconButton(
-          onPressed: _stopAndSendVoice,
+          onPressed: _isWaiting ? null : _sendPendingVoice,
           tooltip: 'Send voice note',
           icon: const Icon(Icons.send, size: 20),
           style: IconButton.styleFrom(
             backgroundColor: context.palette.primary,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: context.palette.border,
             padding: const EdgeInsets.all(12),
           ),
         ),
@@ -1099,7 +1209,11 @@ class _ChatScreenState extends State<ChatScreen>
           blurSigma: 20,
           tint: context.palette.glassTintStrong,
           padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
-          child: _isRecording ? _buildRecordingBar() : Row(
+          child: _isRecording
+              ? _buildRecordingBar()
+              : _pendingVoicePath != null
+                  ? _buildVoiceReviewBar()
+                  : Row(
             children: [
               Expanded(
                 child: TextField(
@@ -1131,16 +1245,13 @@ class _ChatScreenState extends State<ChatScreen>
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               ),
               IconButton(
-                onPressed: _isWaiting
-                    ? null
-                    : (_isRecording ? _stopAndSendVoice : _startRecording),
-                icon: Icon(
-                  _isRecording
-                      ? Icons.stop_circle_rounded
-                      : Icons.mic_none_rounded,
-                  size: 20,
-                ),
-                color: _isRecording ? context.palette.danger : context.palette.textSecondary,
+                // Only ever "start" here: once recording, this whole Row is
+                // replaced by the recording bar, whose Stop button takes this
+                // button's place.
+                onPressed: _isWaiting ? null : _startRecording,
+                tooltip: 'Record a voice note',
+                icon: const Icon(Icons.mic_none_rounded, size: 20),
+                color: context.palette.textSecondary,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               ),
@@ -1159,6 +1270,83 @@ class _ChatScreenState extends State<ChatScreen>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Stop. A glowing red square, in the mic button's own position — so the tap
+/// that starts a recording is the tap that ends it, and nothing destructive is
+/// reachable while recording.
+class _StopRecordingButton extends StatefulWidget {
+  final VoidCallback onPressed;
+  const _StopRecordingButton({required this.onPressed});
+
+  @override
+  State<_StopRecordingButton> createState() => _StopRecordingButtonState();
+}
+
+class _StopRecordingButtonState extends State<_StopRecordingButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _glow;
+
+  @override
+  void initState() {
+    super.initState();
+    _glow = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduceMotion) {
+      _glow.stop();
+      _glow.value = 1.0;
+    } else if (!_glow.isAnimating) {
+      _glow.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _glow.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final danger = context.palette.danger;
+    return AnimatedBuilder(
+      animation: _glow,
+      builder: (_, __) {
+        final t = _glow.value;
+        return Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: danger.withValues(alpha: 0.35 + 0.35 * t),
+                blurRadius: 8 + 10 * t,
+                spreadRadius: 1 + 2 * t,
+              ),
+            ],
+          ),
+          child: IconButton(
+            onPressed: widget.onPressed,
+            tooltip: 'Stop recording',
+            icon: const Icon(Icons.stop_rounded, size: 20),
+            style: IconButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.all(12),
+            ),
+          ),
+        );
+      },
     );
   }
 }

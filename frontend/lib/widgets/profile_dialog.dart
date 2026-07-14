@@ -237,7 +237,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     const SizedBox(height: 8),
                     Text(
                       'Permanently deletes your account and all your property '
-                      'data. Past guest conversations are kept, anonymised.',
+                      'data.',
                       style: TextStyle(
                           fontSize: 11, color: palette.textMuted),
                     ),

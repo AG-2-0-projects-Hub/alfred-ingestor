@@ -81,8 +81,12 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   /// Null when the app wasn't configured with a bot username.
   ///
   /// t.me and telegram.me are interchangeable official front-ends for the same
-  /// deep link, so the domain is configurable: on 2026-07-13 t.me stopped
-  /// resolving worldwide while telegram.me stayed up.
+  /// deep link. We use **t.me**, and TELEGRAM_LINK_DOMAIN is left unset.
+  ///
+  /// The lever exists because on 2026-07-13 t.me stopped resolving and we
+  /// switched to telegram.me — but that turned out to be a global Telegram
+  /// outage, not anything on our side, and it resolved. Keep the escape hatch,
+  /// leave it unset.
   String? get _telegramUrl {
     final u = dotenv.env['TELEGRAM_BOT_USERNAME']?.trim();
     if (u == null || u.isEmpty) return null;

@@ -71,6 +71,12 @@ Requires `aiplatform.googleapis.com` enabled + the Cloud Run SA holding `roles/a
 - **429s under real load** — the retry may not be enough; may need a concurrency cap on ingest fan-out.
 - ✅ **RESOLVED (was stale — corrected 2026-07-14).** This line used to say `gemini_messenger` / `gemini_merge_resolve` lacked the 429 retry. They have had it since **`5681735`**: all **7** backend `generate_content` sites go through `genai_factory.generate_with_retry()` (`gemini_client:243`, `gemini_messenger:622/646/765`, `gemini_merge_resolve:620/651/692`). The note outlived the fix and was still being read as current a session later.
 - 🔴 **The scraper is the one Gemini call with NO retry.** `scraper/main.py:117` calls `client.models.generate_content(...)` raw — it is a separate service with its own client, which is how it was missed. Prod's scraper runs on Vertex too, so a dynamic-shared-quota 429 fails an Airbnb ingest outright. Route it through the same helper.
+
+### Telegram deep-link domain — we are on `t.me` (2026-07-14)
+`591e9e6` made the domain configurable after t.me stopped resolving on 2026-07-13. **That was a global Telegram outage, not our bug, and it resolved.** We are back on **`t.me`**:
+- `TELEGRAM_LINK_DOMAIN` **removed from Cloud Run** (rev 00017) — the backend was minting `telegram.me` links while the frontend showed `t.me`, so the two disagreed.
+- `vercel-build.sh` deliberately does **not** emit it, so the client keeps its `t.me` default.
+- The env lever remains in the code as an escape hatch. **Leaving it unset is what pins us to `t.me`** — only set it if t.me breaks again.
 - Region/model availability if `GOOGLE_CLOUD_LOCATION` moves off `global` (e.g. for EU data residency — D4).
 
 ---
