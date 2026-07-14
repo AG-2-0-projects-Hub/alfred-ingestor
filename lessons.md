@@ -132,6 +132,21 @@ inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
 
 ---
 
+## 2026-07-14 — Web voice notes lose ~30% of the recording: the resampler, not the tail
+**Context:** A guest counted to 10 into the web recorder; the voice note came back ~7s. A *compounding* percentage loss, not a missing tail — which rules out the obvious "the last buffer wasn't flushed" story.
+
+**Discovery (from reading `record_web-1.3.0` source, not guessing):**
+1. **`RecordConfig` defaults to 44.1 kHz / 2 channels**, but browsers run their AudioContext at **48 kHz, and a laptop mic is mono**. So every buffer is pushed through the package's hand-rolled JS resampler in `assets/js/record.worklet.js`.
+2. That resampler's downsampling path (`multiTap`) **resets its carry-over state — `tailExists = false`, `lastWeight = 0` — on EVERY `resample()` call**, so the partial sample carried between buffers is discarded on each ~43 ms flush. The loss accumulates across the whole recording. That is the ~30%.
+3. **The fix is one line:** `RecordConfig(encoder: AudioEncoder.wav, sampleRate: 48000, numChannels: 1)`. When `fromSampleRate == toSampleRate` the resampler installs a **bypass** (`this.resampler = (buffer) => buffer`) and never touches a sample.
+4. **⚠️ Do NOT "fix" this by switching to opus.** It's tempting — opus uses the browser-native `MediaRecorder` (whose `stop()` properly awaits the final data via `_onStopCompleter`, unlike the WAV path's `MicRecorderDelegate`, which tears down the context and *then* calls `finish()`). But **Gemini does not accept `audio/webm`** (its audio list is wav/mp3/aiff/aac/ogg/flac), and opus on Chrome produces a webm container. WAV is *why* transcription works today.
+
+**Impact:** not yet applied — needs a real browser to verify (headless Chromium can't be trusted for this app; see the 2026-07-07 CanvasKit/WebGL note).
+
+**Global Candidate:** Yes — "a steady percentage loss points at a resampler/rate mismatch, a fixed loss at the tail points at a flush bug" is a good general diagnostic, as is "read the package source before theorising".
+
+---
+
 ## 2026-07-13 — 🔴 The prod website publicly served the `service_role` key (and a misdiagnosis on the way)
 **Context:** Gate-2 testing. The founder signed up with a second email and saw a dashboard containing *another host's* properties, with "Email: —" and zero stats.
 
