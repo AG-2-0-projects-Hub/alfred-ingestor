@@ -63,6 +63,12 @@ async def _notify_tg_transition(
         log.warning("telegram transition notice (%s) failed: %s", kind, exc)
 
 
+class WebMediaItem(BaseModel):
+    url: str
+    kind: str  # 'image' | 'audio'
+    mime: str | None = None
+
+
 class WebIncomingRequest(BaseModel):
     booking_id: str
     message: str = ""
@@ -71,6 +77,10 @@ class WebIncomingRequest(BaseModel):
     media_url: str | None = None
     media_kind: str | None = None  # 'image' | 'audio'
     media_mime: str | None = None
+    # Several images sent together are ONE turn (the web equivalent of a Telegram
+    # album), so Alfred addresses them in a single reply rather than one each.
+    # The singular fields above remain for older clients.
+    media_items: list[WebMediaItem] | None = None
 
 
 class HostSendRequest(BaseModel):
@@ -416,8 +426,12 @@ async def process_guest_message(
 
 @router.post("/messages/web-incoming")
 async def web_incoming(req: WebIncomingRequest, background_tasks: BackgroundTasks):
-    media = None
-    if req.media_url and req.media_kind:
+    media: dict | list[dict] | None = None
+    if req.media_items:
+        media = [
+            {"kind": i.kind, "url": i.url, "mime": i.mime} for i in req.media_items
+        ]
+    elif req.media_url and req.media_kind:
         media = {"kind": req.media_kind, "url": req.media_url, "mime": req.media_mime}
 
     # A web guest splits a thought across messages just like a Telegram one, so

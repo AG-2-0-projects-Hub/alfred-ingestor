@@ -330,50 +330,62 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _pickAndSendImage() async {
     if (_conversationId == null) {
+      await _loadConversation();
+    }
+    if (_conversationId == null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Send a text message first to start the conversation.')),
       );
       return;
     }
+    // Several photos are ONE turn — the web equivalent of a Telegram album — so
+    // Alfred addresses them together instead of replying once per image.
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       withData: true,
+      allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-    final ext = file.extension?.toLowerCase() ?? 'jpg';
-    final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
-    final filename = 'img_${DateTime.now().millisecondsSinceEpoch}.$ext';
-    final storagePath = '$_conversationId/chat_media/$filename';
+
+    final sent = <Map<String, String>>[];
     try {
-      await _db.storage
-          .from('chat_media')
-          .uploadBinary(
-            storagePath,
-            bytes,
-            fileOptions: FileOptions(contentType: contentType, upsert: false),
-          );
-      await _db.from('messages').insert({
-        'conversation_id': _conversationId,
-        'sender_type': 'guest',
-        'content': '[image]',
-        'message_type': 'image',
-        'media_url': storagePath,
-        'status': 'delivered',
-      });
-      // Ask Alfred to analyze the image + respond (skipped server-side if the
-      // host has taken over). The reply arrives via the realtime messages stream.
+      for (final file in result.files) {
+        final bytes = file.bytes;
+        if (bytes == null) continue;
+        final ext = file.extension?.toLowerCase() ?? 'jpg';
+        final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
+        final filename =
+            'img_${DateTime.now().microsecondsSinceEpoch}_${sent.length}.$ext';
+        final storagePath = '$_conversationId/chat_media/$filename';
+
+        await _db.storage.from('chat_media').uploadBinary(
+              storagePath,
+              bytes,
+              fileOptions: FileOptions(contentType: contentType, upsert: false),
+            );
+        await _db.from('messages').insert({
+          'conversation_id': _conversationId,
+          'sender_type': 'guest',
+          'content': '[image]',
+          'message_type': 'image',
+          'media_url': storagePath,
+          'status': 'delivered',
+        });
+        sent.add({'url': storagePath, 'kind': 'image', 'mime': contentType});
+      }
+      if (sent.isEmpty) return;
+
+      // Ask Alfred to analyze them + respond, in a single turn (skipped
+      // server-side if the host has taken over). The reply arrives via the
+      // realtime messages stream.
       try {
         await ApiClient.postJson('/api/messages/web-incoming', {
           'booking_id': widget.bookingId,
-          'media_url': storagePath,
-          'media_kind': 'image',
-          'media_mime': contentType,
+          'media_items': sent,
         });
       } catch (_) {
-        // Non-fatal — the image is delivered; only the auto-reply is missed.
+        // Non-fatal — the images are delivered; only the auto-reply is missed.
       }
     } catch (e) {
       if (mounted) {
@@ -387,43 +399,51 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _startRecording() async {
     if (_recorder == null) return;
     if (_conversationId == null) {
+      // The conversation already exists — /api/guest-token creates it with the
+      // welcome message — so a null id here just means the load hasn't landed.
+      // Fetch it rather than telling the guest to go type something first.
+      await _loadConversation();
+    }
+    if (_conversationId == null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Send a text message first to start the conversation.')),
       );
       return;
     }
     try {
-      // A browser that has already stored a "block" for this origin returns
-      // false here without ever re-prompting, so tell the guest how to undo it
-      // rather than leaving them tapping a mic that does nothing.
-      if (!await _recorder!.hasPermission()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              duration: Duration(seconds: 6),
-              content: Text(
-                'Microphone blocked. Open the padlock in your browser\'s address bar, '
-                'set Microphone to "Allow", then reload and try again.',
-              ),
-            ),
-          );
-        }
-        return;
-      }
-      // Prefer WAV (which Gemini reads directly); fall back to opus if the
-      // browser can't encode WAV. Errors are surfaced instead of silently
-      // doing nothing (the old behaviour when permission/encoder failed).
+      // Do NOT gate on hasPermission() here. On desktop Chrome and Firefox it
+      // reports false while the permission is merely UN-ASKED (state "prompt",
+      // not "denied"), so bailing out meant getUserMedia was never called — and
+      // getUserMedia is the only thing that makes the browser show its
+      // permission dialog. The mic was unreachable on desktop for that reason;
+      // it only worked on mobile because permission was already granted there.
+      //
+      // Starting the recorder performs getUserMedia, which prompts. A genuine
+      // denial (or a previously stored block) then surfaces as an exception
+      // below, where we can tell the guest how to undo it.
       _recordEncoder = await _recorder!.isEncoderSupported(AudioEncoder.wav)
-          ? AudioEncoder.wav
+          ? AudioEncoder.wav  // Gemini reads WAV directly
           : AudioEncoder.opus;
       await _recorder!.start(RecordConfig(encoder: _recordEncoder), path: 'recording');
       if (mounted) setState(() => _isRecording = true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start recording: $e')),
-        );
-      }
+      if (!mounted) return;
+      final err = e.toString().toLowerCase();
+      final blocked = err.contains('notallowed') ||
+          err.contains('permission') ||
+          err.contains('denied');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(
+            blocked
+                ? 'Microphone blocked. Open the padlock in your browser\'s address '
+                    'bar, set Microphone to "Allow", then reload and try again.'
+                : 'Could not start recording: $e',
+          ),
+        ),
+      );
     }
   }
 
