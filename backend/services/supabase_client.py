@@ -859,6 +859,109 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
     return "ok"
 
 
+def _delete_host_avatars(host_id: str) -> None:
+    """Best-effort removal of every avatar the host ever uploaded.
+
+    upload_host_avatar timestamps each file rather than overwriting, so a host
+    who changed their picture has several — and the bucket is PUBLIC, so leaving
+    any behind leaves a public photo of a person who just deleted their account.
+    """
+    client = get_client()
+    try:
+        files = client.storage.from_("host_avatars").list(
+            host_id, {"limit": 1000, "offset": 0}
+        )
+        paths = [f"{host_id}/{f['name']}" for f in files or []]
+    except Exception as exc:
+        print(f"_delete_host_avatars: list failed: {exc}")
+        return
+    if paths:
+        try:
+            client.storage.from_("host_avatars").remove(paths)
+        except Exception as exc:
+            print(f"_delete_host_avatars: remove failed: {exc}")
+
+
+def delete_host_account(host_id: str) -> dict:
+    """Delete a host's account and all their property data, KEEPING the
+    conversations — archived, with their guests already pseudonymized.
+
+    The property rows survive as tombstones because they have to: `guests` and
+    `conversations` hold FKs to `properties` with no ON DELETE, so a hard delete
+    would be rejected. That constraint is also what makes the spec work — the
+    conversations we want to retain are exactly what pins the tombstone.
+
+    Order matters. The property data is blanked first (durable), then the
+    best-effort cleanup runs, and the auth user is deleted LAST: once it's gone
+    the host can no longer sign in to retry, so anything that could fail must
+    have already run. Returns a summary for the caller to log.
+    """
+    client = get_client()
+
+    props = (
+        client.table("properties")
+        .select("id, deleted_at")
+        .eq("owner_id", host_id)
+        .execute()
+    ).data or []
+
+    deleted_now = 0
+    for p in props:
+        # Already-tombstoned properties keep their conversations, so they still
+        # need the archive + Telegram-unlink pass below; they just don't need
+        # blanking twice.
+        if not p.get("deleted_at"):
+            if soft_delete_property(p["id"], host_id) == "ok":
+                deleted_now += 1
+
+    # Sever the Telegram link and archive the conversations. Without the unlink,
+    # the bot still maps that chat_id to a guest; the deleted_at guard in
+    # process_guest_message would answer them with the closed notice, but there
+    # is no reason to keep a live mapping to a host who no longer exists.
+    archived = 0
+    for p in props:
+        guests = (
+            client.table("guests")
+            .select("id")
+            .eq("property_id", p["id"])
+            .execute()
+        ).data or []
+        for g in guests:
+            client.table("guests").update(
+                {"telegram_chat_id": None}
+            ).eq("id", g["id"]).execute()
+
+        convs = (
+            client.table("conversations")
+            .select("id")
+            .eq("property_id", p["id"])
+            .is_("archived_at", "null")
+            .execute()
+        ).data or []
+        for c in convs:
+            archive_conversation(c["id"])
+            archived += 1
+
+    _delete_host_avatars(host_id)
+
+    # host_profiles has ON DELETE CASCADE from auth.users, so deleting the auth
+    # user below would take it anyway — but do it explicitly so the row is gone
+    # even if the auth delete fails and the host retries.
+    try:
+        client.table("host_profiles").delete().eq("id", host_id).execute()
+    except Exception as exc:
+        print(f"delete_host_account: host_profiles delete failed: {exc}")
+
+    # Last: the point of no return.
+    client.auth.admin.delete_user(host_id)
+
+    return {
+        "properties_seen": len(props),
+        "properties_deleted": deleted_now,
+        "conversations_archived": archived,
+    }
+
+
 def _delete_property_storage(property_id: str) -> None:
     """Best-effort removal of all objects under the property's storage prefix."""
     client = get_client()

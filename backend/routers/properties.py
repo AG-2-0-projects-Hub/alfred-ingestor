@@ -1,7 +1,10 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from services import supabase_client
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -81,3 +84,34 @@ async def soft_delete_property(
     if result == "forbidden":
         raise HTTPException(status_code=403, detail="Not your property")
     return {"status": "deleted"}
+
+
+@router.post("/host/delete-account")
+async def delete_account(authorization: str | None = Header(default=None)):
+    """Delete the caller's account and all their property data.
+
+    The conversations are KEPT — archived, with their guests already
+    pseudonymized to "Guest xxxxx" by the per-property soft-delete. They are
+    retained for internal AI training and cannot be dropped anyway: guests and
+    conversations hold FKs to properties with no ON DELETE.
+
+    No property id and no ownership check: the host being deleted IS the subject
+    of the token, so there is nothing to authorize beyond proving they hold it.
+    Irreversible — the confirmation lives in the UI.
+    """
+    host_id = await _require_host_id(authorization)
+
+    try:
+        summary = await asyncio.to_thread(
+            supabase_client.delete_host_account, host_id
+        )
+    except Exception as exc:
+        # The host is mid-deletion and cannot be left guessing. Surface a real
+        # failure instead of a 200 that silently kept their data.
+        log.exception("delete_host_account failed for host=%s", host_id)
+        raise HTTPException(
+            status_code=500, detail="Could not delete the account. Nothing was lost — please try again."
+        ) from exc
+
+    log.info("account deleted host=%s summary=%s", host_id, summary)
+    return {"status": "deleted", **summary}

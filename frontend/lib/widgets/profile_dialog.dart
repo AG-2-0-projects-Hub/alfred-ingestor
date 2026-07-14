@@ -5,6 +5,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../screens/auth_screen.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 
 /// Host profile menu. Shows and edits the host's display name, nickname, short
@@ -40,6 +42,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
   bool _loading = true;
   bool _saving = false;
   bool _uploading = false;
+  bool _deleting = false;
 
   SupabaseClient get _db => Supabase.instance.client;
   String? get _uid => _db.auth.currentUser?.id;
@@ -215,17 +218,40 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     const SizedBox(height: 8),
                     _readOnlyRow(Icons.home_work_outlined, 'Registered properties',
                         '${widget.propertyCount}', palette),
+                    const SizedBox(height: 28),
+                    const Divider(),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _deleting ? null : _confirmDeleteAccount,
+                      icon: Icon(Icons.delete_forever_outlined,
+                          size: 16, color: Colors.red.shade700),
+                      label: Text(
+                        _deleting ? 'Deleting…' : 'Delete account',
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        side: BorderSide(color: Colors.red.shade300),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Permanently deletes your account and all your property '
+                      'data. Past guest conversations are kept, anonymised.',
+                      style: TextStyle(
+                          fontSize: 11, color: palette.textMuted),
+                    ),
                   ],
                 ),
               ),
       ),
       actions: [
         TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          onPressed: (_saving || _deleting) ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: (_saving || _loading) ? null : _save,
+          onPressed: (_saving || _loading || _deleting) ? null : _save,
           child: _saving
               ? const SizedBox(
                   width: 16,
@@ -237,6 +263,43 @@ class _ProfileDialogState extends State<ProfileDialog> {
         ),
       ],
     );
+  }
+
+  /// Irreversible and it takes the guest conversations' owner with it, so a
+  /// two-tap red button (the pattern used for deleting a single property) is not
+  /// enough here — the host types the word out. This is the only typed
+  /// confirmation in the app, and deliberately so.
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _DeleteAccountConfirmDialog(),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      final token = _db.auth.currentSession?.accessToken;
+      await ApiClient.postJson('/api/host/delete-account', const {}, bearer: token);
+
+      // The account is gone — the session is now a token for a user who doesn't
+      // exist. Tear it down and go back to sign-in, past every dashboard route.
+      await _db.auth.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthScreen()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      final msg = e is ApiException ? e.userMessage : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red.shade700,
+          content: Text('Could not delete your account: $msg'),
+        ),
+      );
+    }
   }
 
   Widget _buildAvatar(AppPalette palette) {
@@ -315,4 +378,121 @@ class _ProfileDialogState extends State<ProfileDialog> {
       ],
     );
   }
+}
+
+/// Typed confirmation for account deletion. States plainly what goes and what
+/// stays — a host who is told "everything is deleted" and later finds the guest
+/// conversations retained has been misled, and that is a trust (and GDPR)
+/// problem, not a copy problem.
+class _DeleteAccountConfirmDialog extends StatefulWidget {
+  const _DeleteAccountConfirmDialog();
+
+  @override
+  State<_DeleteAccountConfirmDialog> createState() =>
+      _DeleteAccountConfirmDialogState();
+}
+
+class _DeleteAccountConfirmDialogState
+    extends State<_DeleteAccountConfirmDialog> {
+  static const _phrase = 'DELETE';
+  final _controller = TextEditingController();
+  bool _matches = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() {
+      final ok = _controller.text.trim().toUpperCase() == _phrase;
+      if (ok != _matches) setState(() => _matches = ok);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return AlertDialog(
+      backgroundColor: palette.surface,
+      title: Row(children: [
+        Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+        const SizedBox(width: 8),
+        const Flexible(child: Text('Delete account')),
+      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'This cannot be undone.',
+            style: GoogleFonts.inter(
+                fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          _bullet('Your account and login are permanently removed.'),
+          _bullet('All your properties and their training data are deleted.'),
+          _bullet('Your profile and avatar are deleted.'),
+          const SizedBox(height: 10),
+          Text(
+            'Past guest conversations are kept and archived, with guest names '
+            'anonymised. They are no longer linked to you.',
+            style: GoogleFonts.inter(
+                fontSize: 12, color: palette.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Type $_phrase to confirm',
+            style: GoogleFonts.inter(
+                fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              isDense: true,
+              hintText: _phrase,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed:
+              _matches ? () => Navigator.of(context).pop(true) : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red.shade700,
+            disabledBackgroundColor: palette.border,
+          ),
+          child: const Text('Delete my account'),
+        ),
+      ],
+    );
+  }
+
+  Widget _bullet(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('•  '),
+            Expanded(
+              child: Text(
+                text,
+                style: GoogleFonts.inter(fontSize: 13, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      );
 }
