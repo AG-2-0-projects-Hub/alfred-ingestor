@@ -743,30 +743,34 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 | # | Area | Assert | Status |
 |---|---|---|---|
-| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ◐ 2026-07-13 — signup 200 + confirm-email ON (email sent); link-click UX = founder's own signup |
+| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ◐ **RETEST REQUIRED (the flow changed)** — founder signed up 2026-07-14 and it worked, but that pass **found an auth hole**: the confirmation link signed you straight into the dashboard without the password. Fixed in `13b651c`. Re-assert: confirm link → **sign-in screen** with an "Email confirmed" banner, never the dashboard; then sign in with the password; profile shows the email |
 | P-2 | Ingest — all types | pdf · docx · image · sheet · audio all reach `Done` (Vertex has **no File API**; bytes go inline) | ✅ 2026-07-13 — all 5 types `done` in one 80s run |
-| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ◐ 2026-07-13 — guard + reject copy confirmed in deployed bundle; founder drags one big file |
+| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ☐ **STILL OPEN — never actually tested.** The 2026-07-14 attempt hit the **guest-chat** limit instead (`chat_media` = **10 MB**), which is a different thing. This row is the **ingest drop zone** (**15 MB**, Vertex inline cap). Guard + reject copy confirmed present in the deployed bundle; needs one real >15 MB file dragged into the drop zone |
 | P-4 | Ingest — burst | A multi-file ingest does **not** 429 (retry/backoff absorbs Vertex's dynamic shared quota) | ✅ 2026-07-13 — 5-file burst, zero surfaced 429s |
 | P-5 | Merge + conflicts | Discrepancies detected, questionnaire answered, master JSON updated | ✅ 2026-07-13 (founder) + re-verified via API: 9 conflicts → resolve → `Trained`, 0 remaining |
 | P-6 | Welcome language | Mexican property → **Spanish** welcome (country reads from `location.address.country`) | ✅ 2026-07-13 — "Bienvenido a Casa Gate2 Test…" with country only at `location.address.country` |
 | P-7 | Guest chat — web | Guest link → message → Alfred replies; reply is **not empty/refused** (Vertex safety defaults differ from AI Studio) | ✅ 2026-07-13 — multiple ES+EN turns, correct wifi/checkout/parking answers, no empty/refused reply |
-| P-8 | Guest chat — Telegram | `/start` → message → Alfred replies. **The `min-instances=1` CPU-freeze check.** No "something went wrong" (429s now retried on every Gemini path) | ◐ 2026-07-13 — root cause found & fixed (CPU throttling, see below); simulated webhook: `/start` links + reply row lands ~15s with **zero** follow-up traffic. Founder retests from a real device |
+| P-8 | Guest chat — Telegram | `/start` → message → Alfred replies. **The `min-instances=1` CPU-freeze check.** No "something went wrong" (429s now retried on every Gemini path) | ✅ **2026-07-14 (founder, real device)** — replies prompt and in order, no stacking, no "something went wrong". Root cause had been Cloud Run CPU throttling; fixed via Cloud Tasks (`3a1d1e5`). Founder: *"the response time … is much faster with Google Cloud"* |
 | P-9 | **Realtime** | Host dashboard shows a new guest message **without refreshing** (requires `messages` in the `supabase_realtime` publication) | ✅ 2026-07-13 — guest + ai INSERTs streamed live over a booking-JWT socket |
 | P-10 | Escalation → resolve | Escalate → Intervene → host reply lands on the guest's channel → Mark Resolved → learning card | ✅ 2026-07-13 — `information_not_in_database` → intervene → host-send → resolve → learning card + ledger row (pseudonymized) |
-| P-11 | Media rules | 1 photo → no escalation · 2-photo TG album → **one** reply + **one** notice + escalation · voice note → answered, escalates only on **content** | ☐ founder — needs real Telegram media (file_ids can't be simulated) |
-| P-12 | Stats + ledger | Dashboard stats strip populates; learning vault accept/undo works | ◐ 2026-07-13 — `get_host_stats` RPC + `learned_knowledge` + `learning_events` all correct via API; vault accept/undo UI = founder |
+| P-11 | Media rules | 1 photo → no escalation · 2-photo TG album → **one** reply + **one** notice + escalation · voice note → answered, escalates only on **content** | ✅ **2026-07-14 (founder, real device)** — all three sub-checks pass: TG album → ONE reply + ONE notice + escalation; single photo → answered, no escalation; voice note → transcribed + answered, no volume-escalation. Web multi-photo also verified (each image its own bubble, one reply, escalation fires) |
+| P-12 | Stats + ledger | Dashboard stats strip populates; learning vault accept/undo works | ✅ **2026-07-14 (founder)** — learning vault accept → "Saved to Vault ✓ / Undo" → entry appears in the Vault. Backend side (`get_host_stats` RPC + `learned_knowledge` + `learning_events`) verified via API 2026-07-13 |
 | P-13 | Guardrails | Rate limit, high-stakes fallback (wifi/door code), prompt-injection attempt | ✅ 2026-07-13 — cooldown at >20/h (Gemini skipped, msgs stored) · wifi-missing → holding line + escalation · injection refused, no prompt/JSON leak |
-| P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ◐ 2026-07-13 — server-side both branches proven via logs (TG-active → delivery attempted; web-active → no attempt); founder cross-device sanity |
+| P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ✅ **2026-07-14 (founder, cross-device)** — while chatting as a guest on the web link, the phone's Telegram stayed silent. Server-side both branches already proven via logs 2026-07-13 |
 | P-15 | No cold start | Reload / idle → first response is immediate (`min-instances=1`) | ✅ 2026-07-13 — 0.09–0.24s first response after ~10 min idle |
 
-### Founder checklist — what's left to turn every ◐/☐ green
-1. **P-8:** chat with `@AlwaysAlfred_bot` from your phone — replies should be prompt and in order, no stacking, no "something went wrong". (Root cause was Cloud Run throttling the CPU the moment the webhook returned its 200, freezing the `BackgroundTask` that generates the reply; `min-instances=1` never prevented that. Now on **rev 00007** the work is dispatched as its own request by **Cloud Tasks** — `3a1d1e5` — which also cut the bill from ~$55/mo to ~$12/mo.)
-2. **P-11:** 1 photo (no escalation) · 2-photo album (ONE reply + ONE notice + escalation) · voice note (answered, no volume-escalation).
-3. **P-1:** your real signup on `alwaysalfred.vercel.app` — the confirm-email click.
-4. **P-3:** drag a >15 MB file into the drop zone — inline rejection.
-5. **P-12:** accept a learning card → "Saved to Vault ✓/Undo" → vault shows it.
-6. **P-14:** while chatting on web, confirm your phone's Telegram stays silent (and vice-versa).
-7. Afterwards: delete the two test properties ("Casa Gate2 Test", "Loft Gate2 Fallback") + the throwaway host `…+gate2claude@gmail.com` from prod, or say the word and Claude removes them.
+### Founder checklist — status as of 2026-07-14
+
+**Gate 2 is 13/15 green.** The founder's verification pass on 2026-07-14 closed **P-8, P-11, P-12 and P-14** (real device / cross-device). Only two rows remain, and neither is a re-run of something already done:
+
+1. **P-1 — RETEST (the flow changed).** The original pass *found an auth hole*: the confirmation link signed you into the dashboard without ever asking for the password. Fixed in `13b651c`. Re-assert: confirm link → **sign-in screen** with an "Email confirmed" banner (never the dashboard) → sign in with the password → the profile dialog shows your email.
+2. **P-3 — never actually tested.** The 2026-07-14 attempt hit the **guest-chat** 10 MB limit, which is a *different* limit. This row is the **ingest drop zone** at **15 MB**. Drag one real >15 MB file in and confirm the inline rejection.
+
+Plus the **Phase-C fixes** and the two open builds, all in the Pending-intake queue below: sign-up form (no longer freezes; strong-password rules) · chat input keeps focus + 6s burst window · localized transition notices · 🔴 **web voice-note truncation (still broken)** · voice UX (duration/60s/glow) · delete-account.
+
+**Merge gate:** these must be green before `staging → main`. Note the merge itself deploys nothing new — prod *already runs this code* (Vercel prod is fed by the `staging` branch; Cloud Run is deployed manually). The merge is when we tag **`v1.0.0-beta.1`** and **retire the rollback**, which is precisely why it waits.
+
+**Afterwards:** delete the prod test data — properties "Casa Gate2 Test" + "Loft Gate2 Fallback", their guests, and the throwaway host `…+gate2claude@gmail.com`.
 
 ---
 
