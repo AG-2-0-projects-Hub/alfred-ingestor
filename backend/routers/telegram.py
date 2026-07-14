@@ -22,11 +22,15 @@ Host-side Telegram (relay + inline buttons) is intentionally out of scope.
 import asyncio
 import logging
 import os
+import time
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from services import supabase_client, task_queue, telegram_client, welcome
+from services import (
+    burst_buffer, supabase_client, task_queue, telegram_client, welcome,
+)
+from routers import messages as messages_router
 from routers.messages import process_guest_message, _notify_tg_transition
 from routers.guest_auth import _resolve_identity
 
@@ -100,24 +104,48 @@ async def telegram_process(request: Request):
             job.get("chat_id"), job.get("group_id"),
             job.get("seed_items") or [], job.get("caption") or "",
         )
+    elif kind == "burst":
+        await _flush_burst(job.get("chat_id"), job.get("seed") or [])
     elif kind == "update":
         await _handle_update(job.get("update") or {})
     return {"ok": True}
+
+
+async def _flush_burst(chat_id, seed: list[str]) -> None:
+    """Answer a run of quick guest messages as one turn. The messages themselves
+    were already stored as they arrived (see _dispatch), so the host sees the
+    bubbles the guest actually sent — only the ANSWER is coalesced."""
+    if chat_id is None:
+        return
+    messages = burst_buffer.pop(f"tg:{chat_id}", seed)
+    if not messages:
+        return
+    await _handle_guest_message(
+        chat_id, burst_buffer.combine(messages), already_stored=True,
+    )
+
+
+async def _sleep_then_flush_burst(chat_id) -> None:
+    await asyncio.sleep(burst_buffer.WINDOW_SECONDS)
+    await _flush_burst(chat_id, [])
 
 
 async def _dispatch(update: dict, background_tasks: BackgroundTasks) -> None:
     """Hand the update to whatever can run it with a CPU: Cloud Tasks in prod,
     an in-process BackgroundTask on a host that doesn't throttle (staging/local).
 
-    An album is the one case that can't be dispatched per-update: Telegram sends
-    one update per photo, so we collect the group and schedule a SINGLE flush,
-    named after the media_group_id — Cloud Tasks rejects the duplicate name, so
-    the siblings ride along instead of each triggering their own reply.
+    Two cases can't be dispatched per-update, because several updates are really
+    one turn — a photo album (one update per photo, shared media_group_id) and a
+    burst of quick text messages ("Dos perros" / "Y tres gatos"). Both collect
+    their parts and schedule a SINGLE flush, named after the group/chat: Cloud
+    Tasks rejects the duplicate name, so the rest ride along instead of each
+    triggering its own reply.
     """
     message = update.get("message") or update.get("edited_message") or {}
     chat_id = (message.get("chat") or {}).get("id")
     group_id = message.get("media_group_id")
     photo = message.get("photo")
+    text = message.get("text")
 
     if group_id and isinstance(photo, list) and photo and chat_id is not None:
         file_id = photo[-1].get("file_id")
@@ -147,6 +175,40 @@ async def _dispatch(update: dict, background_tasks: BackgroundTasks) -> None:
              "seed_items": [item], "caption": caption},
             delay_seconds=_ALBUM_WINDOW_S,
             name=f"album-{task_queue.sanitize_task_name(group_id)}",
+        )
+        return
+
+    # Plain text from a linked guest → coalesce a burst into one turn. `/start`
+    # is a command, not conversation, so it stays immediate.
+    if text and not text.startswith("/") and chat_id is not None:
+        guest = await asyncio.to_thread(
+            supabase_client.get_guest_by_telegram_chat_id, chat_id
+        )
+        if not guest:
+            await telegram_client.send_message(chat_id, _NOT_LINKED)
+            return
+
+        # Store it now so the host's dashboard shows the message the instant it
+        # lands (and lights up live over realtime), even though the ANSWER waits
+        # for the rest of the burst.
+        await messages_router.store_guest_text(
+            guest["booking_id"], text, channel="telegram",
+        )
+
+        opened = burst_buffer.add(f"tg:{chat_id}", text)
+        if not opened:
+            return  # a flush is already scheduled; this message rides along
+
+        if not task_queue.enabled():
+            background_tasks.add_task(_sleep_then_flush_burst, chat_id)
+            return
+
+        task_queue.enqueue(
+            "/api/telegram/process",
+            {"kind": "burst", "chat_id": chat_id, "seed": [text]},
+            delay_seconds=burst_buffer.WINDOW_SECONDS,
+            name=f"burst-{task_queue.sanitize_task_name(str(chat_id))}"
+                 f"-{int(time.time())}",
         )
         return
 
@@ -287,7 +349,9 @@ async def _handle_start(chat_id, text: str) -> None:
     await telegram_client.send_message(chat_id, welcome_text)
 
 
-async def _handle_guest_message(chat_id, text: str) -> None:
+async def _handle_guest_message(
+    chat_id, text: str, already_stored: bool = False,
+) -> None:
     """A normal message from a linked guest → run the shared Brain and reply."""
     guest = await asyncio.to_thread(
         supabase_client.get_guest_by_telegram_chat_id, chat_id
@@ -299,7 +363,10 @@ async def _handle_guest_message(chat_id, text: str) -> None:
     await telegram_client.send_chat_action(chat_id, "typing")
 
     try:
-        result = await process_guest_message(guest["booking_id"], text, channel="telegram")
+        result = await process_guest_message(
+            guest["booking_id"], text, channel="telegram",
+            already_stored=already_stored,
+        )
     except HTTPException as he:
         await telegram_client.send_message(
             chat_id, _TOO_LONG if he.status_code == 504 else _GENERIC_ERR

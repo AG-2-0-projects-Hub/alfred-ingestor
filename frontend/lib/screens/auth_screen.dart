@@ -14,15 +14,33 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   bool _isLogin = true;
   bool _isLoading = false;
   bool _showPassword = false;
+  String? _fieldError;
+
+  /// Set once a sign-up succeeds but returns no session, i.e. the account needs
+  /// email confirmation. The form is replaced by a "check your inbox" panel.
+  String? _awaitingConfirmationFor;
+
+  static const _minPasswordLength = 8;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmController.dispose();
     super.dispose();
+  }
+
+  /// Sign-up only. Returns an error message, or null when the input is good.
+  String? _validateSignUp(String password, String confirm) {
+    if (password.length < _minPasswordLength) {
+      return 'Password must be at least $_minPasswordLength characters.';
+    }
+    if (password != confirm) return "Passwords don't match.";
+    return null;
   }
 
   Future<void> _submit() async {
@@ -30,7 +48,18 @@ class _AuthScreenState extends State<AuthScreen> {
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) return;
 
-    setState(() => _isLoading = true);
+    if (!_isLogin) {
+      final problem = _validateSignUp(password, _confirmController.text);
+      if (problem != null) {
+        setState(() => _fieldError = problem);
+        return;
+      }
+    }
+
+    setState(() {
+      _isLoading = true;
+      _fieldError = null;
+    });
     try {
       if (_isLogin) {
         await Supabase.instance.client.auth.signInWithPassword(
@@ -39,11 +68,21 @@ class _AuthScreenState extends State<AuthScreen> {
         );
       } else {
         final redirectTo = '${Uri.base.scheme}://${Uri.base.host}';
-        await Supabase.instance.client.auth.signUp(
+        final res = await Supabase.instance.client.auth.signUp(
           email: email,
           password: password,
           emailRedirectTo: redirectTo,
         );
+        // With email confirmation on, sign-up returns a user but NO session.
+        // Sending them to the dashboard anyway left them signed out but looking
+        // signed in — no email, no stats, and nothing loadable. Show the
+        // confirmation step instead, and never navigate without a session.
+        if (res.session == null) {
+          if (mounted) {
+            setState(() => _awaitingConfirmationFor = email);
+          }
+          return;
+        }
       }
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -254,8 +293,58 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  // ── "Confirm your email" step (sign-up returned no session) ───────────────
+  Widget _buildAwaitingConfirmation() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Icon(Icons.mark_email_unread_outlined,
+            size: 44, color: context.palette.primary),
+        const SizedBox(height: 20),
+        Text(
+          'Confirm your email',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 26,
+            fontWeight: FontWeight.w300,
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'We sent a confirmation link to $_awaitingConfirmationFor.\n'
+          'Open it to activate your account, then sign in.',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            height: 1.5,
+            color: context.palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 28),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: () => setState(() {
+              _awaitingConfirmationFor = null;
+              _isLogin = true;
+              _passwordController.clear();
+              _confirmController.clear();
+            }),
+            child: Text(
+              'Back to sign in',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── Login / Sign-up form ──────────────────────────────────────────────────
   Widget _buildForm() {
+    if (_awaitingConfirmationFor != null) return _buildAwaitingConfirmation();
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -317,9 +406,33 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
           obscureText: !_showPassword,
-          textInputAction: TextInputAction.done,
+          textInputAction:
+              _isLogin ? TextInputAction.done : TextInputAction.next,
           onSubmitted: (_) => _isLoading ? null : _submit(),
         ),
+        // Confirm password — sign-up only. A typo here otherwise locks the host
+        // out of an account they can no longer guess the password to.
+        if (!_isLogin) ...[
+          const SizedBox(height: 16),
+          TextField(
+            controller: _confirmController,
+            decoration: const InputDecoration(
+              labelText: 'Confirm password',
+              prefixIcon: Icon(Icons.lock_outline),
+            ),
+            obscureText: !_showPassword,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _isLoading ? null : _submit(),
+          ),
+        ],
+        if (_fieldError != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _fieldError!,
+            style: GoogleFonts.inter(
+                fontSize: 13, color: context.palette.danger),
+          ),
+        ],
         const SizedBox(height: 24),
         // Primary action
         SizedBox(
@@ -359,7 +472,11 @@ class _AuthScreenState extends State<AuthScreen> {
             TextButton(
               onPressed: _isLoading
                   ? null
-                  : () => setState(() => _isLogin = !_isLogin),
+                  : () => setState(() {
+                        _isLogin = !_isLogin;
+                        _fieldError = null;
+                        _confirmController.clear();
+                      }),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: Size.zero,

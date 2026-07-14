@@ -4,10 +4,14 @@ import os
 import random
 import re
 import string
+import time
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
-from services import guardrails, learning_triage, supabase_client, gemini_messenger, telegram_client, welcome
+from services import (
+    burst_buffer, guardrails, learning_triage, supabase_client, gemini_messenger,
+    task_queue, telegram_client, welcome,
+)
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
 router = APIRouter()
@@ -77,6 +81,7 @@ class HostSendRequest(BaseModel):
 async def process_guest_message(
     booking_id: str, message: str, channel: str = "web",
     media: dict | list[dict] | None = None,
+    already_stored: bool = False,
 ) -> dict:
     """Channel-agnostic guest pipeline shared by the web chat and the Telegram
     bot. `channel` ('web' | 'telegram') is the channel this message arrived on;
@@ -109,6 +114,14 @@ async def process_guest_message(
         supabase_client.get_conversation_messages,
         conversation["id"],
     )
+
+    # A coalesced burst was already written to the DB message-by-message (so the
+    # guest and the host each see the bubbles they actually sent). Those trailing
+    # guest rows ARE this turn, and `message` is their combined text — peel them
+    # off the history so the model isn't handed the same words twice.
+    if already_stored:
+        while history and history[-1].get("sender_type") == "guest":
+            history.pop()
 
     # Dedupe guard: a client retry (web) or a Telegram webhook re-delivery can
     # replay the same message. Skip the insert if it's identical to the most
@@ -173,7 +186,7 @@ async def process_guest_message(
         if item_bytes:
             media_parts.append((item_bytes, mime))
 
-    if not media_items and not is_duplicate:
+    if not media_items and not is_duplicate and not already_stored:
         # Always log the guest message so the host can see it even in intervene mode.
         await asyncio.to_thread(
             supabase_client.insert_message,
@@ -402,10 +415,22 @@ async def process_guest_message(
 
 
 @router.post("/messages/web-incoming")
-async def web_incoming(req: WebIncomingRequest):
+async def web_incoming(req: WebIncomingRequest, background_tasks: BackgroundTasks):
     media = None
     if req.media_url and req.media_kind:
         media = {"kind": req.media_kind, "url": req.media_url, "mime": req.media_mime}
+
+    # A web guest splits a thought across messages just like a Telegram one, so
+    # plain text is coalesced into a single turn the same way (see burst_buffer).
+    # The client renders Alfred's reply from the realtime stream, not from this
+    # response, so answering later costs it nothing. Media keeps its own path.
+    if media is None and req.message:
+        await store_guest_text(req.booking_id, req.message, channel="web")
+        opened = burst_buffer.add(f"web:{req.booking_id}", req.message)
+        if opened:
+            _schedule_web_burst(req.booking_id, req.message, background_tasks)
+        return {"status": "queued", "reply": None}
+
     result = await process_guest_message(req.booking_id, req.message, media=media)
     if result["mode"] == "intervene":
         return {"status": "intervene_mode", "reply": None}
@@ -414,6 +439,75 @@ async def web_incoming(req: WebIncomingRequest):
         "requires_escalation": result["requires_escalation"],
         "conversation_id": result["conversation_id"],
     }
+
+
+async def store_guest_text(booking_id: str, text: str, channel: str = "web") -> None:
+    """Persist one guest message immediately, before Alfred answers.
+
+    A burst is answered as a single turn, but each message is still stored as the
+    guest actually typed it: the host sees the real bubbles, and the web guest's
+    optimistic bubbles reconcile against matching rows (they match on content —
+    a merged row would leave them stranded on screen).
+    """
+    text = guardrails.truncate_message(text)
+    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, booking_id)
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    conversation = await asyncio.to_thread(
+        supabase_client.find_or_create_conversation,
+        booking_id, guest["property_id"],
+    )
+    await asyncio.to_thread(
+        supabase_client.insert_message, conversation["id"], "guest", text,
+    )
+    if conversation.get("active_channel") != channel:
+        await asyncio.to_thread(
+            supabase_client.set_active_channel, conversation["id"], channel
+        )
+
+
+def _schedule_web_burst(
+    booking_id: str, seed_text: str, background_tasks: BackgroundTasks,
+) -> None:
+    if not task_queue.enabled():
+        background_tasks.add_task(_sleep_then_flush_web_burst, booking_id)
+        return
+    task_queue.enqueue(
+        "/api/messages/flush-burst",
+        {"booking_id": booking_id, "seed": [seed_text]},
+        delay_seconds=burst_buffer.WINDOW_SECONDS,
+        name=f"webburst-{task_queue.sanitize_task_name(booking_id)}"
+             f"-{int(time.time())}",
+    )
+
+
+async def _sleep_then_flush_web_burst(booking_id: str) -> None:
+    await asyncio.sleep(burst_buffer.WINDOW_SECONDS)
+    await _flush_web_burst(booking_id, [])
+
+
+async def _flush_web_burst(booking_id: str, seed: list[str]) -> None:
+    messages = burst_buffer.pop(f"web:{booking_id}", seed)
+    if not messages:
+        return
+    await process_guest_message(
+        booking_id, burst_buffer.combine(messages), already_stored=True,
+    )
+
+
+@router.post("/messages/flush-burst")
+async def flush_burst(req: Request):
+    """Worker endpoint — Cloud Tasks only (guarded by the same shared secret as
+    the Telegram webhook, since this service must stay publicly reachable)."""
+    expected = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if not expected or req.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    try:
+        job = await req.json()
+    except Exception:
+        return {"ok": True}
+    await _flush_web_burst(job.get("booking_id"), job.get("seed") or [])
+    return {"ok": True}
 
 
 @router.post("/messages/host-send")
