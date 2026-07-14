@@ -49,8 +49,25 @@ void _assertNotAServiceRoleKey(String key) {
   }
 }
 
+/// True when the app was opened from the "confirm your email" link.
+///
+/// Supabase's confirmation link carries session tokens in the URL fragment
+/// (`#access_token=…&type=signup`) and signs the visitor straight in. That means
+/// anyone who gets hold of the email — a shared inbox, a forwarded message —
+/// lands in the host's dashboard without ever knowing the password. So we detect
+/// it, drop the session, and make them sign in properly.
+///
+/// Captured BEFORE Supabase.initialize, which consumes the fragment.
+bool _openedFromEmailConfirmation = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  final launchUri = Uri.base;
+  _openedFromEmailConfirmation =
+      launchUri.fragment.contains('type=signup') ||
+          launchUri.fragment.contains('type=email_change') ||
+          launchUri.queryParameters.containsKey('confirmed');
 
   await dotenv.load(fileName: '.env');
 
@@ -77,11 +94,24 @@ class IngestorApp extends StatefulWidget {
 class _IngestorAppState extends State<IngestorApp> {
   StreamSubscription<AuthState>? _authSub;
 
+  /// Set once we've torn down the session that the confirmation link created,
+  /// so the sign-in screen can say "email confirmed" and we don't loop.
+  bool _confirmedNeedsSignIn = false;
+
   @override
   void initState() {
     super.initState();
-    _authSub = Supabase.instance.client.auth.onAuthStateChange
-        .listen((_) { if (mounted) setState(() {}); });
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
+      // Supabase restores the session from the confirmation link's tokens
+      // asynchronously, so we can't just sign out in initState — wait for the
+      // session to actually appear, then drop it.
+      if (_openedFromEmailConfirmation && data.session != null) {
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) setState(() => _confirmedNeedsSignIn = true);
+        return;
+      }
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -111,6 +141,13 @@ class _IngestorAppState extends State<IngestorApp> {
       final session = Supabase.instance.client.auth.currentSession;
       if (session == null) return _app(const AuthScreen(), wrapInactivity: false);
       return _app(HostPanelScreen(propertyId: params['property']!));
+    }
+
+    // Arriving from the confirmation link must never drop you straight into the
+    // dashboard — sign in with the password like anyone else.
+    if (_openedFromEmailConfirmation) {
+      return _app(AuthScreen(justConfirmed: _confirmedNeedsSignIn),
+          wrapInactivity: false);
     }
 
     final session = Supabase.instance.client.auth.currentSession;

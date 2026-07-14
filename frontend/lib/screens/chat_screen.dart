@@ -28,6 +28,7 @@ class _ChatScreenState extends State<ChatScreen>
   String? _conversationId;
   String? _propertyName;
   String _hostName = 'the host';
+  String? _guestLanguage;
   String _mode = 'autopilot';
   List<Map<String, dynamic>> _messages = [];
   // Guest messages shown instantly on send, before the realtime stream
@@ -51,6 +52,13 @@ class _ChatScreenState extends State<ChatScreen>
   AudioRecorder? _recorder;
   AudioEncoder _recordEncoder = AudioEncoder.wav;
   final _controller = TextEditingController();
+  final _inputFocus = FocusNode();
+
+  /// The `chat_media` bucket rejects anything larger with a 413. Check it here
+  /// so the guest gets "that photo is too big" instead of a raw StorageException.
+  static const int _maxMediaBytes = 10 * 1024 * 1024;
+
+  static String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
@@ -75,11 +83,17 @@ class _ChatScreenState extends State<ChatScreen>
       // from reading the properties table, so it comes back with the token.
       final pn = (data['property_name'] as String?)?.trim();
       final hn = (data['host_name'] as String?)?.trim();
+      // The guest's language, so the system markers render in it rather than
+      // dropping a line of English into a Spanish conversation.
+      final lang = (data['language'] as String?)?.trim();
       if (mounted &&
-          ((pn != null && pn.isNotEmpty) || (hn != null && hn.isNotEmpty))) {
+          ((pn != null && pn.isNotEmpty) ||
+              (hn != null && hn.isNotEmpty) ||
+              (lang != null && lang.isNotEmpty))) {
         setState(() {
           if (pn != null && pn.isNotEmpty) _propertyName = pn;
           if (hn != null && hn.isNotEmpty) _hostName = hn;
+          if (lang != null && lang.isNotEmpty) _guestLanguage = lang;
         });
       }
       // Keep the realtime socket's auth in sync on refresh so RLS keeps
@@ -155,6 +169,7 @@ class _ChatScreenState extends State<ChatScreen>
     _pulseCtrl.dispose();
     _recorder?.dispose();
     _controller.dispose();
+    _inputFocus.dispose();
     _scrollController.dispose();
     _guestClient?.dispose();
     _guestClient = null;
@@ -263,7 +278,14 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _sendMessage({String? overrideText}) async {
     final text = overrideText ?? _controller.text.trim();
     if (text.isEmpty || _isWaiting) return;
-    if (overrideText == null) _controller.clear();
+    if (overrideText == null) {
+      _controller.clear();
+      // Keep the caret in the field. Enter otherwise drops focus, so a guest
+      // firing off several quick messages has to click back in each time —
+      // which pushed them outside the burst window and split one thought into
+      // several turns.
+      _inputFocus.requestFocus();
+    }
     // Optimistically render the guest's own bubble immediately so it never
     // looks like the message was dropped while Alfred is thinking. The realtime
     // messages stream later delivers the persisted row and prunes this entry.
@@ -348,6 +370,25 @@ class _ChatScreenState extends State<ChatScreen>
     );
     if (result == null || result.files.isEmpty) return;
 
+    // Reject oversized images up front, naming the offender — the bucket would
+    // otherwise fail the upload with a raw 413 after the guest waited for it.
+    final tooBig = result.files.where(
+        (f) => (f.bytes?.length ?? 0) > _maxMediaBytes);
+    if (tooBig.isNotEmpty) {
+      if (!mounted) return;
+      final f = tooBig.first;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text(
+            '${f.name} is ${_mb(f.bytes!.length)} MB — the maximum is 10 MB. '
+            'Please send a smaller image.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final sent = <Map<String, String>>[];
     try {
       for (final file in result.files) {
@@ -390,10 +431,23 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send image: $e')),
+          SnackBar(content: Text(_friendlyUploadError(e, 'image'))),
         );
       }
     }
+  }
+
+  /// Guests should never be shown a StorageException. Keep the full detail in
+  /// the console for us; give them something they can act on.
+  String _friendlyUploadError(Object e, String what) {
+    debugPrint('chat_media upload failed ($what): $e');
+    final err = e.toString().toLowerCase();
+    if (err.contains('413') ||
+        err.contains('maximum allowed size') ||
+        err.contains('too large')) {
+      return 'That $what is too large — the maximum is 10 MB.';
+    }
+    return 'Couldn\'t send that $what. Please check your connection and try again.';
   }
 
   Future<void> _startRecording() async {
@@ -429,20 +483,28 @@ class _ChatScreenState extends State<ChatScreen>
       if (mounted) setState(() => _isRecording = true);
     } catch (e) {
       if (!mounted) return;
+      // getUserMedia's failure modes are distinct and need distinct advice —
+      // "blocked" and "you have no microphone" are not the same problem, and
+      // showing the raw DOMException helps nobody.
       final err = e.toString().toLowerCase();
-      final blocked = err.contains('notallowed') ||
+      final String message;
+      if (err.contains('notfound') || err.contains('devicesnotfound')) {
+        message = 'No microphone found. Connect one, or check that microphone '
+            'access is enabled in your system settings, then try again.';
+      } else if (err.contains('notallowed') ||
           err.contains('permission') ||
-          err.contains('denied');
+          err.contains('denied')) {
+        message = 'Microphone blocked. Open the padlock in your browser\'s '
+            'address bar, set Microphone to "Allow", then reload and try again.';
+      } else if (err.contains('notreadable') || err.contains('trackstart')) {
+        message = 'Your microphone is being used by another app. Close it and '
+            'try again.';
+      } else {
+        message = 'Could not start recording. Please try again.';
+      }
+      debugPrint('voice recording failed: $e');  // full detail stays for us
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 6),
-          content: Text(
-            blocked
-                ? 'Microphone blocked. Open the padlock in your browser\'s address '
-                    'bar, set Microphone to "Allow", then reload and try again.'
-                : 'Could not start recording: $e',
-          ),
-        ),
+        SnackBar(duration: const Duration(seconds: 6), content: Text(message)),
       );
     }
   }
@@ -458,6 +520,19 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final response = await http.get(Uri.parse(path));
       final bytes = response.bodyBytes;
+      if (bytes.length > _maxMediaBytes) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(
+              'That voice note is ${_mb(bytes.length)} MB — the maximum is '
+              '10 MB. Please record a shorter one.',
+            ),
+          ),
+        );
+        return;
+      }
       final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final storagePath = '$_conversationId/chat_media/$filename';
       await _db.storage
@@ -490,7 +565,7 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send voice message: $e')),
+          SnackBar(content: Text(_friendlyUploadError(e, 'voice note'))),
         );
       }
     }
@@ -800,6 +875,7 @@ class _ChatScreenState extends State<ChatScreen>
       final text = ChatSystemMessages.formatForGuest(
         msg['content'] as String,
         hostName: _hostName,
+        language: _guestLanguage,
       );
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -886,6 +962,7 @@ class _ChatScreenState extends State<ChatScreen>
               Expanded(
                 child: TextField(
                   controller: _controller,
+                  focusNode: _inputFocus,
                   decoration: InputDecoration(
                     hintText: 'Type a message...',
                     filled: false,

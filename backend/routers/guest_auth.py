@@ -133,4 +133,9 @@ async def guest_token(req: GuestTokenRequest):
         "expires_in": _TOKEN_TTL,
         "property_name": property_name,
         "host_name": host_name,
+        # The web chat renders the system markers ("you are now speaking with
+        # your host…") client-side, so it needs the guest's language to render
+        # them in it — a Spanish conversation should not be interrupted by a
+        # line of English.
+        "language": guest.get("preferred_language"),
     }

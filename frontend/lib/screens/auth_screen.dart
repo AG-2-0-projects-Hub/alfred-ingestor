@@ -5,7 +5,12 @@ import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  /// True when the host just arrived from the "confirm your email" link. The
+  /// session that link created has been dropped on purpose (it would otherwise
+  /// sign anyone holding the email straight in), so tell them why they're here.
+  final bool justConfirmed;
+
+  const AuthScreen({super.key, this.justConfirmed = false});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -26,21 +31,39 @@ class _AuthScreenState extends State<AuthScreen> {
 
   static const _minPasswordLength = 8;
 
+  final _passwordFocus = FocusNode();
+  final _confirmFocus = FocusNode();
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
+    _passwordFocus.dispose();
+    _confirmFocus.dispose();
     super.dispose();
   }
 
-  /// Sign-up only. Returns an error message, or null when the input is good.
-  String? _validateSignUp(String password, String confirm) {
+  /// Sign-up only. Returns (error message, the field to send them back to), or
+  /// (null, null) when the input is good.
+  (String?, FocusNode?) _validateSignUp(String password, String confirm) {
     if (password.length < _minPasswordLength) {
-      return 'Password must be at least $_minPasswordLength characters.';
+      return ('Use at least $_minPasswordLength characters.', _passwordFocus);
     }
-    if (password != confirm) return "Passwords don't match.";
-    return null;
+    // A host's account holds their guests' conversations, so make the password
+    // do some work: an 8-char all-lowercase password is barely a password.
+    if (!RegExp(r'[a-z]').hasMatch(password) ||
+        !RegExp(r'[A-Z]').hasMatch(password) ||
+        !RegExp(r'\d').hasMatch(password)) {
+      return (
+        'Use upper- and lower-case letters and at least one number.',
+        _passwordFocus,
+      );
+    }
+    if (password != confirm) {
+      return ("Passwords don't match.", _confirmFocus);
+    }
+    return (null, null);
   }
 
   Future<void> _submit() async {
@@ -49,9 +72,13 @@ class _AuthScreenState extends State<AuthScreen> {
     if (email.isEmpty || password.isEmpty) return;
 
     if (!_isLogin) {
-      final problem = _validateSignUp(password, _confirmController.text);
+      final (problem, focusOn) = _validateSignUp(password, _confirmController.text);
       if (problem != null) {
         setState(() => _fieldError = problem);
+        // Put the caret back in the offending field. Without this the form lost
+        // focus after a rejected submit and the password field became
+        // un-editable until a page reload.
+        focusOn?.requestFocus();
         return;
       }
     }
@@ -349,6 +376,30 @@ class _AuthScreenState extends State<AuthScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (widget.justConfirmed) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.palette.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_outline,
+                    size: 18, color: context.palette.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Email confirmed. Sign in to continue.',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, color: context.palette.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
         Text(
           _isLogin ? 'Welcome back' : 'Create your account',
           style: GoogleFonts.plusJakartaSans(
@@ -383,8 +434,15 @@ class _AuthScreenState extends State<AuthScreen> {
         // Password
         TextField(
           controller: _passwordController,
+          focusNode: _passwordFocus,
+          onChanged: (_) {
+            if (_fieldError != null) setState(() => _fieldError = null);
+          },
           decoration: InputDecoration(
             labelText: 'Password',
+            helperText: _isLogin
+                ? null
+                : 'At least 8 characters, with upper- and lower-case and a number',
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: Padding(
               padding: const EdgeInsets.only(right: 6),
@@ -416,6 +474,10 @@ class _AuthScreenState extends State<AuthScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _confirmController,
+            focusNode: _confirmFocus,
+            onChanged: (_) {
+              if (_fieldError != null) setState(() => _fieldError = null);
+            },
             decoration: const InputDecoration(
               labelText: 'Confirm password',
               prefixIcon: Icon(Icons.lock_outline),

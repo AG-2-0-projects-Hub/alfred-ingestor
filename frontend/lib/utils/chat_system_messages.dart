@@ -21,19 +21,38 @@ class ChatSystemMessages {
   static const String _legacyResolvedFull =
       'Issue resolved — Alfred has resumed the conversation.';
 
-  /// What the guest sees for a given system message content.
-  static String formatForGuest(String content, {required String hostName}) {
+  static bool _isSpanish(String? language) {
+    final l = language?.trim().toLowerCase() ?? '';
+    return l.startsWith('es') || l.startsWith('spa');
+  }
+
+  /// What the guest sees for a given system message content, in the language
+  /// they are chatting in — a Spanish conversation shouldn't be interrupted by
+  /// a line of English. `language` comes from /api/guest-token. Mirrors
+  /// guardrails.transition_notice on the backend (which sends the Telegram copy).
+  static String formatForGuest(
+    String content, {
+    required String hostName,
+    String? language,
+  }) {
+    final spanish = _isSpanish(language);
     switch (content) {
       case intervene:
-        return 'You are now speaking with $hostName.';
+        return spanish
+            ? 'Ahora estás hablando con tu anfitrión $hostName.'
+            : 'You are now speaking with your host $hostName.';
       case resume:
       case resumeAfterResolve:
-        return 'Alfred has resumed the conversation.';
+        return spanish
+            ? 'Alfred ha retomado la conversación.'
+            : 'Alfred has resumed the conversation.';
     }
     // Legacy: strip the host-only "Issue resolved —" prefix so old messages
     // render the guest-appropriate text without a migration.
     if (content == _legacyResolvedFull) {
-      return 'Alfred has resumed the conversation.';
+      return spanish
+          ? 'Alfred ha retomado la conversación.'
+          : 'Alfred has resumed the conversation.';
     }
     return content;
   }

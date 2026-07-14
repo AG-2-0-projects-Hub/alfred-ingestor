@@ -53,10 +53,9 @@ async def _notify_tg_transition(
         return
     if not guest or not guest.get("telegram_chat_id"):
         return
-    if kind == "intervene":
-        text = f"You are now speaking with {host_name or 'your host'}."
-    else:
-        text = "Alfred has resumed the conversation."
+    text = guardrails.transition_notice(
+        kind, host_name, guest.get("preferred_language"),
+    )
     try:
         await telegram_client.send_italic(guest["telegram_chat_id"], text)
     except Exception as exc:

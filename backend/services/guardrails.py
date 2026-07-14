@@ -37,6 +37,23 @@ def _is_spanish(language: str | None) -> bool:
     return bool(language) and language.strip().lower().startswith(("es", "spa"))
 
 
+def transition_notice(
+    kind: str, host_name: str | None, language: str | None,
+) -> str:
+    """The "a human is taking over" / "Alfred is back" notice, in the guest's
+    language. A guest chatting in Spanish should not be interrupted by a line of
+    English. Mirrors ChatSystemMessages.formatForGuest on the web side."""
+    if _is_spanish(language):
+        if kind == "intervene":
+            return (f"Ahora estás hablando con tu anfitrión {host_name}."
+                    if host_name else "Ahora estás hablando con tu anfitrión.")
+        return "Alfred ha retomado la conversación."
+    if kind == "intervene":
+        return (f"You are now speaking with your host {host_name}."
+                if host_name else "You are now speaking with your host.")
+    return "Alfred has resumed the conversation."
+
+
 def rate_limit_reply(language: str | None) -> str:
     if _is_spanish(language):
         return (

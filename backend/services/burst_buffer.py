@@ -19,8 +19,9 @@ import os
 
 # Seconds to wait for the rest of a burst. Long enough to catch a follow-up line,
 # short enough that a lone question doesn't feel like it stalled — a Gemini turn
-# already costs ~10-15s on top of this.
-WINDOW_SECONDS = int(os.getenv("GUEST_BURST_WINDOW_SECONDS", "5"))
+# already costs ~10-15s on top of this. (Raised 5→6 after live testing: a guest
+# typing a second line needs a beat more than the model does.)
+WINDOW_SECONDS = int(os.getenv("GUEST_BURST_WINDOW_SECONDS", "6"))
 
 _buffers: dict[str, list[str]] = {}
 
