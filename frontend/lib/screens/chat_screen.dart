@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:web/web.dart' as web;
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
@@ -51,6 +52,8 @@ class _ChatScreenState extends State<ChatScreen>
   int _guestTokenExpiry = 0; // unix seconds
   AudioRecorder? _recorder;
   AudioEncoder _recordEncoder = AudioEncoder.wav;
+  Timer? _recordTimer;
+  int _recordSeconds = 0;
   final _controller = TextEditingController();
   final _inputFocus = FocusNode();
 
@@ -58,7 +61,16 @@ class _ChatScreenState extends State<ChatScreen>
   /// so the guest gets "that photo is too big" instead of a raw StorageException.
   static const int _maxMediaBytes = 10 * 1024 * 1024;
 
+  /// Hard cap on a voice note. Also keeps us clear of [_maxMediaBytes]: at
+  /// 48kHz mono 16-bit (see [_startRecording]) WAV runs ~96 KB/s, so 60s is
+  /// ~5.8 MB. The old 44.1kHz *stereo* default was ~176 KB/s — a full minute
+  /// came to ~10.6 MB and was rejected *after* the guest had recorded it.
+  static const int _maxRecordSeconds = 60;
+
   static String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
+
+  static String _clock(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
   final _scrollController = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
@@ -167,6 +179,7 @@ class _ChatScreenState extends State<ChatScreen>
     _convSubscription?.cancel();
     _modeSubscription?.cancel();
     _pulseCtrl.dispose();
+    _recordTimer?.cancel();
     _recorder?.dispose();
     _controller.dispose();
     _inputFocus.dispose();
@@ -450,6 +463,46 @@ class _ChatScreenState extends State<ChatScreen>
     return 'Couldn\'t send that $what. Please check your connection and try again.';
   }
 
+  /// The rate the browser will actually run its microphone at.
+  ///
+  /// `record_web` hands every buffer to a hand-rolled JS resampler
+  /// (`record.worklet.js`) unless the requested rate already matches the source,
+  /// in which case the resampler takes an identity bypass. That resampler is
+  /// lossy by construction: on a downsample it resets its carry-over state
+  /// (`tailExists`, `lastWeight`) on EVERY call, so it drops samples on each
+  /// ~43ms flush — which is why ten seconds of speech came back as seven.
+  ///
+  /// The catch: it builds its AudioContext from the mic track's REAL rate, not
+  /// from the rate we ask for. So the bypass triggers only when our requested
+  /// rate equals the hardware's. Hardcoding 48000 would fix Chrome/Android but
+  /// keep resampling on 44.1kHz devices (common on macOS and iOS Safari). Ask
+  /// the browser instead of guessing.
+  int _browserSampleRate() {
+    try {
+      final ctx = web.AudioContext();
+      final rate = ctx.sampleRate.toInt();
+      ctx.close();
+      return rate;
+    } catch (_) {
+      return 48000; // Overwhelmingly the common case if the probe is blocked.
+    }
+  }
+
+  void _stopRecordTimer() {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+  }
+
+  Future<void> _cancelRecording() async {
+    _stopRecordTimer();
+    try {
+      await _recorder?.cancel();
+    } catch (_) {
+      // Nothing to salvage — we're throwing the take away regardless.
+    }
+    if (mounted) setState(() => _isRecording = false);
+  }
+
   Future<void> _startRecording() async {
     if (_recorder == null) return;
     if (_conversationId == null) {
@@ -477,10 +530,34 @@ class _ChatScreenState extends State<ChatScreen>
       // denial (or a previously stored block) then surfaces as an exception
       // below, where we can tell the guest how to undo it.
       _recordEncoder = await _recorder!.isEncoderSupported(AudioEncoder.wav)
-          ? AudioEncoder.wav  // Gemini reads WAV directly
+          ? AudioEncoder.wav  // Gemini reads WAV directly; it rejects audio/webm
           : AudioEncoder.opus;
-      await _recorder!.start(RecordConfig(encoder: _recordEncoder), path: 'recording');
-      if (mounted) setState(() => _isRecording = true);
+      // sampleRate: match the hardware so record_web bypasses its lossy
+      // resampler (see _browserSampleRate). numChannels: 1 because the worklet
+      // does `input[channel % input.length]` — with the default 2 it duplicates
+      // a mono mic into a fake stereo pair, doubling the bytes for no
+      // information and halving how long a note can be under the 10 MB cap.
+      await _recorder!.start(
+        RecordConfig(
+          encoder: _recordEncoder,
+          sampleRate: _browserSampleRate(),
+          numChannels: 1,
+        ),
+        path: 'recording',
+      );
+      if (!mounted) return;
+      setState(() {
+        _isRecording = true;
+        _recordSeconds = 0;
+      });
+      _stopRecordTimer();
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || !_isRecording) return;
+        setState(() => _recordSeconds++);
+        if (_recordSeconds >= _maxRecordSeconds) {
+          _stopAndSendVoice(); // Hard cap — send what we have rather than lose it.
+        }
+      });
     } catch (e) {
       if (!mounted) return;
       // getUserMedia's failure modes are distinct and need distinct advice —
@@ -510,9 +587,15 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _stopAndSendVoice() async {
-    if (_recorder == null) return;
+    // Re-entrancy: the 60s auto-stop fires from the timer at the same moment the
+    // guest may be tapping stop. Clear the flag SYNCHRONOUSLY, before the first
+    // await — clearing it after would leave a window in which both callers pass
+    // the guard and we stop() a recorder that is already stopped.
+    if (_recorder == null || !_isRecording) return;
+    _stopRecordTimer();
+    _isRecording = false;
+    if (mounted) setState(() {});
     final path = await _recorder!.stop();
-    if (mounted) setState(() => _isRecording = false);
     if (path == null || _conversationId == null) return;
     final isWav = _recordEncoder == AudioEncoder.wav;
     final mime = isWav ? 'audio/wav' : 'audio/ogg';
@@ -947,6 +1030,65 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// Replaces the text field while recording: a glowing dot, a live counter, and
+  /// an explicit choice between discarding the take and sending it. The text
+  /// field is deliberately gone — you cannot type and record at once, and
+  /// leaving it there made it ambiguous which one the send button would act on.
+  Widget _buildRecordingBar() {
+    final remaining = _maxRecordSeconds - _recordSeconds;
+    final nearLimit = remaining <= 10;
+    final danger = context.palette.danger;
+
+    return Row(
+      children: [
+        const SizedBox(width: 8),
+        const _RecordingDot(),
+        const SizedBox(width: 12),
+        Text(
+          _clock(_recordSeconds),
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: nearLimit ? danger : context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            nearLimit
+                ? '${remaining}s left'
+                : 'Recording — max ${_clock(_maxRecordSeconds)}',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: nearLimit ? danger : context.palette.textMuted,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        IconButton(
+          onPressed: _cancelRecording,
+          tooltip: 'Discard',
+          icon: const Icon(Icons.close_rounded, size: 20),
+          color: context.palette.textSecondary,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          onPressed: _stopAndSendVoice,
+          tooltip: 'Send voice note',
+          icon: const Icon(Icons.send, size: 20),
+          style: IconButton.styleFrom(
+            backgroundColor: context.palette.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.all(12),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildInputBar() {
     return SafeArea(
       top: false,
@@ -957,7 +1099,7 @@ class _ChatScreenState extends State<ChatScreen>
           blurSigma: 20,
           tint: context.palette.glassTintStrong,
           padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
-          child: Row(
+          child: _isRecording ? _buildRecordingBar() : Row(
             children: [
               Expanded(
                 child: TextField(
@@ -1017,6 +1159,78 @@ class _ChatScreenState extends State<ChatScreen>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The "you are being recorded" tell. Its own widget with its own ticker:
+/// _ChatScreenState is a SingleTickerProviderStateMixin and its _pulseCtrl is
+/// already spoken for by the intervention banner.
+class _RecordingDot extends StatefulWidget {
+  const _RecordingDot();
+
+  @override
+  State<_RecordingDot> createState() => _RecordingDotState();
+}
+
+class _RecordingDotState extends State<_RecordingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Honour "reduce motion": a guest who asked the OS for no animation should
+    // still SEE that they are recording — so we pin the glow on rather than
+    // hiding it.
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduceMotion) {
+      _pulse.stop();
+      _pulse.value = 1.0;
+    } else if (!_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final danger = context.palette.danger;
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, __) {
+        final t = _pulse.value;
+        return Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: danger,
+            boxShadow: [
+              BoxShadow(
+                color: danger.withValues(alpha: 0.45 + 0.40 * t),
+                blurRadius: 6 + 10 * t,
+                spreadRadius: 1 + 2 * t,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

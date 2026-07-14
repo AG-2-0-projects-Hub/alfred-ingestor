@@ -69,7 +69,8 @@ Requires `aiplatform.googleapis.com` enabled + the Cloud Run SA holding `roles/a
 🔎 **Still to watch (Vertex ≠ AI Studio at runtime, same prompts notwithstanding):**
 - **Safety-filter defaults differ** between the two transports — a reply that passed on AI Studio can be blocked/filtered on Vertex. Watch guest chat for empty/refused replies.
 - **429s under real load** — the retry may not be enough; may need a concurrency cap on ingest fan-out.
-- `gemini_messenger` / `gemini_merge_resolve` do **not** yet have the 429 retry (only `gemini_client`) — add if chat/merge starts throttling.
+- ✅ **RESOLVED (was stale — corrected 2026-07-14).** This line used to say `gemini_messenger` / `gemini_merge_resolve` lacked the 429 retry. They have had it since **`5681735`**: all **7** backend `generate_content` sites go through `genai_factory.generate_with_retry()` (`gemini_client:243`, `gemini_messenger:622/646/765`, `gemini_merge_resolve:620/651/692`). The note outlived the fix and was still being read as current a session later.
+- 🔴 **The scraper is the one Gemini call with NO retry.** `scraper/main.py:117` calls `client.models.generate_content(...)` raw — it is a separate service with its own client, which is how it was missed. Prod's scraper runs on Vertex too, so a dynamic-shared-quota 429 fails an Airbnb ingest outright. Route it through the same helper.
 - Region/model availability if `GOOGLE_CLOUD_LOCATION` moves off `global` (e.g. for EU data residency — D4).
 
 ---
