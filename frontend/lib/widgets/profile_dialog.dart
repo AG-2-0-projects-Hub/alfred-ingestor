@@ -380,10 +380,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
   }
 }
 
-/// Typed confirmation for account deletion. States plainly what goes and what
-/// stays — a host who is told "everything is deleted" and later finds the guest
-/// conversations retained has been misled, and that is a trust (and GDPR)
-/// problem, not a copy problem.
+/// Typed confirmation for account deletion. States what is destroyed, and asks
+/// the host to type the word out. What happens to past conversations is covered
+/// by the ToS they accepted at sign-up — repeating it here only invites doubt at
+/// the worst moment, so it is deliberately not mentioned.
 class _DeleteAccountConfirmDialog extends StatefulWidget {
   const _DeleteAccountConfirmDialog();
 
@@ -436,13 +436,6 @@ class _DeleteAccountConfirmDialogState
           _bullet('Your account and login are permanently removed.'),
           _bullet('All your properties and their training data are deleted.'),
           _bullet('Your profile and avatar are deleted.'),
-          const SizedBox(height: 10),
-          Text(
-            'Past guest conversations are kept and archived, with guest names '
-            'anonymised. They are no longer linked to you.',
-            style: GoogleFonts.inter(
-                fontSize: 12, color: palette.textSecondary, height: 1.4),
-          ),
           const SizedBox(height: 18),
           Text(
             'Type $_phrase to confirm',

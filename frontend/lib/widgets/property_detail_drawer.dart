@@ -1517,7 +1517,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           ),
           const SizedBox(height: 8),
           Text(
-            'Deletes this property entry. Chat history is preserved.',
+            'Deletes this property entry.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
           ),
         ],

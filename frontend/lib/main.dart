@@ -51,23 +51,32 @@ void _assertNotAServiceRoleKey(String key) {
 
 /// True when the app was opened from the "confirm your email" link.
 ///
-/// Supabase's confirmation link carries session tokens in the URL fragment
-/// (`#access_token=…&type=signup`) and signs the visitor straight in. That means
-/// anyone who gets hold of the email — a shared inbox, a forwarded message —
-/// lands in the host's dashboard without ever knowing the password. So we detect
-/// it, drop the session, and make them sign in properly.
+/// Supabase's confirmation link signs the visitor straight in. That means anyone
+/// who gets hold of the email — a shared inbox, a forwarded message — lands in
+/// the host's dashboard without ever knowing the password. So we detect it, drop
+/// the session, and make them sign in properly.
 ///
-/// Captured BEFORE Supabase.initialize, which consumes the fragment.
+/// There are TWO link shapes and we have to catch both:
+///   • Implicit flow — tokens in the URL FRAGMENT: `#access_token=…&type=signup`.
+///   • PKCE flow — a single-use code in the QUERY: `/?code=<uuid>`.
+/// The first fix only handled the fragment; prod turned out to send the PKCE
+/// shape, so the link still dropped you into the dashboard. This app has no
+/// social OAuth, so a bare `?code=` can only be a confirmation link.
+///
+/// Captured BEFORE Supabase.initialize, which consumes both.
 bool _openedFromEmailConfirmation = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final launchUri = Uri.base;
+  final q = launchUri.queryParameters;
   _openedFromEmailConfirmation =
       launchUri.fragment.contains('type=signup') ||
           launchUri.fragment.contains('type=email_change') ||
-          launchUri.queryParameters.containsKey('confirmed');
+          q.containsKey('confirmed') ||
+          q.containsKey('code') ||       // PKCE confirmation code
+          q.containsKey('token_hash');   // older verify-OTP links
 
   await dotenv.load(fileName: '.env');
 
@@ -101,17 +110,35 @@ class _IngestorAppState extends State<IngestorApp> {
   @override
   void initState() {
     super.initState();
+
+    // The PKCE code is exchanged DURING Supabase.initialize, so a session may
+    // already exist right now — before any listener could fire. Catch that case
+    // directly; the listener below catches the implicit flow, where the session
+    // is restored a beat later.
+    if (_openedFromEmailConfirmation &&
+        Supabase.instance.client.auth.currentSession != null) {
+      _tearDownConfirmationSession();
+    }
+
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
-      // Supabase restores the session from the confirmation link's tokens
-      // asynchronously, so we can't just sign out in initState — wait for the
-      // session to actually appear, then drop it.
       if (_openedFromEmailConfirmation && data.session != null) {
-        await Supabase.instance.client.auth.signOut();
-        if (mounted) setState(() => _confirmedNeedsSignIn = true);
+        await _tearDownConfirmationSession();
         return;
       }
       if (mounted) setState(() {});
     });
+  }
+
+  bool _tearingDown = false;
+
+  /// Sign out the session the confirmation link created and flip to sign-in.
+  /// Guarded so the two entry points (initState + the auth listener) don't both
+  /// fire it.
+  Future<void> _tearDownConfirmationSession() async {
+    if (_tearingDown) return;
+    _tearingDown = true;
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) setState(() => _confirmedNeedsSignIn = true);
   }
 
   @override
