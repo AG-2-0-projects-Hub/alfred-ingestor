@@ -5,11 +5,10 @@ import time
 import jwt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services import supabase_client
+from services import supabase_client, welcome
 
 router = APIRouter()
 
-_PROJECT_REF = "gcxxilzfhwlsjcvtpsvj"
 _TOKEN_TTL = 86_400  # 24 hours
 
 _SENTENCE_PUNCT = (",", ";", ":", ".", "!", "?")
@@ -97,10 +96,31 @@ async def guest_token(req: GuestTokenRequest):
         )
     property_name, host_name = _resolve_identity(prop)
 
+    # Post the welcome once (creating the conversation) so it renders on the web
+    # and the conversation shows on the dashboard immediately — same behaviour as
+    # Telegram /start. Idempotent: only inserts when the thread is empty.
+    welcome_text = welcome.build_welcome(
+        property_name or (prop or {}).get("name"),
+        (prop or {}).get("master_json"),
+        also_english=bool((prop or {}).get("welcome_also_english")),
+    )
+    await asyncio.to_thread(
+        supabase_client.ensure_conversation_with_welcome,
+        req.booking_id, guest["property_id"], welcome_text,
+    )
+
+    # Project ref comes from the environment's own SUPABASE_URL
+    # (https://<ref>.supabase.co) so staging and prod each stamp their own —
+    # this was previously hardcoded to the staging ref and leaked into prod JWTs.
+    project_ref = (
+        os.environ.get("SUPABASE_URL", "")
+        .removeprefix("https://").removeprefix("http://")
+        .split(".")[0]
+    )
     now = int(time.time())
     payload = {
         "iss": "supabase",
-        "ref": _PROJECT_REF,
+        "ref": project_ref,
         "role": "anon",
         "booking_id": req.booking_id,
         "iat": now,
@@ -113,4 +133,9 @@ async def guest_token(req: GuestTokenRequest):
         "expires_in": _TOKEN_TTL,
         "property_name": property_name,
         "host_name": host_name,
+        # The web chat renders the system markers ("you are now speaking with
+        # your host…") client-side, so it needs the guest's language to render
+        # them in it — a Spanish conversation should not be interrupted by a
+        # line of English.
+        "language": guest.get("preferred_language"),
     }

@@ -15,7 +15,37 @@ void main() {
         ChatSystemMessages.intervene,
         hostName: 'Maria',
       );
-      expect(result, equals('You are now speaking with Maria.'));
+      expect(result, equals('You are now speaking with your host Maria.'));
+    });
+
+    test('renders in Spanish when the guest is chatting in Spanish', () {
+      expect(
+        ChatSystemMessages.formatForGuest(
+          ChatSystemMessages.intervene,
+          hostName: 'Maria',
+          language: 'es',
+        ),
+        equals('Ahora estás hablando con tu anfitrión Maria.'),
+      );
+      expect(
+        ChatSystemMessages.formatForGuest(
+          ChatSystemMessages.resume,
+          hostName: 'Maria',
+          language: 'es-MX',
+        ),
+        equals('Alfred ha retomado la conversación.'),
+      );
+    });
+
+    test('unknown or missing language falls back to English', () {
+      expect(
+        ChatSystemMessages.formatForGuest(
+          ChatSystemMessages.intervene,
+          hostName: 'Maria',
+          language: 'de',
+        ),
+        equals('You are now speaking with your host Maria.'),
+      );
     });
 
     test('resume marker renders neutral message', () {

@@ -8,11 +8,10 @@ and adapted for audio and tabular data — originals not present in any
 spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
 """
 
-import asyncio
-import io
-import os
 from google import genai
 from google.genai import types
+
+from services import genai_factory
 
 MODEL = "gemini-2.5-pro"
 
@@ -221,43 +220,28 @@ REMEMBER: Structured data often contains implicit rules. A pricing table with we
 
 
 def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return genai_factory.make_client()
 
 
-async def upload_file(data: bytes, filename: str, mime_type: str) -> str:
-    """Upload bytes to the Gemini File API. Returns the file URI."""
-    client = _get_client()
-    response = await client.aio.files.upload(
-        file=io.BytesIO(data),
-        config=types.UploadFileConfig(
-            display_name=filename,
-            mime_type=mime_type,
-        ),
-    )
-    # Wait until file is ACTIVE
-    file_name = response.name
-    for _ in range(30):
-        file_info = await client.aio.files.get(name=file_name)
-        if file_info.state == types.FileState.ACTIVE:
-            return file_info.uri
-        await asyncio.sleep(2)
-    raise RuntimeError(f"Gemini file {file_name} did not become ACTIVE in time.")
+# The Gemini File API (client.files.upload) exists ONLY on the Developer API —
+# Vertex rejects it with "This method is only supported in the Gemini Developer
+# client" — so file bytes go inline instead, which both transports accept.
+# Inline data rides in the request body, so keep it clear of the ~20 MB cap.
+_MAX_INLINE_BYTES = 15 * 1024 * 1024
 
-
-async def delete_file(uri: str) -> None:
-    """Delete a file from the Gemini File API by URI."""
-    client = _get_client()
-    # Extract name from URI e.g. "https://generativelanguage.googleapis.com/v1beta/files/abc123"
-    name = uri.rstrip("/").split("/")[-1]
-    try:
-        await client.aio.files.delete(name=f"files/{name}")
-    except Exception:
-        pass  # Best-effort cleanup
+def _inline_part(data: bytes, mime_type: str) -> types.Part:
+    if len(data) > _MAX_INLINE_BYTES:
+        raise ValueError(
+            f"File is {len(data) // (1024 * 1024)} MB — the limit is "
+            f"{_MAX_INLINE_BYTES // (1024 * 1024)} MB."
+        )
+    return types.Part.from_bytes(data=data, mime_type=mime_type)
 
 
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
-    response = await client.aio.models.generate_content(
+    response = await genai_factory.generate_with_retry(
+        client,
         model=MODEL,
         contents=[types.Content(role="user", parts=parts)],
         config=types.GenerateContentConfig(
@@ -267,12 +251,9 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
     return response.text
 
 
-async def process_with_prompt_a(file_uri: str, mime_type: str) -> str:
-    """Prompt A: PDF uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_A),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_a(data: bytes, mime_type: str) -> str:
+    """Prompt A: PDF / document, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_A), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
@@ -282,21 +263,15 @@ async def process_with_prompt_a_text(extracted_text: str) -> str:
     return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
 
 
-async def process_with_prompt_b(file_uri: str, mime_type: str) -> str:
-    """Prompt B: Image uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_B),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_b(data: bytes, mime_type: str) -> str:
+    """Prompt B: image, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_B), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
 
 
-async def process_with_prompt_c(file_uri: str, mime_type: str) -> str:
-    """Prompt C: Audio uploaded to Gemini File API."""
-    parts = [
-        types.Part(text=USER_PROMPT_C),
-        types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type)),
-    ]
+async def process_with_prompt_c(data: bytes, mime_type: str) -> str:
+    """Prompt C: audio, sent inline."""
+    parts = [types.Part(text=USER_PROMPT_C), _inline_part(data, mime_type)]
     return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
 
 
@@ -307,9 +282,15 @@ async def process_with_prompt_d(table_text: str) -> str:
 
 
 # ─── Knowledge Base Query (host audit tool) ──────────────────────────────────
+# Alfred's voice, mirrored from the guest-facing SYSTEM_PROMPT in
+# gemini_messenger.py, but framed as a trusted check for the HOST.
 SYSTEM_INSTRUCTION_KB = (
-    "You are Alfred, a warm and knowledgeable property concierge assistant. "
-    "You speak with elegance and precision — always helpful, never speculative."
+    "You are Alfred — a warm, composed property concierge who speaks with quiet "
+    "elegance and precision: helpful, considered, and never speculative. Here you "
+    "are helping the HOST verify what you know about their property, so answer in "
+    "the same natural, concierge voice you'd use with a guest — just framed as a "
+    "trusted check. Acknowledge before answering, keep it conversational, and vary "
+    "your phrasing so it never feels templated."
 )
 
 
@@ -332,16 +313,16 @@ async def query_knowledge_base(
             )
         learned_block = "\n\nPast Resolutions (from automated learning):\n" + "\n".join(lines)
 
-    prompt = f"""You are Alfred, a property knowledge assistant with a warm, concierge flair. Your ONLY knowledge sources are the Master JSON and Past Resolutions provided below — you must not infer, assume, or add any information beyond what is explicitly present in them.
+    prompt = f"""You are Alfred, the property's concierge assistant, helping the HOST audit what you know. Speak in your natural voice — warm, precise, and composed, with a concierge's touch. When the Master JSON includes the host's communication style, mirror it. Vary your phrasing; never sound templated or robotic. Open with one beat of acknowledgement, then give the facts.
+
+Your ONLY knowledge sources are the Master JSON and Past Resolutions below. You must NOT infer, assume, or add anything beyond what is explicitly present — this is a verification tool, so accuracy matters more than completeness. Never speculate.
 
 When the host asks a question:
-1. Search the Master JSON for the relevant field(s)
-2. Also check the Past Resolutions for any relevant Q&A
-3. Answer concisely and in plain language — no JSON syntax in the reply
-4. If the information is not in either source, say exactly: "That information is not in the knowledge base yet."
-5. If the data is partial, give what you have and note what's missing
-
-You are a verification tool for the host — accuracy matters more than completeness. Do not speculate.
+1. Search the Master JSON for the relevant field(s), and check the Past Resolutions for any relevant Q&A.
+2. Answer concisely and conversationally, in plain language — no JSON syntax in the reply.
+3. If the data is partial, give what you have and gently note what's missing.
+4. If the information is in neither source, say plainly that it isn't in the knowledge base yet — then, if helpful, suggest what the host could add so you can answer it next time.
+5. Reply in the language the host wrote in.
 
 Master JSON:
 {master_json_str}{learned_block}

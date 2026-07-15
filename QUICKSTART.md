@@ -9,6 +9,15 @@ bash ~/AG_master_files/_scripts/ag-switch.sh the-ingestor [task-profile]
 Or via shortcut: `Ctrl+Shift+P → Run Task → Sync AG MCP Profile`
 Check `mcp-profile.json` in this workspace for available task profiles.
 
+## Add a New MCP (visible to both Gemini and Claude)
+1. Add the server via the Antigravity MCP panel (this writes the command/args/key into `config/mcp_config.json` — the only step that should touch that file).
+2. Decide which specific tools it should expose (explicit allowlist, not everything).
+3. Run:
+   ```
+   bash ~/AG_master_files/_scripts/ag-switch.sh --enable <mcp> tool1,tool2 the-ingestor
+   ```
+4. Restart your Claude Code session. Gemini picks it up on its next MCP panel refresh.
+
 ## Kick Off This Project
 Run these in order at the start of a new project:
 1. Tell Gemini: "Run BLAST Phase 1" — defines stack, schema, and project domains

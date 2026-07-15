@@ -5,7 +5,12 @@ import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  /// True when the host just arrived from the "confirm your email" link. The
+  /// session that link created has been dropped on purpose (it would otherwise
+  /// sign anyone holding the email straight in), so tell them why they're here.
+  final bool justConfirmed;
+
+  const AuthScreen({super.key, this.justConfirmed = false});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -14,15 +19,51 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   bool _isLogin = true;
   bool _isLoading = false;
   bool _showPassword = false;
+  String? _fieldError;
+
+  /// Set once a sign-up succeeds but returns no session, i.e. the account needs
+  /// email confirmation. The form is replaced by a "check your inbox" panel.
+  String? _awaitingConfirmationFor;
+
+  static const _minPasswordLength = 8;
+
+  final _passwordFocus = FocusNode();
+  final _confirmFocus = FocusNode();
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmController.dispose();
+    _passwordFocus.dispose();
+    _confirmFocus.dispose();
     super.dispose();
+  }
+
+  /// Sign-up only. Returns (error message, the field to send them back to), or
+  /// (null, null) when the input is good.
+  (String?, FocusNode?) _validateSignUp(String password, String confirm) {
+    if (password.length < _minPasswordLength) {
+      return ('Use at least $_minPasswordLength characters.', _passwordFocus);
+    }
+    // A host's account holds their guests' conversations, so make the password
+    // do some work: an 8-char all-lowercase password is barely a password.
+    if (!RegExp(r'[a-z]').hasMatch(password) ||
+        !RegExp(r'[A-Z]').hasMatch(password) ||
+        !RegExp(r'\d').hasMatch(password)) {
+      return (
+        'Use upper- and lower-case letters and at least one number.',
+        _passwordFocus,
+      );
+    }
+    if (password != confirm) {
+      return ("Passwords don't match.", _confirmFocus);
+    }
+    return (null, null);
   }
 
   Future<void> _submit() async {
@@ -30,7 +71,22 @@ class _AuthScreenState extends State<AuthScreen> {
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) return;
 
-    setState(() => _isLoading = true);
+    if (!_isLogin) {
+      final (problem, focusOn) = _validateSignUp(password, _confirmController.text);
+      if (problem != null) {
+        setState(() => _fieldError = problem);
+        // Put the caret back in the offending field. Without this the form lost
+        // focus after a rejected submit and the password field became
+        // un-editable until a page reload.
+        focusOn?.requestFocus();
+        return;
+      }
+    }
+
+    setState(() {
+      _isLoading = true;
+      _fieldError = null;
+    });
     try {
       if (_isLogin) {
         await Supabase.instance.client.auth.signInWithPassword(
@@ -39,11 +95,21 @@ class _AuthScreenState extends State<AuthScreen> {
         );
       } else {
         final redirectTo = '${Uri.base.scheme}://${Uri.base.host}';
-        await Supabase.instance.client.auth.signUp(
+        final res = await Supabase.instance.client.auth.signUp(
           email: email,
           password: password,
           emailRedirectTo: redirectTo,
         );
+        // With email confirmation on, sign-up returns a user but NO session.
+        // Sending them to the dashboard anyway left them signed out but looking
+        // signed in — no email, no stats, and nothing loadable. Show the
+        // confirmation step instead, and never navigate without a session.
+        if (res.session == null) {
+          if (mounted) {
+            setState(() => _awaitingConfirmationFor = email);
+          }
+          return;
+        }
       }
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -254,12 +320,86 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  // ── Login / Sign-up form ──────────────────────────────────────────────────
-  Widget _buildForm() {
+  // ── "Confirm your email" step (sign-up returned no session) ───────────────
+  Widget _buildAwaitingConfirmation() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Icon(Icons.mark_email_unread_outlined,
+            size: 44, color: context.palette.primary),
+        const SizedBox(height: 20),
+        Text(
+          'Confirm your email',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 26,
+            fontWeight: FontWeight.w300,
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'We sent a confirmation link to $_awaitingConfirmationFor.\n'
+          'Open it to activate your account, then sign in.',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            height: 1.5,
+            color: context.palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 28),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: () => setState(() {
+              _awaitingConfirmationFor = null;
+              _isLogin = true;
+              _passwordController.clear();
+              _confirmController.clear();
+            }),
+            child: Text(
+              'Back to sign in',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Login / Sign-up form ──────────────────────────────────────────────────
+  Widget _buildForm() {
+    if (_awaitingConfirmationFor != null) return _buildAwaitingConfirmation();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.justConfirmed) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.palette.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_outline,
+                    size: 18, color: context.palette.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Email confirmed. Sign in to continue.',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, color: context.palette.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
         Text(
           _isLogin ? 'Welcome back' : 'Create your account',
           style: GoogleFonts.plusJakartaSans(
@@ -294,8 +434,15 @@ class _AuthScreenState extends State<AuthScreen> {
         // Password
         TextField(
           controller: _passwordController,
+          focusNode: _passwordFocus,
+          onChanged: (_) {
+            if (_fieldError != null) setState(() => _fieldError = null);
+          },
           decoration: InputDecoration(
             labelText: 'Password',
+            helperText: _isLogin
+                ? null
+                : 'At least 8 characters, with upper- and lower-case and a number',
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: Padding(
               padding: const EdgeInsets.only(right: 6),
@@ -317,9 +464,37 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
           obscureText: !_showPassword,
-          textInputAction: TextInputAction.done,
+          textInputAction:
+              _isLogin ? TextInputAction.done : TextInputAction.next,
           onSubmitted: (_) => _isLoading ? null : _submit(),
         ),
+        // Confirm password — sign-up only. A typo here otherwise locks the host
+        // out of an account they can no longer guess the password to.
+        if (!_isLogin) ...[
+          const SizedBox(height: 16),
+          TextField(
+            controller: _confirmController,
+            focusNode: _confirmFocus,
+            onChanged: (_) {
+              if (_fieldError != null) setState(() => _fieldError = null);
+            },
+            decoration: const InputDecoration(
+              labelText: 'Confirm password',
+              prefixIcon: Icon(Icons.lock_outline),
+            ),
+            obscureText: !_showPassword,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _isLoading ? null : _submit(),
+          ),
+        ],
+        if (_fieldError != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _fieldError!,
+            style: GoogleFonts.inter(
+                fontSize: 13, color: context.palette.danger),
+          ),
+        ],
         const SizedBox(height: 24),
         // Primary action
         SizedBox(
@@ -359,7 +534,11 @@ class _AuthScreenState extends State<AuthScreen> {
             TextButton(
               onPressed: _isLoading
                   ? null
-                  : () => setState(() => _isLogin = !_isLogin),
+                  : () => setState(() {
+                        _isLogin = !_isLogin;
+                        _fieldError = null;
+                        _confirmController.clear();
+                      }),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: Size.zero,

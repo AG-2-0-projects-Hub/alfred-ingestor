@@ -83,11 +83,16 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
   void _applyConversations(List<Map<String, dynamic>> rows) {
     final merged = <Map<String, dynamic>>[
       for (final c in rows)
-        <String, dynamic>{
-          ...c,
-          'guestName':
-              _guestNamesByBooking[c['booking_id'] as String? ?? ''] ?? 'Guest',
-        }
+        // Archived conversations belong under the Archived section, not the
+        // active list — mirror the dashboard card's filter so the overview and
+        // the card agree, and so a just-archived conversation doesn't reappear
+        // when this one-shot refresh (which reads all rows) runs after archive.
+        if (c['archived_at'] == null)
+          <String, dynamic>{
+            ...c,
+            'guestName':
+                _guestNamesByBooking[c['booking_id'] as String? ?? ''] ?? 'Guest',
+          }
     ];
     merged.sort((a, b) {
       int priority(Map<String, dynamic> x) {
@@ -95,6 +100,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
         if (reason != null && reason.startsWith('emergency_')) return 0;
         if (x['requires_attention'] == true) return 1;
         if (x['mode'] == 'intervene') return 2;
+        if (x['has_guest_message'] != true) return 4; // pending — awaiting reply, last
         return 3;
       }
       return priority(a).compareTo(priority(b));
@@ -111,30 +117,25 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
       _archivedExpanded = true;
       _loadingArchived = true;
     });
-    // No `is_archived` column exists yet (see Future Backend Work in CONTEXT.md).
-    // "Archived" here = past guests for this property whose booking_id is NOT
-    // in the active conversations list. Matches the existing
-    // ArchivedChatsDialog behavior of querying the `guests` table directly.
+    // Archived = conversations with archived_at set (auto-archived once the
+    // reservation check_out passed, or manually archived by the host). Joined
+    // to the guest name for display.
     try {
-      final activeIds = _activeConversations
-          .map((c) => c['booking_id'] as String?)
-          .whereType<String>()
-          .toSet();
-      final guests = await Supabase.instance.client
-          .from('guests')
-          .select('booking_id, name, created_at')
+      final rows = await Supabase.instance.client
+          .from('conversations')
+          .select('booking_id, mode, requires_attention, escalation_reason, guests(name)')
           .eq('property_id', widget.property['id'])
-          .order('created_at', ascending: false);
+          .not('archived_at', 'is', null)
+          .order('archived_at', ascending: false);
       final archived = [
-        for (final g in guests)
-          if (!activeIds.contains(g['booking_id']))
-            {
-              'booking_id': g['booking_id'],
-              'guestName': g['name'] ?? 'Guest',
-              'mode': 'archived',
-              'requires_attention': false,
-              'escalation_reason': null,
-            }
+        for (final c in rows)
+          {
+            'booking_id': c['booking_id'],
+            'guestName': (c['guests'] as Map?)?['name'] ?? 'Guest',
+            'mode': 'archived',
+            'requires_attention': false,
+            'escalation_reason': null,
+          }
       ];
       if (mounted) setState(() {
         _archivedConvs = archived;
@@ -209,7 +210,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text('Active Conversations',
+                  Text('Conversations',
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: palette.textSecondary,
@@ -236,6 +237,8 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                                     Expanded(
                                       child: ConversationPill(
                                         conv: c, compact: false,
+                                        pending: c['has_guest_message'] != true,
+                                        showPendingLabel: true,
                                         onTap: () => _openChat(c['booking_id'] as String),
                                       ),
                                     ),

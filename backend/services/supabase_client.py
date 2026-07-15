@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 _client: Client | None = None
@@ -172,6 +172,60 @@ def download_file(property_id: str, filename: str) -> bytes:
     return client.storage.from_(BUCKET).download(path)
 
 
+_CHAT_MEDIA_BUCKET = "chat_media"
+
+
+def upload_chat_media(path: str, data: bytes, content_type: str) -> None:
+    """Upload guest media (from Telegram) into the chat_media bucket so the host
+    sees it in the dashboard, just like web-uploaded media. Path convention
+    matches the web client: "{conversation_id}/chat_media/{filename}"."""
+    client = get_client()
+    client.storage.from_(_CHAT_MEDIA_BUCKET).upload(
+        path, data, {"content-type": content_type, "upsert": "false"}
+    )
+
+
+def download_chat_media(path: str) -> bytes:
+    """Download raw bytes of a chat_media object (for Gemini analysis)."""
+    client = get_client()
+    return client.storage.from_(_CHAT_MEDIA_BUCKET).download(path)
+
+
+def upload_host_avatar(uid: str, data: bytes, content_type: str, ext: str) -> str:
+    """Upload a host's avatar to host_avatars/{uid}/ under the SERVICE role and
+    return its public URL. The caller (backend) authenticates the host token and
+    scopes the path to their own uid, so this is a safe bypass of the storage
+    RLS write policy — which the Flutter web client couldn't satisfy directly."""
+    client = get_client()
+    ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    path = f"{uid}/avatar_{ts}.{ext}"
+    client.storage.from_("host_avatars").upload(
+        path, data, {"content-type": content_type, "upsert": "true"}
+    )
+    return client.storage.from_("host_avatars").get_public_url(path)
+
+
+def count_recent_guest_media(
+    conversation_id: str,
+    since_iso: str,
+    kinds: tuple[str, ...] = ("image", "audio"),
+) -> int:
+    """Guest media messages of `kinds` in this conversation since `since_iso` —
+    feeds the media-burst escalation (a guest sending several photos usually
+    wants a human to look)."""
+    client = get_client()
+    result = (
+        client.table("messages")
+        .select("id", count="exact")
+        .eq("conversation_id", conversation_id)
+        .eq("sender_type", "guest")
+        .in_("message_type", list(kinds))
+        .gte("created_at", since_iso)
+        .execute()
+    )
+    return result.count or 0
+
+
 def move_files_in_storage(src_id: str, dest_id: str) -> None:
     """Move all user_uploads from src_id folder to dest_id folder. (REQ-01, REQ-19)"""
     client = get_client()
@@ -268,7 +322,7 @@ def get_guest_by_booking_id(booking_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("guests")
-        .select("id, name, booking_id, property_id, preferred_language")
+        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
@@ -276,11 +330,69 @@ def get_guest_by_booking_id(booking_id: str) -> dict | None:
     return result.data if result else None
 
 
+def get_guest_by_telegram_chat_id(chat_id: str) -> dict | None:
+    """Find the guest linked to a Telegram chat (via /start <booking_id>)."""
+    client = get_client()
+    result = (
+        client.table("guests")
+        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
+        .eq("telegram_chat_id", str(chat_id))
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def link_guest_telegram(booking_id: str, chat_id: str) -> None:
+    """Attach a Telegram chat to a guest booking.
+
+    A Telegram account maps to exactly one booking (unique index on
+    telegram_chat_id). So first RELEASE this chat from any other booking it was
+    linked to, then attach it here. This makes /start on a new booking MOVE the
+    link instead of hitting a unique violation — needed for a returning guest
+    (new stay, same Telegram) and for testing several bookings from one account.
+    """
+    client = get_client()
+    cid = str(chat_id)
+    client.table("guests").update({"telegram_chat_id": None}) \
+        .eq("telegram_chat_id", cid).neq("booking_id", booking_id).execute()
+    client.table("guests").update({"telegram_chat_id": cid}) \
+        .eq("booking_id", booking_id).execute()
+
+
+def update_guest_language(booking_id: str, language: str) -> None:
+    """Persist the established conversation language so future turns have a stable
+    anchor (avoids re-detecting from scratch each message). Only meaningful,
+    non-empty values are written."""
+    if not language or not language.strip():
+        return
+    client = get_client()
+    client.table("guests").update(
+        {"preferred_language": language.strip().lower()}
+    ).eq("booking_id", booking_id).execute()
+
+
+def get_guest_by_conversation_id(conversation_id: str) -> dict | None:
+    """Resolve the guest behind a conversation — used to deliver a host reply to
+    the guest's Telegram chat when they're Telegram-linked."""
+    client = get_client()
+    conv = (
+        client.table("conversations")
+        .select("booking_id")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv and conv.data):
+        return None
+    return get_guest_by_booking_id(conv.data["booking_id"])
+
+
 def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name, learned_knowledge, deleted_at")
+        .select("id, master_json, name, learned_knowledge, deleted_at, welcome_also_english")
         .eq("id", property_id)
         .maybe_single()
         .execute()
@@ -308,6 +420,49 @@ def find_or_create_conversation(booking_id: str, property_id: str) -> dict:
         "last_message_at": _now(),
     }).execute()
     return insert_result.data[0]
+
+
+def ensure_conversation_with_welcome(
+    booking_id: str, property_id: str, welcome_text: str
+) -> tuple[dict, bool]:
+    """Get-or-create the conversation and, if it has no messages yet, post the
+    welcome as Alfred's first message. Returns (conversation, welcome_inserted).
+
+    Idempotent: safe to call on every /start and every guest-token load — the
+    welcome is inserted at most once (only when the thread is empty).
+    """
+    client = get_client()
+    conversation = find_or_create_conversation(booking_id, property_id)
+    existing = (
+        client.table("messages")
+        .select("id")
+        .eq("conversation_id", conversation["id"])
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return conversation, False
+    insert_message(conversation["id"], "ai", welcome_text)
+    return conversation, True
+
+
+def count_recent_guest_messages(conversation_id: str, since_iso: str) -> int:
+    """Guest messages in this conversation since `since_iso` (rate limiting).
+
+    NOTE: `messages` currently has no index beyond its PK, so this filters via
+    a scan — fine at current volume. Index TODO (pending approval):
+    CREATE INDEX idx_messages_conversation_created ON messages (conversation_id, created_at);
+    """
+    client = get_client()
+    result = (
+        client.table("messages")
+        .select("id", count="exact")
+        .eq("conversation_id", conversation_id)
+        .eq("sender_type", "guest")
+        .gte("created_at", since_iso)
+        .execute()
+    )
+    return result.count or 0
 
 
 def get_conversation_messages(conversation_id: str) -> list[dict]:
@@ -346,27 +501,49 @@ def insert_message(
     if media_url:
         row["media_url"] = media_url
     result = client.table("messages").insert(row).execute()
+
+    # First guest message flips the conversation out of the "Awaiting reply"
+    # (pending) state on the dashboard. Guarded so it writes at most once.
+    if sender_type == "guest":
+        client.table("conversations").update({"has_guest_message": True}) \
+            .eq("id", conversation_id).eq("has_guest_message", False).execute()
+
+        # Reactivate an archived conversation: a new guest message pulls it back
+        # into the active list (covers both auto-archive on check_out and manual
+        # host archive). Done unconditionally — clearing an already-null
+        # archived_at is a harmless no-op, and bumping last_message_at on each
+        # guest message is correct anyway (it also stops the hourly cron from
+        # immediately re-archiving a conversation revived after check_out).
+        client.table("conversations").update(
+            {"archived_at": None, "last_message_at": _now()}
+        ).eq("id", conversation_id).execute()
+
     # A BEFORE INSERT trigger (suppress_dup_system_marker) can skip a duplicate
     # consecutive system marker, in which case no row is returned. Callers of
     # marker inserts ignore the return; guard so we don't IndexError on skip.
     return result.data[0] if result.data else {}
 
 
-def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, list[dict]]:
-    """Returns (conversation_id, messages) where messages are all rows since the
-    earliest unresolved escalated message, including host replies and guest follow-ups.
-    Returns (None, []) if no conversation found."""
+def get_conversation_thread_for_resolve(
+    booking_id: str,
+) -> tuple[str | None, list[dict], str | None]:
+    """Returns (conversation_id, messages, escalation_reason) where messages are
+    all rows since the earliest unresolved escalated message, including host
+    replies and guest follow-ups. `escalation_reason` is read here (before
+    resolve_conversation nulls it) so the learning triage can gate on it.
+    Returns (None, [], None) if no conversation found."""
     client = get_client()
     conv_result = (
         client.table("conversations")
-        .select("id")
+        .select("id, escalation_reason")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
     )
     if not (conv_result and conv_result.data):
-        return None, []
+        return None, [], None
     conv_id = conv_result.data["id"]
+    escalation_reason = conv_result.data.get("escalation_reason")
     first_esc = (
         client.table("messages")
         .select("created_at")
@@ -378,7 +555,7 @@ def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, li
         .execute()
     )
     if not first_esc.data:
-        return conv_id, []
+        return conv_id, [], escalation_reason
     threshold = first_esc.data[0]["created_at"]
     thread = (
         client.table("messages")
@@ -388,7 +565,7 @@ def get_conversation_thread_for_resolve(booking_id: str) -> tuple[str | None, li
         .order("created_at")
         .execute()
     )
-    return conv_id, (thread.data or [])
+    return conv_id, (thread.data or []), escalation_reason
 
 
 def resolve_conversation(
@@ -434,10 +611,73 @@ def resolve_conversation(
         }).eq("id", property_id).execute()
 
 
+def record_learning_event(
+    property_id: str | None,
+    booking_id: str | None,
+    escalation_reason: str | None,
+    disposition: str,
+    skip_reason: str | None = None,
+    problem_summary: str | None = None,
+    solution_summary: str | None = None,
+    category: str | None = None,
+    language: str | None = None,
+) -> None:
+    """Append one row to the pseudonymized learning_events ledger (permanent
+    internal record of every triage decision — learned or dropped). No guest
+    name/PII: the summarizer is instructed to omit it, and only property_id +
+    booking_id (opaque) are stored. Best-effort — never fail the resolve."""
+    client = get_client()
+    client.table("learning_events").insert({
+        "property_id": property_id,
+        "booking_id": booking_id,
+        "escalation_reason": escalation_reason,
+        "problem_summary": problem_summary,
+        "solution_summary": solution_summary,
+        "category": category,
+        "language": language,
+        "disposition": disposition,
+        "skip_reason": skip_reason,
+    }).execute()
+
+
+def set_active_channel(conversation_id: str, channel: str) -> None:
+    """Record the channel the guest is currently using ('web' | 'telegram').
+    Guest-facing pushes route only to this channel."""
+    get_client().table("conversations").update(
+        {"active_channel": channel}
+    ).eq("id", conversation_id).execute()
+
+
+def get_active_channel(conversation_id: str) -> str:
+    """Current active channel for a conversation; defaults to 'web'."""
+    result = (
+        get_client()
+        .table("conversations")
+        .select("active_channel")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if result and result.data:
+        return result.data.get("active_channel") or "web"
+    return "web"
+
+
 def update_conversation(conversation_id: str, **fields) -> None:
     client = get_client()
     fields["last_message_at"] = _now()
     client.table("conversations").update(fields).eq("id", conversation_id).execute()
+
+
+def archive_conversation(conversation_id: str) -> None:
+    """Manually archive a conversation (host "delete conversation" action).
+
+    Non-destructive: messages/training are kept and the conversation returns to
+    the active list if the guest sends a new message (see insert_message)."""
+    client = get_client()
+    client.table("conversations").update(
+        {"archived_at": _now()}
+    ).eq("id", conversation_id).execute()
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────
@@ -463,13 +703,21 @@ def create_guest(
 ) -> dict:
     """Insert a new guest booking row and return it."""
     client = get_client()
+    now = datetime.now(timezone.utc)
     result = client.table("guests").insert({
         "booking_id": booking_id,
         "property_id": property_id,
         "name": name,
-        "preferred_language": "english",
+        # Start neutral — the working language is established from the actual
+        # conversation, not seeded to English (which caused false "switches").
+        "preferred_language": "not_set",
         "guest_chat_url": guest_chat_url,
         "host_chat_url": host_chat_url,
+        # Testing defaults until Channex.io feeds real reservation dates: the
+        # stay starts now and runs 96h. check_out drives auto-archiving of the
+        # conversation once it passes (pg_cron job auto-archive-conversations).
+        "check_in": now.isoformat(),
+        "check_out": (now + timedelta(hours=96)).isoformat(),
     }).execute()
     return result.data[0]
 
@@ -503,6 +751,55 @@ def get_user_id_from_token(access_token: str) -> str | None:
     if resp and getattr(resp, "user", None):
         return resp.user.id
     return None
+
+
+# ── Host authorization helpers ──────────────────────────────────────────────
+# The backend uses the service-role key (bypasses RLS), so every host-initiated,
+# state-changing endpoint must verify ownership itself. Each helper resolves the
+# target down to its owning property and checks properties.owner_id == host uid.
+
+def host_owns_property(host_id: str, property_id: str) -> bool:
+    """True if the property exists and is owned by this host."""
+    client = get_client()
+    res = (
+        client.table("properties")
+        .select("id")
+        .eq("id", property_id)
+        .eq("owner_id", host_id)
+        .maybe_single()
+        .execute()
+    )
+    return bool(res and res.data)
+
+
+def host_owns_conversation(host_id: str, conversation_id: str) -> bool:
+    """True if the conversation's property is owned by this host."""
+    client = get_client()
+    conv = (
+        client.table("conversations")
+        .select("property_id")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv and conv.data and conv.data.get("property_id")):
+        return False
+    return host_owns_property(host_id, conv.data["property_id"])
+
+
+def host_owns_booking(host_id: str, booking_id: str) -> bool:
+    """True if the booking's guest belongs to a property owned by this host."""
+    client = get_client()
+    guest = (
+        client.table("guests")
+        .select("property_id")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (guest and guest.data and guest.data.get("property_id")):
+        return False
+    return host_owns_property(host_id, guest.data["property_id"])
 
 
 def soft_delete_property(property_id: str, owner_id: str) -> str:
@@ -560,6 +857,109 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
     # Remove all stored files for the property (best-effort).
     _delete_property_storage(property_id)
     return "ok"
+
+
+def _delete_host_avatars(host_id: str) -> None:
+    """Best-effort removal of every avatar the host ever uploaded.
+
+    upload_host_avatar timestamps each file rather than overwriting, so a host
+    who changed their picture has several — and the bucket is PUBLIC, so leaving
+    any behind leaves a public photo of a person who just deleted their account.
+    """
+    client = get_client()
+    try:
+        files = client.storage.from_("host_avatars").list(
+            host_id, {"limit": 1000, "offset": 0}
+        )
+        paths = [f"{host_id}/{f['name']}" for f in files or []]
+    except Exception as exc:
+        print(f"_delete_host_avatars: list failed: {exc}")
+        return
+    if paths:
+        try:
+            client.storage.from_("host_avatars").remove(paths)
+        except Exception as exc:
+            print(f"_delete_host_avatars: remove failed: {exc}")
+
+
+def delete_host_account(host_id: str) -> dict:
+    """Delete a host's account and all their property data, KEEPING the
+    conversations — archived, with their guests already pseudonymized.
+
+    The property rows survive as tombstones because they have to: `guests` and
+    `conversations` hold FKs to `properties` with no ON DELETE, so a hard delete
+    would be rejected. That constraint is also what makes the spec work — the
+    conversations we want to retain are exactly what pins the tombstone.
+
+    Order matters. The property data is blanked first (durable), then the
+    best-effort cleanup runs, and the auth user is deleted LAST: once it's gone
+    the host can no longer sign in to retry, so anything that could fail must
+    have already run. Returns a summary for the caller to log.
+    """
+    client = get_client()
+
+    props = (
+        client.table("properties")
+        .select("id, deleted_at")
+        .eq("owner_id", host_id)
+        .execute()
+    ).data or []
+
+    deleted_now = 0
+    for p in props:
+        # Already-tombstoned properties keep their conversations, so they still
+        # need the archive + Telegram-unlink pass below; they just don't need
+        # blanking twice.
+        if not p.get("deleted_at"):
+            if soft_delete_property(p["id"], host_id) == "ok":
+                deleted_now += 1
+
+    # Sever the Telegram link and archive the conversations. Without the unlink,
+    # the bot still maps that chat_id to a guest; the deleted_at guard in
+    # process_guest_message would answer them with the closed notice, but there
+    # is no reason to keep a live mapping to a host who no longer exists.
+    archived = 0
+    for p in props:
+        guests = (
+            client.table("guests")
+            .select("id")
+            .eq("property_id", p["id"])
+            .execute()
+        ).data or []
+        for g in guests:
+            client.table("guests").update(
+                {"telegram_chat_id": None}
+            ).eq("id", g["id"]).execute()
+
+        convs = (
+            client.table("conversations")
+            .select("id")
+            .eq("property_id", p["id"])
+            .is_("archived_at", "null")
+            .execute()
+        ).data or []
+        for c in convs:
+            archive_conversation(c["id"])
+            archived += 1
+
+    _delete_host_avatars(host_id)
+
+    # host_profiles has ON DELETE CASCADE from auth.users, so deleting the auth
+    # user below would take it anyway — but do it explicitly so the row is gone
+    # even if the auth delete fails and the host retries.
+    try:
+        client.table("host_profiles").delete().eq("id", host_id).execute()
+    except Exception as exc:
+        print(f"delete_host_account: host_profiles delete failed: {exc}")
+
+    # Last: the point of no return.
+    client.auth.admin.delete_user(host_id)
+
+    return {
+        "properties_seen": len(props),
+        "properties_deleted": deleted_now,
+        "conversations_archived": archived,
+    }
 
 
 def _delete_property_storage(property_id: str) -> None:

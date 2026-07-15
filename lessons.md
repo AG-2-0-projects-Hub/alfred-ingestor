@@ -129,3 +129,74 @@ inheritance pointer to `_template/CLAUDE.md` and the-ingestor `CLAUDE.md`.
 - Preserved historical brain step executions for past utility scripts like `decode.py`.
 
 **Global Candidate:** Yes — the safety discovery regarding the `.gemini/config/` plugin path and the clean, selective decommissioning process applies directly to the entire AG ecosystem.
+
+---
+
+## 2026-07-14 — Web voice notes lose ~30% of the recording: the resampler, not the tail
+**Context:** A guest counted to 10 into the web recorder; the voice note came back ~7s. A *compounding* percentage loss, not a missing tail — which rules out the obvious "the last buffer wasn't flushed" story.
+
+**Discovery (from reading `record_web-1.3.0` source, not guessing):**
+1. **`RecordConfig` defaults to 44.1 kHz / 2 channels**, but browsers run their AudioContext at **48 kHz, and a laptop mic is mono**. So every buffer is pushed through the package's hand-rolled JS resampler in `assets/js/record.worklet.js`.
+2. That resampler's downsampling path (`multiTap`) **resets its carry-over state — `tailExists = false`, `lastWeight = 0` — on EVERY `resample()` call**, so the partial sample carried between buffers is discarded on each ~43 ms flush. The loss accumulates across the whole recording. That is the ~30%.
+3. **The fix is one line:** `RecordConfig(encoder: AudioEncoder.wav, sampleRate: 48000, numChannels: 1)`. When `fromSampleRate == toSampleRate` the resampler installs a **bypass** (`this.resampler = (buffer) => buffer`) and never touches a sample.
+4. **⚠️ Do NOT "fix" this by switching to opus.** It's tempting — opus uses the browser-native `MediaRecorder` (whose `stop()` properly awaits the final data via `_onStopCompleter`, unlike the WAV path's `MicRecorderDelegate`, which tears down the context and *then* calls `finish()`). But **Gemini does not accept `audio/webm`** (its audio list is wav/mp3/aiff/aac/ogg/flac), and opus on Chrome produces a webm container. WAV is *why* transcription works today.
+
+**Impact:** not yet applied — needs a real browser to verify (headless Chromium can't be trusted for this app; see the 2026-07-07 CanvasKit/WebGL note).
+
+**Global Candidate:** Yes — "a steady percentage loss points at a resampler/rate mismatch, a fixed loss at the tail points at a flush bug" is a good general diagnostic, as is "read the package source before theorising".
+
+---
+
+## 2026-07-13 — 🔴 The prod website publicly served the `service_role` key (and a misdiagnosis on the way)
+**Context:** Gate-2 testing. The founder signed up with a second email and saw a dashboard containing *another host's* properties, with "Email: —" and zero stats.
+
+**Discovery:**
+1. **`SUPABASE_ANON_KEY` on the prod Vercel project held the `service_role` key.** Flutter compiles `.env` into the web bundle and serves it at **`/assets/.env`**, so the live site handed an omnipotent key — bypasses all RLS, can read/delete/rewrite any table, can reset any user's password via the admin auth API — to **every visitor**, for ~1 day. Only the new prod was affected; old prod and staging correctly shipped `anon` (verified by decoding all three bundles).
+2. **Cause:** the cutover loaded six secrets by hand; `anon` and `service_role` are both long opaque JWTs that look identical at a glance, and nothing validated which one landed where.
+3. **⚠️ Fixing the env var is NOT enough — you must ROTATE.** Vercel keeps every past deployment live at its own immutable URL, each still serving the old bundle. Legacy `anon`/`service_role` are both signed with the project JWT secret, so revoking one means rotating the secret (which also reissues the other, invalidates host sessions, and invalidates the guest booking JWTs → update `SUPABASE_SERVICE_ROLE_KEY` **and** `SUPABASE_JWT_SECRET`, redeploy backend, then fix the Vercel var). Runbook: `_Context/plans/prod-key-rotation.md`.
+4. **🚨 THE DEBUGGING LESSON — I misdiagnosed this first.** My "is RLS enforced?" probe queried prod with what I *believed* was the anon key and got rows back from every table, so I declared "RLS is not enforced, P0 data leak" and had the founder run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on prod. Harmless (idempotent), but **wrong**: the probe was using the leaked **service_role** key, which bypasses RLS *by design*. RLS was almost certainly fine all along. **Always verify which credential a security probe is actually authenticating as — decode the JWT — before concluding the database is open.** A probe that "proves" a catastrophic finding deserves more scepticism, not less.
+
+**Impact:** guard added in `main.dart` — the app now **refuses to boot** if `SUPABASE_ANON_KEY` is a service_role JWT **or an `sb_secret_` key**, so a misconfigured deploy fails loudly instead of silently exposing the DB. Add `key_audit.py` (decode every deployed frontend's key) to the checklist for any new environment (e.g. Phase-8 staging→Cloud Run).
+
+**Remediation actually used (2026-07-14) — no JWT-secret rotation needed.** The project already had Supabase's new key system, which is independently rotatable, so instead of rotating the JWT signing secret (which would have invalidated the HS256 guest booking tokens): backend → **`sb_secret_`**, all frontends → **`sb_publishable_`**, then **Disable JWT-based API keys** in Supabase, which killed the exposed legacy `service_role` key outright. Verified after: RLS enforced (0 rows to an unprivileged key on all 8 tables), tenant isolation holds, host login, guest chat, guest realtime, ingest — all green. ⚠️ Do **not** revoke the "PREVIOUS KEY / Legacy HS256" under JWT Signing Keys: the backend still signs guest booking tokens with it.
+
+**Three traps hit while remediating — each cost a cycle:**
+1. **Vercel "Redeploy" reuses the build cache**, so the corrected env var never reached the bundle. Untick *Use existing Build Cache*, and make sure the var is set for the **Production** scope (Vercel scopes vars per environment).
+2. **There are TWO Vercel projects** (`alwaysalfred` = new prod; `alfred-ingestor` = old prod + staging preview) pointing at **different Supabase projects**. A key from one is meaningless in the other — pasting the new prod's key into the old project 401'd the rollback stack. Always confirm the project name AND which Supabase project the key came from.
+3. **The first guard missed `sb_secret_`** because it only decoded JWTs, and an `sb_secret_` key is not a JWT — one briefly reached a public deploy as a result. A guard that inspects only one credential *format* is not a guard.
+
+**Fixing the env var is never enough on Vercel:** every past deployment stays live at its own immutable URL, still serving the old bundle. The credential must be **rotated/revoked**, not just re-pointed.
+
+**Wider point:** the "zero-delta parity" probe from the DB split has now missed three things — the `supabase_realtime` publication, `relrowsecurity`, and which credentials each environment actually ships. **Parity must compare switches and secrets, not just objects** (tables/policies/indexes).
+
+**Global Candidate:** Yes — "never let a non-anon key reach a client bundle", "rotate, don't just re-point", and "decode the credential your probe is using" all generalise to every AG project on Supabase/Vercel.
+
+---
+
+## 2026-07-13 — Cloud Run BackgroundTasks freeze: min-instances does NOT keep CPU allocated
+**Context:** Prod Telegram replies were flaky ("sometimes no answer, or 3 messages later, all stacked"). The webhook acks 200 immediately and runs all Gemini/DB work in FastAPI `BackgroundTasks`.
+
+**Discovery:**
+1. **Under Cloud Run request-based billing, CPU is throttled to ~0 the instant the response is sent.** Background work after the ack freezes and only resumes when the next request grants CPU — replies then flush "stacked". `min-instances=1` only keeps the *instance* alive; it does nothing about CPU between requests. The needed flag is `--no-cpu-throttling` (annotation `run.googleapis.com/cpu-throttling: false`).
+2. **The freeze has misleading side-effects** that masquerade as other bugs: pooled HTTP/2 connections (supabase postgrest httpx) idle past keepalive and die with `ConnectionTerminated`, and `asyncio.sleep` retry backoffs stretch/burst, so quota errors exhaust their retries.
+3. **Debugging trap:** a conversation whose host has sent a message flips to `intervene` mode and Alfred stays silent BY DESIGN — a "frozen background task" probe on such a conversation is a false negative. Probe on a clean autopilot conversation.
+4. **Verification method that needs no real Telegram client:** POST a crafted update to `/api/telegram/webhook` (with the real secret header, fake chat_id), then poll ONLY Supabase for the ai reply row — zero Cloud Run traffic, so a frozen task cannot be accidentally woken by your own polling.
+5. **Tooling trap (how this entry originally got mangled):** appending markdown with backticks via a `wsl bash -c` heredoc command-substitutes the backticked phrases. Write files with the Write/Edit tools or a Python script instead.
+
+**Impact:** Root cause fixed with one flag (rev 00006); Gate-2 P-8 probe shows replies in ~15s with zero follow-up traffic.
+
+**⚠️ The flag is a STOPGAP, not the answer — it costs ~$55/mo (2026-07-13 founder decision: mitigate, don't accept).** `--no-cpu-throttling` switches Cloud Run to **instance-based billing**: the container is billed 24/7 whether or not a single message arrives. That charge is unrelated to traffic — a Gemini reply burns ~15 vCPU-seconds against a 180,000 vCPU-s/month free tier, so the *work* is effectively free; you are paying purely to keep an idle CPU switched on. (Also note `europe-west3`/Frankfurt is **Tier 2** pricing, ~20–25% above the headline Tier 1 rates.)
+
+**The correct fix is to do the work INSIDE a request, then go back to request-based billing** (~$10–12/mo with `min-instances=1`; ~$0 with `min-instances=0`, since Cloud Run does **not** charge for idle instances that aren't minimum instances — so an external 5-min ping, e.g. UptimeRobot, buys warmth for free).
+
+Two traps when designing that fix:
+1. **Do NOT just make the webhook synchronous.** Telegram **serialises updates per chat — it does not send the next update until you answer the previous one.** The album debounce (buffer photos of one `media_group_id` for 2s) therefore deadlocks: photo 1 blocks waiting for siblings Telegram is holding back until photo 1 responds → the group flushes with one photo and each sibling arrives as a fresh group → one reply + one escalation notice PER PHOTO, i.e. the exact bug fixed in `c82b419`.
+2. **An uptime ping does NOT substitute for the fix.** Pinging keeps the *instance* warm but not the *CPU* allocated between requests; each ping would merely lurch the frozen background task forward, so replies would still arrive minutes late and stacked. It is only useful *after* the work moves inside a request.
+
+**RESOLVED same day (rev 00007, commit `3a1d1e5`) — Cloud Tasks.** The webhook validates, enqueues and acks in ~150 ms; Cloud Tasks POSTs the payload back to `/api/telegram/process` as a **fresh HTTP request**, which therefore gets full CPU for its whole duration (and no 60 s Telegram ceiling). The service went back to request-based billing with `--cpu-throttling`. **Verified under throttling: reply row landed ~14 s after the webhook with ZERO follow-up traffic** — the exact condition that used to freeze it. Cost: **~$55/mo → ~$12/mo** (`min-instances=1`, billed at the 10×-cheaper idle rate), or **~$0** with `min-instances=0` + an external keep-warm ping. Cloud Tasks itself is free (1M ops/month).
+
+**Album grouping without post-response CPU:** collect the group in memory, then schedule a single flush task **named after the `media_group_id`** (~3 s delay). Cloud Tasks rejects a duplicate task name, so photos 2..N ride along instead of each firing their own reply. Verified: 3 photo updates → 3 fast acks → **ONE** worker run that pulled all 3 file_ids → **ONE** reply. The payload also carries the first photo as a `seed_items` fallback, so if the flush ever lands on an instance that doesn't hold the buffer the guest gets a degraded answer rather than silence.
+
+**Debugging trap that bit twice:** a conversation whose host has replied is in `intervene` mode and Alfred stays silent BY DESIGN — both a "frozen task" probe and a realtime probe on such a conversation return false negatives. Always probe a clean **autopilot** conversation.
+
+**Global Candidate:** Yes — "min-instances ≠ CPU-always-allocated" applies to every Cloud Run service in AG that does post-response background work.

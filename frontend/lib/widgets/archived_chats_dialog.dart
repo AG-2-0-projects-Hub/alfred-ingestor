@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
-import '../screens/host_panel_screen.dart';
+import 'chat_live_dialog.dart';
 
 class ArchivedChatsDialog extends StatefulWidget {
   final String propertyId;
@@ -30,24 +30,42 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
 
   Future<void> _load() async {
     try {
+      // Chat History = archived conversations (auto-archived once the
+      // reservation ended, or manually archived by the host). Active ones live
+      // on the dashboard. Joined to the guest for name + booking display.
       final data = await Supabase.instance.client
-          .from('guests')
-          .select('id, booking_id, name, created_at, preferred_language')
+          .from('conversations')
+          .select('booking_id, archived_at, guests(name, created_at)')
           .eq('property_id', widget.propertyId)
-          .order('created_at', ascending: false);
+          .not('archived_at', 'is', null)
+          .order('archived_at', ascending: false);
+      final guests = [
+        for (final c in data)
+          {
+            'booking_id': c['booking_id'],
+            'name': (c['guests'] as Map?)?['name'] ?? 'Guest',
+            'created_at': c['archived_at'],
+          }
+      ];
       if (mounted) {
-        setState(() => _guests = List<Map<String, dynamic>>.from(data));
+        setState(() => _guests = List<Map<String, dynamic>>.from(guests));
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
 
   void _openChat(Map<String, dynamic> guest) {
-    Navigator.of(context).pop();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => HostPanelScreen(propertyId: widget.propertyId),
-      ),
+    final bookingId = guest['booking_id'] as String? ?? '';
+    if (bookingId.isEmpty) return;
+    // Open the tapped past conversation in the same consolidated (and
+    // mobile-responsive) ChatLiveDialog every other entry point uses, stacked
+    // on top of this history list so closing it returns here — instead of the
+    // old full-page HostPanelScreen → ChatLiveScreen (crushed on mobile).
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: widget.propertyId,
+      propertyName: widget.propertyName,
     );
   }
 

@@ -16,10 +16,19 @@ flutter config --no-analytics
 # Write frontend/.env from Vercel environment variables.
 # These must be set in the Vercel project dashboard:
 #   SUPABASE_URL, SUPABASE_ANON_KEY, BACKEND_URL
+#   TELEGRAM_BOT_USERNAME (optional — enables the guest Telegram link in the
+#   host chat view; the link is hidden when unset).
+#
+# TELEGRAM_LINK_DOMAIN is deliberately NOT emitted. Both the client
+# (chat_live_dialog.dart) and the backend (messages.py) default to `t.me`, which
+# is what we want: the 2026-07 outage that prompted 591e9e6 was a global
+# Telegram problem, not ours. The env lever stays in the code as an escape hatch
+# if t.me ever breaks again — leaving it unset is what pins us to t.me.
 cat > frontend/.env <<EOF
 SUPABASE_URL=${SUPABASE_URL}
 SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
 BACKEND_URL=${BACKEND_URL}
+TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
 EOF
 
 echo "frontend/.env written with BACKEND_URL=${BACKEND_URL}"

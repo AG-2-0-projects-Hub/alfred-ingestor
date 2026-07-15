@@ -5,7 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../screens/chat_live_screen.dart';
+import 'chat_live_dialog.dart';
 import '../theme/app_theme.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
@@ -89,12 +89,13 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   void _openHostChat() {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
+    final propertyName = widget.property['name'] as String? ?? '';
     Navigator.of(context).pop();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            ChatLiveScreen(bookingId: bookingId, propertyId: propertyId),
-      ),
+    ChatLiveDialog.show(
+      context,
+      bookingId: bookingId,
+      propertyId: propertyId,
+      propertyName: propertyName,
     );
   }
 
@@ -166,6 +167,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   Widget _buildStep2(bool isMobile) {
     final guestUrl = _result!['guest_chat_url'] as String;
     final hostUrl = _result!['host_chat_url'] as String;
+    final telegramUrl = _result!['telegram_link'] as String?;
 
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
@@ -173,7 +175,11 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _urlRow('Guest link', guestUrl),
+          _urlRow('Guest link (web)', guestUrl),
+          if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _urlRow('Guest link (Telegram)', telegramUrl),
+          ],
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
         ],

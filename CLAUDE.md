@@ -7,6 +7,15 @@
 **Stack:** [Define after BLAST Blueprint phase]
 **Data Schema:** [Define after BLAST Blueprint phase]
 
+## Session Start
+**Before any other action:** read `CONTEXT.md` and `_Context/session-digest.md` (if present) to know exactly where the project stands and what happened last session.
+
+### Updating `_Context/session-digest.md`
+This file holds the **last 3 sessions** as separate dated entries (newest first) — including parallel sessions — so a fresh session sees everything recent, not just whichever session updated it last.
+- **Never fully replace the file.** Re-read it fresh immediately before editing, **prepend** a new dated entry for the current session, and if that makes more than 3 entries, delete only the oldest one.
+- If a parallel session already added its own entry since you last looked, keep it — add yours alongside, don't overwrite.
+- Full permanent history (not capped at 3) always lives in `CONTEXT.md`.
+
 ## Git — HARD RULES
 
 **NEVER run `git commit` or `git push` on your own.**

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
@@ -74,9 +75,35 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   String? _guestChatUrl;
   String _guestName = 'the guest';
   bool _copiedLink = false;
+  bool _copiedTg = false;
+
+  /// Telegram deep link for this booking, built from the bot username env var.
+  /// Null when the app wasn't configured with a bot username.
+  ///
+  /// t.me and telegram.me are interchangeable official front-ends for the same
+  /// deep link. We use **t.me**, and TELEGRAM_LINK_DOMAIN is left unset.
+  ///
+  /// The lever exists because on 2026-07-13 t.me stopped resolving and we
+  /// switched to telegram.me — but that turned out to be a global Telegram
+  /// outage, not anything on our side, and it resolved. Keep the escape hatch,
+  /// leave it unset.
+  String? get _telegramUrl {
+    final u = dotenv.env['TELEGRAM_BOT_USERNAME']?.trim();
+    if (u == null || u.isEmpty) return null;
+    final domain = (dotenv.env['TELEGRAM_LINK_DOMAIN']?.trim().isNotEmpty ?? false)
+        ? dotenv.env['TELEGRAM_LINK_DOMAIN']!.trim()
+        : 't.me';
+    return 'https://$domain/${u.replaceFirst('@', '')}?start=${widget.bookingId}';
+  }
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
   String? _escalationReason;
+  bool _requiresAttention = false;
+
+  // A conversation is "escalated" only when the backend flagged it
+  // (requires_attention + escalation_reason). A manual Intervene toggle sets
+  // neither — so the resolve button must not appear just because mode==intervene.
+  bool get _isEscalated => _requiresAttention || _escalationReason != null;
   bool _isSending = false;
   bool _isResolving = false;
   final _hostController = TextEditingController();
@@ -109,12 +136,31 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         .eq('booking_id', widget.bookingId)
         .maybeSingle();
 
+    // One-shot fetch of the conversation row so _conversationId (and the mode /
+    // escalation flags) are available immediately, instead of only when the
+    // free-tier realtime stream first fires. Without this, opening a conversation
+    // and quickly tapping Archive/Resolve could silently no-op (those handlers
+    // bail while _conversationId is still null) — the intermittent "nothing
+    // happens on archive" bug, most visible on not-yet-engaged conversations.
+    final conv = await Supabase.instance.client
+        .from('conversations')
+        .select('id, mode, escalation_reason, requires_attention')
+        .eq('booking_id', widget.bookingId)
+        .maybeSingle();
+
     if (mounted) {
       setState(() {
         _guestChatUrl = guest?['guest_chat_url'] as String?;
         final gn = guest?['name'] as String?;
         if (gn != null && gn.isNotEmpty) _guestName = gn;
+        if (conv != null) {
+          _mode = conv['mode'] as String? ?? _mode;
+          _escalationReason = conv['escalation_reason'] as String?;
+          _requiresAttention = conv['requires_attention'] == true;
+          _conversationId ??= conv['id'] as String?;
+        }
       });
+      if (_conversationId != null) _subscribeToMessages(_conversationId!);
       _watchConversation();
     }
   }
@@ -132,6 +178,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           setState(() {
             _mode = row['mode'] as String? ?? 'autopilot';
             _escalationReason = row['escalation_reason'] as String?;
+            _requiresAttention = row['requires_attention'] == true;
           });
           if (_conversationId == null) {
             setState(() => _conversationId = rowId);
@@ -147,6 +194,18 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       setState(() => _copiedLink = true);
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) setState(() => _copiedLink = false);
+      });
+    }
+  }
+
+  Future<void> _copyTelegramLink() async {
+    final url = _telegramUrl;
+    if (url == null) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) {
+      setState(() => _copiedTg = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _copiedTg = false);
       });
     }
   }
@@ -172,10 +231,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           if (mounted) {
             setState(() => _messages = data);
             _scrollToBottom();
-            if (_mode == 'autopilot' &&
-                data.isNotEmpty &&
-                data.last['is_escalated_interaction'] == true) {
-              _setMode('intervene');
+            // An escalation can land while this dialog is open. Detect it from
+            // the messages themselves — scanning ALL rows, since the last one is
+            // usually the __SYS_INTERVENE__ marker, not the escalated reply —
+            // then pull the authoritative flags. This is the reliable fallback
+            // when the conversations realtime event lags or drops.
+            final hasUnresolvedEscalation = data.any((m) =>
+                m['is_escalated_interaction'] == true &&
+                m['resolution_status'] == null);
+            if (hasUnresolvedEscalation && !_isEscalated) {
               _refreshEscalationReason();
             }
           }
@@ -194,7 +258,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     });
   }
 
-  Future<void> _setMode(String mode) async {
+  Future<void> _setMode(String mode, {bool announce = false}) async {
     if (_conversationId == null) return;
     await Supabase.instance.client
         .from('conversations')
@@ -206,23 +270,43 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     } else {
       await _insertSystemMessage(ChatSystemMessages.resume);
     }
+    // Manual toggles push the same notice to a Telegram-linked guest. The
+    // auto-escalation path (announce:false) is skipped — the backend already
+    // notified Telegram when it inserted the escalation marker.
+    if (announce) {
+      try {
+        await ApiClient.postJson(
+          '/api/conversations/announce-transition',
+          {
+            'conversation_id': _conversationId,
+            'kind': mode == 'intervene' ? 'intervene' : 'resume',
+          },
+          bearer: Supabase.instance.client.auth.currentSession?.accessToken,
+        );
+      } catch (_) {
+        // Best-effort — never let a notice failure break the mode switch.
+      }
+    }
   }
 
   // Targeted single-row refresh used when the conversations stream may have
   // missed an update (e.g. after a backgrounded tab, or a new escalation
-  // arriving right after a resolve). Cheap — fetches just the row we need.
+  // arriving while the dialog is open). Pulls the authoritative mode +
+  // escalation flags so the Resolve button appears live even if the
+  // conversations realtime event lagged or dropped (free-tier). Cheap.
   Future<void> _refreshEscalationReason() async {
     if (_conversationId == null) return;
     final row = await Supabase.instance.client
         .from('conversations')
-        .select('escalation_reason')
+        .select('mode, escalation_reason, requires_attention')
         .eq('id', _conversationId!)
         .maybeSingle();
     if (!mounted || row == null) return;
-    final reason = row['escalation_reason'] as String?;
-    if (_escalationReason != reason) {
-      setState(() => _escalationReason = reason);
-    }
+    setState(() {
+      _mode = row['mode'] as String? ?? _mode;
+      _escalationReason = row['escalation_reason'] as String?;
+      _requiresAttention = row['requires_attention'] == true;
+    });
   }
 
   Future<void> _resolveIssue() async {
@@ -232,11 +316,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await ApiClient.postJson(
         '/api/conversations/resolve',
         {'booking_id': widget.bookingId},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
       if (mounted) {
         setState(() {
           _mode = 'autopilot';
           _escalationReason = null;
+          _requiresAttention = false;
         });
         await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
         widget.onResolved?.call();
@@ -266,6 +352,60 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
   }
 
+  Future<void> _archiveConversation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.palette.surface,
+        title: const Text('Archive conversation?'),
+        content: Text(
+          'The reservation may still be active. If the guest sends a new '
+          'message, it will move back to Active Conversations.',
+          style: GoogleFonts.inter(fontSize: 13, color: context.palette.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || _conversationId == null) return;
+    try {
+      await ApiClient.postJson(
+        '/api/conversations/archive',
+        {'conversation_id': _conversationId},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
+      );
+      // Reuse the dashboard's optimistic-refresh callback so the archived
+      // conversation drops off the active list immediately.
+      widget.onResolved?.call();
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conversation archived.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to archive: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _sendHostMessage() async {
     final text = _hostController.text.trim();
     if (text.isEmpty || _conversationId == null || _isSending) return;
@@ -291,6 +431,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       await ApiClient.postJson(
         '/api/messages/host-send',
         {'conversation_id': _conversationId, 'message': text},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
     } on ApiException catch (e) {
       if (mounted) {
@@ -338,9 +479,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
               ),
               child: Column(
                 children: [
-                  _buildDialogAppBar(),
+                  _buildDialogAppBar(isMobile),
                   const Divider(height: 1),
-                  Expanded(child: _buildBody()),
+                  Expanded(child: _buildBody(isMobile)),
                 ],
               ),
             ),
@@ -350,7 +491,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     );
   }
 
-  Widget _buildDialogAppBar() {
+  Widget _buildDialogAppBar(bool isMobile) {
     final palette = context.palette;
     final isEmergency = _escalationReason?.startsWith('emergency_') == true;
     final modeColor = _mode == 'intervene'
@@ -382,9 +523,35 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  widget.bookingId,
-                  style: GoogleFonts.inter(fontSize: 11, color: palette.textMuted),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person_outline_rounded,
+                        size: 12, color: palette.textMuted),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        _guestName,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: palette.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '· ${widget.bookingId}',
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: palette.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -407,6 +574,36 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             ),
           ),
           const SizedBox(width: 4),
+          // On mobile the guest-link panel moves out of view (the conversation
+          // takes the full width), so expose it from the app bar instead.
+          if (isMobile && _guestChatUrl != null)
+            IconButton(
+              icon: const Icon(Icons.link_rounded),
+              tooltip: 'Guest links',
+              onPressed: _showGuestLinkSheet,
+              color: palette.textMuted,
+            ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: Icon(Icons.more_vert_rounded, color: palette.textMuted),
+            color: palette.surface,
+            onSelected: (v) {
+              if (v == 'archive') _archiveConversation();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem<String>(
+                value: 'archive',
+                child: Row(
+                  children: [
+                    Icon(Icons.archive_outlined,
+                        size: 16, color: palette.textSecondary),
+                    const SizedBox(width: 8),
+                    const Text('Archive conversation'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.close_rounded),
             tooltip: 'Close',
@@ -418,7 +615,79 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     );
   }
 
-  Widget _buildBody() {
+  /// Bottom sheet holding the guest-link panel — used on mobile, where the
+  /// side panel is collapsed so the conversation can take the full width.
+  void _showGuestLinkSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(top: 8, bottom: 16),
+          child: _buildGuestLinkSection(),
+        ),
+      ),
+    );
+  }
+
+  /// The messages area (empty state or the scrolling bubble list). Extracted so
+  /// the desktop two-pane layout and the mobile stacked layout share one source.
+  Widget _buildMessagesList() {
+    if (_messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded,
+                size: 40, color: context.palette.border),
+            const SizedBox(height: 12),
+            Text(
+              'No messages yet.',
+              style: GoogleFonts.inter(
+                  color: context.palette.textMuted, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+    final states = _computeEscalationWindow();
+    final isEmergency = _escalationReason?.startsWith('emergency_') == true;
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(16),
+      itemCount: _messages.length,
+      itemBuilder: (_, i) => _buildBubble(
+        _messages[i],
+        escalationState: states[i],
+        isEmergency: isEmergency,
+      ),
+    );
+  }
+
+  /// Mobile: conversation takes the full width; mode toggle + resolve/banner
+  /// sit above it, the reply box below. Guest links live in a bottom sheet
+  /// (app-bar link icon). Avoids the fixed 320px side panel crushing the chat.
+  Widget _buildMobileBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildModeToggle(),
+        if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
+        if (_mode == 'autopilot' && _escalationReason != null)
+          _buildUnresolvedBanner(),
+        const Divider(height: 1),
+        Expanded(child: _buildMessagesList()),
+        if (_mode == 'intervene') _buildHostInput(),
+      ],
+    );
+  }
+
+  Widget _buildBody(bool isMobile) {
+    if (isMobile) return _buildMobileBody();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -440,39 +709,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 ),
               ),
               const Divider(height: 1),
-              Expanded(
-                child: _messages.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.chat_bubble_outline_rounded,
-                                size: 40, color: context.palette.border),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No messages yet.',
-                              style: GoogleFonts.inter(
-                                  color: context.palette.textMuted, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      )
-                    : Builder(builder: (_) {
-                        final states = _computeEscalationWindow();
-                        final isEmergency =
-                            _escalationReason?.startsWith('emergency_') == true;
-                        return ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _messages.length,
-                          itemBuilder: (_, i) => _buildBubble(
-                            _messages[i],
-                            escalationState: states[i],
-                            isEmergency: isEmergency,
-                          ),
-                        );
-                      }),
-              ),
+              Expanded(child: _buildMessagesList()),
             ],
           ),
         ),
@@ -484,7 +721,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             children: [
               _buildGuestLinkSection(),
               _buildModeToggle(),
-              if (_mode == 'intervene') _buildResolveButton(),
+              if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
               if (_mode == 'autopilot' && _escalationReason != null)
                 _buildUnresolvedBanner(),
               const Divider(height: 1),
@@ -586,6 +823,56 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   ],
                 ),
               ],
+              if (_telegramUrl != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Guest Telegram Link',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: context.palette.textPrimary),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: context.palette.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: context.palette.border),
+                  ),
+                  child: Text(
+                    _telegramUrl!,
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: context.palette.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _copiedTg ? null : _copyTelegramLink,
+                    icon: Icon(
+                      _copiedTg
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.copy_rounded,
+                      size: 16,
+                    ),
+                    label: Text(_copiedTg ? 'Copied!' : 'Copy Telegram Link'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _copiedTg
+                          ? context.palette.success
+                          : context.palette.primary,
+                      side: BorderSide(
+                          color: _copiedTg
+                              ? context.palette.success
+                              : context.palette.border),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -623,7 +910,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                     label: 'Autopilot',
                     active: isAutopilot,
                     activeColor: context.palette.primary,
-                    onTap: isAutopilot ? null : () => _setMode('autopilot'),
+                    onTap: isAutopilot
+                        ? null
+                        : () => _setMode('autopilot', announce: true),
                   ),
                 ),
                 Expanded(
@@ -631,7 +920,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                     label: 'Intervene',
                     active: !isAutopilot,
                     activeColor: context.palette.warning,
-                    onTap: !isAutopilot ? null : () => _setMode('intervene'),
+                    onTap: !isAutopilot
+                        ? null
+                        : () => _setMode('intervene', announce: true),
                   ),
                 ),
               ],
@@ -686,9 +977,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   }
 
   // Classifies each message as part of an active escalation, a resolved
-  // escalation, or neither. When a 'resolved' marker is seen, retroactively
-  // flips every message in the open window from active → resolved so the
-  // bubble renderer can colour them green (closed lifecycle).
+  // escalation, or neither, so the bubble renderer can colour the WHOLE chain
+  // (guest trigger → Alfred's escalation reply → host replies → guest
+  // follow-ups → resolve) amber while active and green once resolved.
+  //
+  // The window closes on the `__SYS_RESOLVED__` marker — which is inserted last,
+  // after the host's replies — NOT on the escalated reply's resolution_status
+  // (that sits early in the chain and would wrongly exclude everything after it).
   List<_EscalationState> _computeEscalationWindow() {
     final out =
         List<_EscalationState>.filled(_messages.length, _EscalationState.none);
@@ -696,6 +991,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     int windowStart = -1;
     for (int i = 0; i < _messages.length; i++) {
       final m = _messages[i];
+      final content = m['content'];
+      // Open at the escalation trigger: the guest message right before an
+      // escalated reply, or the escalated reply itself. (A manual Intervene is
+      // not an escalation, so it intentionally does not open a window.)
       if (!inWindow &&
           m['sender_type'] == 'guest' &&
           i + 1 < _messages.length &&
@@ -703,15 +1002,21 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         inWindow = true;
         windowStart = i;
       }
-      if (m['is_escalated_interaction'] == true) {
-        if (!inWindow) windowStart = i;
+      if (!inWindow && m['is_escalated_interaction'] == true) {
         inWindow = true;
+        windowStart = i;
       }
       if (inWindow) out[i] = _EscalationState.active;
-      if (m['resolution_status'] == 'resolved' && inWindow) {
+      // Resolve marker → flip the ENTIRE span green and close the window.
+      if (inWindow && content == ChatSystemMessages.resumeAfterResolve) {
         for (int j = windowStart; j <= i; j++) {
           out[j] = _EscalationState.resolved;
         }
+        inWindow = false;
+        windowStart = -1;
+      } else if (inWindow && content == ChatSystemMessages.resume) {
+        // Manual resume without a formal resolve: stop the window but leave the
+        // span amber (unresolved) — nothing was actually resolved.
         inWindow = false;
         windowStart = -1;
       }
@@ -911,14 +1216,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         bottomRight: Radius.circular(3),
       );
     } else if (isHost) {
-      bgColor = context.palette.surface;
-      border = Border.all(color: context.palette.border);
       radius = const BorderRadius.only(
         topLeft: Radius.circular(3),
         topRight: Radius.circular(14),
         bottomLeft: Radius.circular(14),
         bottomRight: Radius.circular(14),
       );
+      // Host replies made during the intervention are part of the chain, so
+      // they take the same amber (active) / green (resolved) treatment.
+      if (isResolved) {
+        bgColor = context.palette.successContainer;
+        border = Border.all(color: context.palette.success, width: 1.5);
+      } else if (isActive && isEmergency) {
+        bgColor = context.palette.dangerContainer;
+        border = Border.all(color: context.palette.danger, width: 1.5);
+      } else if (isActive) {
+        bgColor = context.palette.warningContainer;
+        border = Border.all(color: context.palette.warning, width: 1.5);
+      } else {
+        bgColor = context.palette.surface;
+        border = Border.all(color: context.palette.border);
+      }
     } else if (isResolved) {
       bgColor = context.palette.successContainer;
       border = Border.all(color: context.palette.success, width: 1.5);

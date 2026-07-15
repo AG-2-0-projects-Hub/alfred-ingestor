@@ -48,7 +48,7 @@ async def process_file(filename: str, data: bytes) -> str:
     ext = _ext(filename)
 
     if ext == "pdf":
-        return await _process_via_file_api(filename, data, "pdf")
+        return await _process_document(filename, data, "pdf")
 
     if ext in _IMAGE_EXTS:
         return await _process_image(filename, data, ext)
@@ -69,31 +69,19 @@ async def process_file(filename: str, data: bytes) -> str:
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
 
-async def _process_via_file_api(filename: str, data: bytes, ext: str) -> str:
+async def _process_document(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "application/octet-stream")
-    uri = await gemini_client.upload_file(data, filename, mime)
-    try:
-        return await gemini_client.process_with_prompt_a(uri, mime)
-    finally:
-        await gemini_client.delete_file(uri)
+    return await gemini_client.process_with_prompt_a(data, mime)
 
 
 async def _process_image(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "image/jpeg")
-    uri = await gemini_client.upload_file(data, filename, mime)
-    try:
-        return await gemini_client.process_with_prompt_b(uri, mime)
-    finally:
-        await gemini_client.delete_file(uri)
+    return await gemini_client.process_with_prompt_b(data, mime)
 
 
 async def _process_audio(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "audio/webm")
-    uri = await gemini_client.upload_file(data, filename, mime)
-    try:
-        return await gemini_client.process_with_prompt_c(uri, mime)
-    finally:
-        await gemini_client.delete_file(uri)
+    return await gemini_client.process_with_prompt_c(data, mime)
 
 
 async def _process_docx(data: bytes) -> str:
