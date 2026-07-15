@@ -115,8 +115,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **⚠️ TWO link shapes — both must be caught (`13b651c` only caught the first):**
   - **implicit flow** — tokens in the URL **fragment**: `#access_token=…&type=signup`.
   - **PKCE flow** — a code in the **query**: `/?code=<uuid>`. **Prod sends this one**, and `13b651c` didn't detect it → the founder's 2026-07-14 test **FAILED** (went straight to the dashboard). The `?code=` (and `token_hash`) detection was added afterward; since the app has no social OAuth, a bare `?code=` can only be a confirmation link. Teardown is also triggered from `initState` directly, because PKCE exchanges the code *during* `initialize` (the session can exist before any listener fires).
-- **last_tested:** 2026-07-14 — **FAILED** (PKCE `?code=` went to the dashboard). Fix shipped; **awaiting retest.** = GATE-2 row **P-1**.
-- **status:** failing
+- **last_tested:** 2026-07-15 (founder) — **PASS** after the PKCE fix (`fcead48`); the 07-14 attempt FAILED on `?code=`. = GATE-2 row **P-1**.
+- **status:** passing
 - **promoted from intake:** `13b651c`, + PKCE fix
 
 ### A7. Delete account
@@ -133,10 +133,10 @@ Not all fields are required for every scenario — drop irrelevant ones.
   2. **Conversations SURVIVE**, archived (`archived_at` set), with their guests renamed **`Guest xxxxx`** (last 5 of the booking id). This is the point of the feature — they are retained, pseudonymized.
   3. `guests.telegram_chat_id` is nulled; `host_profiles` row gone; every object under `host_avatars/{uid}/` removed (the bucket is public and `upload_host_avatar` timestamps rather than overwrites, so a host who changed their picture has several).
   4. The `auth.users` row is gone. It is deleted **LAST**, so any earlier failure leaves the host able to sign in and retry.
-- **also assert:** the guest of a deleted listing can no longer chat — see **C12**.
+- **also assert:** the guest of a deleted listing can no longer chat — see **C9**.
 - **not covered:** `learning_events` rows survive with `property_id` intact. They are pseudonymized, but there is no GDPR erasure path yet — that is decision **D4**.
-- **last_tested:** never — **awaiting founder test on a throwaway account**
-- **status:** pending
+- **last_tested:** 2026-07-15 (founder) — **PASS**: deleted `saint.sannn88@gmail.com` on prod, then re-registered the same email successfully (auth user freed).
+- **status:** passing
 - **promoted from intake:** new 2026-07-14 (`59fd4d5`)
 
 ---
@@ -294,8 +294,8 @@ Not all fields are required for every scenario — drop irrelevant ones.
   2. A **>15 MB** file is rejected **in the drop zone** and never reaches the backend ("exceeds the 15 MB limit per file"). ⚠️ This is the **Vertex inline cap** and is a *different* limit from guest chat media (**10 MB**, `chat_media` bucket) — see **M5**. Confusing the two is what left this row untested.
   3. A multi-file ingest does **not** surface a 429 — `generate_with_retry` (2s/4s/8s) absorbs Vertex's dynamic shared quota.
   4. Merge / conflict-resolve still returns valid JSON.
-- **last_tested:** 2026-07-13 (API sweep — PASS on 1, 3, 4: all 5 types `done` in one 80s run; 5-file burst, zero surfaced 429s). **Assertion 2 is GATE-2 row P-3 and is STILL OPEN — never actually tested.**
-- **status:** pending *(blocked only on assertion 2)*
+- **last_tested:** 2026-07-15 — assertions 1/3/4 via the 2026-07-13 API sweep; **assertion 2 (>15 MB drop-zone reject) closed by the founder 2026-07-15** with a real 34.4 MB file (= GATE-2 P-3).
+- **status:** passing
 - **promoted from intake:** `efd8086`, `5681735`
 
 ### B12. Ingest error surfacing, duplicate files, and completion popups
@@ -903,9 +903,9 @@ mobile breakpoints so the web/desktop layout is unchanged.
   - **Attempt 2 (`72ba4c2`) — desktop FIXED, phone still 6/10.** Read the **mic track's** rate (desktop audio then complete, 9.69s), but the mobile AudioWorklet still dropped ~40%.
   - **Attempt 3 (native rewrite) — abandons `record_web`.** Records with the browser's native **`MediaRecorder`** (lossless everywhere, no worklet), then decodes the blob with the browser's own **`decodeAudioData`** and re-encodes mono 16-bit **WAV** (`_encodeWavMono16`). No rate math, no device-specific path. **Awaiting retest, desktop + phone.**
 - **⚠️ WAV is mandatory:** Gemini **rejects `audio/webm`** and mp4; `decodeAudioData` → WAV is how we get a Gemini-readable file out of whatever MediaRecorder produced.
-- **last_tested:** 2026-07-14 — #1 FAILED; #2 desktop OK, phone 6/10; **#3 (native MediaRecorder) awaiting retest.**
-- **status:** failing
-- **promoted from intake:** `d28cb44`, `72ba4c2`, + native-recorder rewrite
+- **last_tested:** 2026-07-15 (founder) — **PASS on desktop AND phone** after the native-MediaRecorder rewrite (`a1ab9bb`). Console: `44100Hz 1ch — audio 10.80s vs wallclock 11s` (full take). Attempts 1 & 2 (record_web) had FAILED.
+- **status:** passing
+- **promoted from intake:** `d28cb44`, `72ba4c2`, + native-recorder rewrite (`a1ab9bb`)
 
 ### M2. Voice recording UX — stop, review, discard, 60s cap
 - **id:** chat-voice-ux-01
@@ -920,8 +920,8 @@ mobile breakpoints so the web/desktop layout is unchanged.
   5. Reduce-motion (`MediaQuery.disableAnimations`) pins the glow **on** rather than hiding it — a recording indicator that respects reduce-motion by disappearing would be worse than useless.
 - **why:** the first build put **Discard where the mic button had been**, and made stop-and-send one action. The founder's instinctive "I'm done" tap **deleted their message**. Stop must mean stop.
 - **payload note:** at mono 16-bit, 60s ≈ **5.5 MB** — comfortably under the 10 MB cap. At the old 44.1k **stereo** default it was ~10.6 MB, i.e. a full-length note was **rejected after the guest had already recorded it**.
-- **last_tested:** 2026-07-14 — first build FAILED (destructive button in the mic's position). **Rework awaiting founder retest.**
-- **status:** failing
+- **last_tested:** 2026-07-15 (founder) — **PASS** ("working perfectly"). First build FAILED (destructive button in the mic's position); the rework moved Stop into the mic's spot and split off a review step.
+- **status:** passing
 - **promoted from intake:** `d28cb44`, `72ba4c2`
 
 ### M3. Desktop microphone is reachable
@@ -982,12 +982,10 @@ mobile breakpoints so the web/desktop layout is unchanged.
 | **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
 | **Total** | **74** | **13** | **42** | **22** |
 
-**Open (not passing):**
-- **A6** — confirm-email link must not sign you in (= GATE-2 **P-1**, retest required, the flow changed)
-- **A7** — delete account (awaiting founder test on a throwaway)
-- **B11** — the **>15 MB ingest** drop-zone rejection (= GATE-2 **P-3**, never actually tested)
-- **C9** — deleted listing closes Telegram too (RLS half proven; Telegram leg awaiting test)
-- **M1 / M2** — voice duration + recording UX (**both failed once**; reworked, awaiting retest)
+**Open (not passing) — as of 2026-07-15:**
+- **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.
+
+*(Closed 2026-07-15: A6/P-1, A7, B11/P-3, M1, M2 — all founder-verified. Gate 2 is 15/15.)*
 
 ---
 
@@ -1011,9 +1009,9 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 | # | Area | Assert | Status |
 |---|---|---|---|
-| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ◐ **RETEST REQUIRED (the flow changed)** — founder signed up 2026-07-14 and it worked, but that pass **found an auth hole**: the confirmation link signed you straight into the dashboard without the password. Fixed in `13b651c`. Re-assert: confirm link → **sign-in screen** with an "Email confirmed" banner, never the dashboard; then sign in with the password; profile shows the email |
+| P-1 | Signup + auth | Fresh account on empty prod DB; confirm-email flow if enabled | ✅ **2026-07-15 (founder)** — confirm link → **sign-in screen** with the banner, never the dashboard. The 07-14 pass found the auth hole (implicit flow) AND the retest found a second one (PKCE `?code=`, `13b651c` missed it); both fixed (`fcead48`). See **A6** |
 | P-2 | Ingest — all types | pdf · docx · image · sheet · audio all reach `Done` (Vertex has **no File API**; bytes go inline) | ✅ 2026-07-13 — all 5 types `done` in one 80s run |
-| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ☐ **STILL OPEN — never actually tested.** The 2026-07-14 attempt hit the **guest-chat** limit instead (`chat_media` = **10 MB**), which is a different thing. This row is the **ingest drop zone** (**15 MB**, Vertex inline cap). Guard + reject copy confirmed present in the deployed bundle; needs one real >15 MB file dragged into the drop zone |
+| P-3 | Ingest — size cap | A >15 MB file is rejected in the drop zone, never reaching the backend | ✅ **2026-07-15 (founder)** — a 34.4 MB `.wav` in the ingest drop zone shows "…exceeds the 15 MB limit per file" and never reaches the backend. (Not to be confused with the guest-chat 10 MB `chat_media` limit — see **M5**.) |
 | P-4 | Ingest — burst | A multi-file ingest does **not** 429 (retry/backoff absorbs Vertex's dynamic shared quota) | ✅ 2026-07-13 — 5-file burst, zero surfaced 429s |
 | P-5 | Merge + conflicts | Discrepancies detected, questionnaire answered, master JSON updated | ✅ 2026-07-13 (founder) + re-verified via API: 9 conflicts → resolve → `Trained`, 0 remaining |
 | P-6 | Welcome language | Mexican property → **Spanish** welcome (country reads from `location.address.country`) | ✅ 2026-07-13 — "Bienvenido a Casa Gate2 Test…" with country only at `location.address.country` |
@@ -1027,18 +1025,17 @@ mobile breakpoints so the web/desktop layout is unchanged.
 | P-14 | Channel isolation | Web guest is not pinged on Telegram and vice-versa | ✅ **2026-07-14 (founder, cross-device)** — while chatting as a guest on the web link, the phone's Telegram stayed silent. Server-side both branches already proven via logs 2026-07-13 |
 | P-15 | No cold start | Reload / idle → first response is immediate (`min-instances=1`) | ✅ 2026-07-13 — 0.09–0.24s first response after ~10 min idle |
 
-### Founder checklist — status as of 2026-07-14
+### Founder checklist — ✅ COMPLETE as of 2026-07-15
 
-**Gate 2 is 13/15 green.** The founder's verification pass on 2026-07-14 closed **P-8, P-11, P-12 and P-14** (real device / cross-device). Only two rows remain, and neither is a re-run of something already done:
+**Gate 2 is 15/15 green.** P-1 (confirm-email link, after the PKCE fix) and P-3 (the >15 MB ingest cap, with a real 34.4 MB file) were both closed by the founder on 2026-07-15. P-8/P-11/P-12/P-14 closed 2026-07-14 (real device / cross-device); the rest via the 2026-07-13 API sweep.
 
-1. **P-1 — RETEST (the flow changed).** The original pass *found an auth hole*: the confirmation link signed you into the dashboard without ever asking for the password. Fixed in `13b651c`. Re-assert: confirm link → **sign-in screen** with an "Email confirmed" banner (never the dashboard) → sign in with the password → the profile dialog shows your email.
-2. **P-3 — never actually tested.** The 2026-07-14 attempt hit the **guest-chat** 10 MB limit, which is a *different* limit. This row is the **ingest drop zone** at **15 MB**. Drag one real >15 MB file in and confirm the inline rejection.
+Also closed 2026-07-14→15, beyond the P-rows: **A5** sign-up · **A7** delete account · **C10** burst · **C11** transition language · **M1/M2** voice (after the native-MediaRecorder rewrite) · **M3–M5** mic/multi-photo/file-size · the confirm-link **A6** (both implicit + PKCE) · storage/copy.
 
-Plus the **Phase-C fixes** and the two open builds, all in the Pending-intake queue below: sign-up form (no longer freezes; strong-password rules) · chat input keeps focus + 6s burst window · localized transition notices · 🔴 **web voice-note truncation (still broken)** · voice UX (duration/60s/glow) · delete-account.
+**Still open (does NOT gate the merge):** **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested; the RLS + web halves are proven and delete-account (A7) exercised the backend path.
 
-**Merge gate:** these must be green before `staging → main`. Note the merge itself deploys nothing new — prod *already runs this code* (Vercel prod is fed by the `staging` branch; Cloud Run is deployed manually). The merge is when we tag **`v1.0.0-beta.1`** and **retire the rollback**, which is precisely why it waits.
+**Prod test data: DELETED (2026-07-15).** Properties "Casa Gate2 Test" + "Loft Gate2 Fallback", their guests/conversations, and the throwaway host `…+gate2claude@gmail.com` are gone (hard delete via `_Context/plans/prod_cleanup_gate2.sql`; STEP 3 confirmed host=0, properties=0).
 
-**Afterwards:** delete the prod test data — properties "Casa Gate2 Test" + "Loft Gate2 Fallback", their guests, and the throwaway host `…+gate2claude@gmail.com`.
+**Merge gate is CLEAR.** The merge itself deploys nothing new — prod already runs this code (Vercel prod builds from `staging`; Cloud Run is manual). The merge is when we tag **`v1.0.0-beta.1`** and retire the Render rollback. → **Batch 5, the flip.**
 
 ---
 
