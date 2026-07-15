@@ -111,10 +111,13 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **action:** click "Confirm your email address" in the email
 - **host_expected:** lands on the **sign-in screen** with an "Email confirmed" banner — **never** straight into the dashboard. Then signing in with the password works, and the profile dialog shows the email.
 - **also assert:** a normal (non-confirmation) visit with an existing session still goes straight to the dashboard.
-- **why this exists:** Supabase's confirmation link carries **session tokens in the URL**, so clicking it dropped the visitor into the dashboard **signed in, without ever entering the password** — anyone holding a forwarded or shared inbox became the host. The launch URL is now captured *before* `Supabase.initialize` consumes the fragment, the auto-created session is torn down, and the visitor is routed to sign-in.
-- **last_tested:** never — **the flow changed after the bug was found (`13b651c`); this is GATE-2 row P-1 and is still open**
-- **status:** pending
-- **promoted from intake:** `13b651c`
+- **why this exists:** Supabase's confirmation link signs the visitor straight in, so anyone holding a forwarded or shared inbox became the host without the password. On confirmation we capture the launch URL *before* `Supabase.initialize` consumes it, tear down the auto-created session, and route to sign-in.
+- **⚠️ TWO link shapes — both must be caught (`13b651c` only caught the first):**
+  - **implicit flow** — tokens in the URL **fragment**: `#access_token=…&type=signup`.
+  - **PKCE flow** — a code in the **query**: `/?code=<uuid>`. **Prod sends this one**, and `13b651c` didn't detect it → the founder's 2026-07-14 test **FAILED** (went straight to the dashboard). The `?code=` (and `token_hash`) detection was added afterward; since the app has no social OAuth, a bare `?code=` can only be a confirmation link. Teardown is also triggered from `initState` directly, because PKCE exchanges the code *during* `initialize` (the session can exist before any listener fires).
+- **last_tested:** 2026-07-14 — **FAILED** (PKCE `?code=` went to the dashboard). Fix shipped; **awaiting retest.** = GATE-2 row **P-1**.
+- **status:** failing
+- **promoted from intake:** `13b651c`, + PKCE fix
 
 ### A7. Delete account
 - **id:** auth-delete-account-01
@@ -889,22 +892,20 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 ### M1. 🔴 A voice note records its full duration
 - **id:** chat-voice-duration-01
-- **touches:** `frontend/lib/screens/chat_screen.dart` (`_recorderSampleRate`, `_auditWav`)
+- **touches:** `frontend/lib/screens/chat_screen.dart` (`_startRecording` via `MediaRecorder`, `_finalizeRecording`, `_encodeWavMono16`, `_auditWav`)
 - **layer:** 2
-- **setup:** guest web chat, on a real browser (this **cannot** be simulated — it needs a real mic + AudioContext)
-- **action:** hold the mic and count out loud to **10**, then stop and send
-- **guest_expected:** the stored WAV is **~10s, not ~7s**. Open the console: `_auditWav` prints the truth every time —
-  `voice: 48000Hz 1ch — audio 9.98s vs wallclock 10s`, and shouts `STILL TRUNCATED` if the audio is >5% short of the clock.
-- **db_expected:** the WAV header reads `numChannels = 1` and `sampleRate =` **the device's real mic rate**; `dataLen / byteRate ≈ wall-clock`.
-- **also assert on a 44.1kHz device (a Mac or iPhone):** this is the case a hardcoded `48000` would have missed.
-- **root cause (twice — read before touching this):** `record_web` routes every buffer through a hand-rolled JS resampler (`record.worklet.js`) unless the requested rate **equals the source**, in which case it takes an identity bypass. That resampler **resets its carry-over (`tailExists`, `lastWeight`) on EVERY call**, so a downsample drops samples on each ~43ms flush — a *compounding* loss, not a missing tail.
-  - **Attempt 1 (wrong):** the default config is 44.1kHz/2ch → forced a resample. Fixed by requesting a rate — but we read `AudioContext().sampleRate`, which is the **OUTPUT** device. On a 44.1kHz-output / 48kHz-mic machine that asks for a *downsample* and walks straight back into the bug (`48000/44100 = 1.088` — exactly the ~9% observed: 9/10s, 8/10s, 9/10s).
-  - **Attempt 2 (correct):** `recorder_delegate.dart:_adjustContext` builds the AudioContext from the **MIC TRACK's** settings (`tracks.first.getSettings().sampleRate`), falling back to a default AudioContext only where the browser hides it (Firefox). We now reproduce **that** decision exactly.
-- **⚠️ do NOT "fix" this by switching to opus:** Gemini **rejects `audio/webm`**. WAV is why transcription works at all.
-- **⚠️ `numChannels: 1` is load-bearing:** the worklet does `input[channel % input.length]`, so the default of 2 duplicates a mono mic into a **fake stereo pair** — double the bytes for zero information. It is also what makes the 60s cap safe (see **M2**).
-- **last_tested:** 2026-07-14 — attempt 1 FAILED (still ~10% short). **Attempt 2 awaiting founder retest.**
+- **setup:** guest web chat, on a real browser — **desktop AND a phone browser** (cannot be simulated; needs a real mic)
+- **action:** record while counting out loud to **10**, stop, send
+- **guest_expected:** the stored WAV covers the whole take on **both** desktop and phone. Console: `_auditWav` prints `voice: <rate>Hz 1ch — audio <n>s vs wallclock <n>s`; audio ≈ wall clock (a touch over is normal — see below), never well under.
+- **⚠️ "stops at 9" is NOT truncation.** Counting "one…ten" out loud takes ~9s, not 10 — the timer is honest and the audio (e.g. 9.69s) captures past the last count. Only audio **well below** the wall clock is a real loss.
+- **THREE attempts (read before touching this):** `record_web` records via an **AudioWorklet + a hand-rolled JS resampler** that resets its carry-over on every call and is flaky on mobile Safari.
+  - **Attempt 1 (`d28cb44`) — FAILED, ~10% short.** Read `AudioContext().sampleRate` = the **OUTPUT** device → requested a downsample on a 44.1k-out/48k-mic machine (`48000/44100 = 1.088`).
+  - **Attempt 2 (`72ba4c2`) — desktop FIXED, phone still 6/10.** Read the **mic track's** rate (desktop audio then complete, 9.69s), but the mobile AudioWorklet still dropped ~40%.
+  - **Attempt 3 (native rewrite) — abandons `record_web`.** Records with the browser's native **`MediaRecorder`** (lossless everywhere, no worklet), then decodes the blob with the browser's own **`decodeAudioData`** and re-encodes mono 16-bit **WAV** (`_encodeWavMono16`). No rate math, no device-specific path. **Awaiting retest, desktop + phone.**
+- **⚠️ WAV is mandatory:** Gemini **rejects `audio/webm`** and mp4; `decodeAudioData` → WAV is how we get a Gemini-readable file out of whatever MediaRecorder produced.
+- **last_tested:** 2026-07-14 — #1 FAILED; #2 desktop OK, phone 6/10; **#3 (native MediaRecorder) awaiting retest.**
 - **status:** failing
-- **promoted from intake:** `d28cb44`, `72ba4c2`
+- **promoted from intake:** `d28cb44`, `72ba4c2`, + native-recorder rewrite
 
 ### M2. Voice recording UX — stop, review, discard, 60s cap
 - **id:** chat-voice-ux-01

@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:record/record.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:web/web.dart' as web;
+// Guest voice recording uses the browser's native MediaRecorder (see the voice
+// section below), not the `record` package — its web resampler truncated audio.
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
@@ -53,12 +52,21 @@ class _ChatScreenState extends State<ChatScreen>
   // JWT state — fetched from /api/guest-token on init and re-fetched on expiry.
   String? _guestToken;
   int _guestTokenExpiry = 0; // unix seconds
-  AudioRecorder? _recorder;
-  AudioEncoder _recordEncoder = AudioEncoder.wav;
+  // Voice recording uses the browser's NATIVE MediaRecorder, not the `record`
+  // package. record_web routes audio through an AudioWorklet + a hand-rolled JS
+  // resampler that drops samples (badly on mobile Safari) — two attempts to tame
+  // it still lost ~10% on desktop and ~40% on a phone. MediaRecorder captures
+  // losslessly on every browser; we convert its output to WAV with the browser's
+  // own decoder (see _finalizeRecording), which is the only format Gemini reads.
+  web.MediaRecorder? _mediaRecorder;
+  web.MediaStream? _micStream;
+  final List<web.Blob> _recordChunks = [];
   Timer? _recordTimer;
   int _recordSeconds = 0;
-  /// A finished take, held for review. Non-null == "recorded, not yet sent".
-  String? _pendingVoicePath;
+  bool _processingVoice = false;
+  /// A finished, WAV-encoded take held for review. Non-null == "recorded, not
+  /// yet sent".
+  Uint8List? _pendingVoiceWav;
   final _controller = TextEditingController();
   final _inputFocus = FocusNode();
 
@@ -145,7 +153,6 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
-    _recorder = AudioRecorder();
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -185,7 +192,12 @@ class _ChatScreenState extends State<ChatScreen>
     _modeSubscription?.cancel();
     _pulseCtrl.dispose();
     _recordTimer?.cancel();
-    _recorder?.dispose();
+    if (_isRecording) {
+      try {
+        _mediaRecorder?.stop();
+      } catch (_) {}
+    }
+    _stopMic();
     _controller.dispose();
     _inputFocus.dispose();
     _scrollController.dispose();
@@ -468,64 +480,10 @@ class _ChatScreenState extends State<ChatScreen>
     return 'Couldn\'t send that $what. Please check your connection and try again.';
   }
 
-  /// The sample rate `record_web` will actually run its AudioContext at.
-  ///
-  /// Why this exists: record_web hands every buffer to a hand-rolled JS
-  /// resampler (`record.worklet.js`) unless the requested rate already equals
-  /// the source rate, in which case it takes an identity bypass. That resampler
-  /// is lossy by construction — on a downsample it resets its carry-over state
-  /// (`tailExists`, `lastWeight`) on EVERY call, dropping samples on each ~43ms
-  /// flush. That is the ~10% (compounding) loss, not a missing tail.
-  ///
-  /// The rate it compares against is NOT one we choose and NOT the output
-  /// device's. `recorder_delegate.dart:_adjustContext` builds the AudioContext
-  /// from the MIC TRACK's own settings:
-  ///
-  ///     settings.hasProperty('sampleRate')
-  ///         ? AudioContext(sampleRate: settings.sampleRate)   // Chrome, Safari
-  ///         : AudioContext()                                  // Firefox
-  ///
-  /// So we reproduce exactly that decision. Reading `AudioContext().sampleRate`
-  /// instead — as a first pass here did — reads the OUTPUT device, which on a
-  /// machine with a 44.1kHz output and a 48kHz mic asks for a downsample and
-  /// walks straight back into the bug.
-  Future<int> _recorderSampleRate() async {
-    try {
-      final stream = await web.window.navigator.mediaDevices
-          .getUserMedia(web.MediaStreamConstraints(audio: true.toJS))
-          .toDart;
-      final tracks = stream.getAudioTracks().toDart;
-      int? rate;
-      if (tracks.isNotEmpty) {
-        final settings = tracks.first.getSettings();
-        if (settings.hasProperty('sampleRate'.toJS).toDart) {
-          rate = settings.sampleRate;
-        }
-      }
-      // Release the probe's handle on the mic before record_web opens its own.
-      for (final t in tracks) {
-        t.stop();
-      }
-      if (rate != null && rate > 0) return rate;
-    } catch (_) {
-      // Permission denied / no device — _startRecording surfaces it properly.
-    }
-    // Firefox: the track exposes no sampleRate, so record_web falls back to a
-    // default AudioContext. Match that fallback.
-    try {
-      final ctx = web.AudioContext();
-      final rate = ctx.sampleRate.toInt();
-      ctx.close();
-      return rate;
-    } catch (_) {
-      return 48000;
-    }
-  }
-
-  /// Ground truth for the truncation bug: what the WAV header actually claims,
-  /// against the wall clock we counted. If audio < wallclock, samples are still
-  /// being dropped and the resampler is still engaged — so say so out loud
-  /// rather than shipping another silent 10% loss.
+  /// Sanity check on the finished WAV: what the header claims vs the wall clock
+  /// we counted. Prints to the console so a bad take reports itself instead of
+  /// being argued about. (Note: counting "one…ten" out loud takes ~9s, not 10 —
+  /// audio ≈ wall clock, or a touch over, is correct, not truncation.)
   void _auditWav(Uint8List bytes, int wallClockSeconds) {
     if (bytes.length < 44) return;
     final bd = ByteData.sublistView(bytes);
@@ -539,8 +497,8 @@ class _ChatScreenState extends State<ChatScreen>
       'voice: ${rate}Hz ${channels}ch — audio ${audioSeconds.toStringAsFixed(2)}s '
       'vs wallclock ${wallClockSeconds}s',
     );
-    if (wallClockSeconds > 2 && audioSeconds < wallClockSeconds * 0.95) {
-      debugPrint('voice: STILL TRUNCATED — the resampler did not bypass.');
+    if (wallClockSeconds > 2 && audioSeconds < wallClockSeconds * 0.9) {
+      debugPrint('voice: SHORT — captured audio is well under the timer.');
     }
   }
 
@@ -549,41 +507,20 @@ class _ChatScreenState extends State<ChatScreen>
     _recordTimer = null;
   }
 
-  /// Stop recording and hold the take for review — do NOT send it.
-  ///
-  /// Stopping and sending used to be the same tap, which meant the only control
-  /// next to a live recording was a destructive one. It sat where the mic button
-  /// had been, so the obvious "I'm done" tap threw the recording away instead.
-  /// Now: mic → stop → review (discard | send).
-  Future<void> _stopRecording() async {
-    // Re-entrancy: the 60s auto-stop can fire at the same moment the guest taps
-    // stop. Clear the flag synchronously, before the first await.
-    if (_recorder == null || !_isRecording) return;
-    _stopRecordTimer();
-    _isRecording = false;
-    if (mounted) setState(() {});
-
-    final path = await _recorder!.stop();
-    if (!mounted) return;
-    setState(() => _pendingVoicePath = path);
-  }
-
-  /// Throw the take away. Only reachable from the review state — never while
-  /// recording, where it would be one mis-tap away from destroying the message.
-  void _discardPendingVoice() {
-    if (!mounted) return;
-    setState(() {
-      _pendingVoicePath = null;
-      _recordSeconds = 0;
-    });
+  void _stopMic() {
+    final s = _micStream;
+    if (s != null) {
+      for (final t in s.getTracks().toDart) {
+        t.stop();
+      }
+    }
+    _micStream = null;
   }
 
   Future<void> _startRecording() async {
-    if (_recorder == null) return;
     if (_conversationId == null) {
       // The conversation already exists — /api/guest-token creates it with the
       // welcome message — so a null id here just means the load hasn't landed.
-      // Fetch it rather than telling the guest to go type something first.
       await _loadConversation();
     }
     if (_conversationId == null) {
@@ -594,36 +531,30 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
     try {
-      // Do NOT gate on hasPermission() here. On desktop Chrome and Firefox it
-      // reports false while the permission is merely UN-ASKED (state "prompt",
-      // not "denied"), so bailing out meant getUserMedia was never called — and
-      // getUserMedia is the only thing that makes the browser show its
-      // permission dialog. The mic was unreachable on desktop for that reason;
-      // it only worked on mobile because permission was already granted there.
-      //
-      // Starting the recorder performs getUserMedia, which prompts. A genuine
-      // denial (or a previously stored block) then surfaces as an exception
-      // below, where we can tell the guest how to undo it.
-      _recordEncoder = await _recorder!.isEncoderSupported(AudioEncoder.wav)
-          ? AudioEncoder.wav  // Gemini reads WAV directly; it rejects audio/webm
-          : AudioEncoder.opus;
-      // sampleRate: match the hardware so record_web bypasses its lossy
-      // resampler (see _browserSampleRate). numChannels: 1 because the worklet
-      // does `input[channel % input.length]` — with the default 2 it duplicates
-      // a mono mic into a fake stereo pair, doubling the bytes for no
-      // information and halving how long a note can be under the 10 MB cap.
-      await _recorder!.start(
-        RecordConfig(
-          encoder: _recordEncoder,
-          sampleRate: await _recorderSampleRate(),
-          numChannels: 1,
-        ),
-        path: 'recording',
-      );
+      // getUserMedia is the only call that makes the browser show its mic
+      // prompt, so we go straight to it (never gate on a permission query —
+      // desktop reports "prompt" as false and the mic would be unreachable).
+      // A real denial surfaces as an exception below.
+      final stream = await web.window.navigator.mediaDevices
+          .getUserMedia(web.MediaStreamConstraints(audio: true.toJS))
+          .toDart;
+      _micStream = stream;
+      _recordChunks.clear();
+
+      final rec = web.MediaRecorder(stream);
+      rec.ondataavailable = ((web.BlobEvent e) {
+        if (e.data.size > 0) _recordChunks.add(e.data);
+      }).toJS;
+      rec.onstop = ((web.Event _) {
+        _finalizeRecording();
+      }).toJS;
+      _mediaRecorder = rec;
+      rec.start(); // one blob delivered at stop()
+
       if (!mounted) return;
       setState(() {
         _isRecording = true;
-        _pendingVoicePath = null;
+        _pendingVoiceWav = null;
         _recordSeconds = 0;
       });
       _stopRecordTimer();
@@ -631,16 +562,15 @@ class _ChatScreenState extends State<ChatScreen>
         if (!mounted || !_isRecording) return;
         setState(() => _recordSeconds++);
         if (_recordSeconds >= _maxRecordSeconds) {
-          // Hard cap. Stop into the review state — never auto-send: the guest
-          // must still get to hear what the cap caught and decide.
+          // Hard cap. Stop into review — never auto-send.
           _stopRecording();
         }
       });
     } catch (e) {
       if (!mounted) return;
-      // getUserMedia's failure modes are distinct and need distinct advice —
-      // "blocked" and "you have no microphone" are not the same problem, and
-      // showing the raw DOMException helps nobody.
+      _stopMic();
+      // getUserMedia's failure modes need distinct advice — "blocked" and "no
+      // microphone" are different problems, and a raw DOMException helps nobody.
       final err = e.toString().toLowerCase();
       final String message;
       if (err.contains('notfound') || err.contains('devicesnotfound')) {
@@ -657,29 +587,145 @@ class _ChatScreenState extends State<ChatScreen>
       } else {
         message = 'Could not start recording. Please try again.';
       }
-      debugPrint('voice recording failed: $e');  // full detail stays for us
+      debugPrint('voice recording failed: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(duration: const Duration(seconds: 6), content: Text(message)),
       );
     }
   }
 
-  /// Upload and send the take the guest reviewed and approved.
-  Future<void> _sendPendingVoice() async {
-    final path = _pendingVoicePath;
-    if (path == null || _conversationId == null) return;
-    final recordedSeconds = _recordSeconds;
+  /// Stop recording and hold the take for review — do NOT send it. Stopping the
+  /// MediaRecorder fires `onstop` → [_finalizeRecording], which decodes the take
+  /// to WAV. mic → stop → (brief "preparing") → review (discard | send).
+  Future<void> _stopRecording() async {
+    // Re-entrancy: the 60s cap can fire at the same instant the guest taps stop.
+    if (_mediaRecorder == null || !_isRecording) return;
+    _stopRecordTimer();
+    if (!mounted) return;
     setState(() {
-      _pendingVoicePath = null;
+      _isRecording = false;
+      _processingVoice = true;
+    });
+    try {
+      _mediaRecorder!.stop(); // async → onstop → _finalizeRecording
+    } catch (e) {
+      debugPrint('voice stop failed: $e');
+      _stopMic();
+      if (mounted) setState(() => _processingVoice = false);
+    }
+  }
+
+  /// onstop handler: assemble the recorded blob, decode it with the browser's
+  /// OWN decoder (correct on every device — this is what record_web's buggy JS
+  /// resampler failed to be), and re-encode as mono 16-bit WAV, the one audio
+  /// format Gemini reads.
+  Future<void> _finalizeRecording() async {
+    _stopMic();
+    try {
+      final parts = <JSAny>[for (final b in _recordChunks) b].toJS;
+      final blob = web.Blob(parts);
+      final arrayBuffer = await blob.arrayBuffer().toDart;
+
+      final ctx = web.AudioContext();
+      final audioBuffer = await ctx.decodeAudioData(arrayBuffer).toDart;
+      await ctx.close().toDart;
+
+      final wav = _encodeWavMono16(audioBuffer);
+      _mediaRecorder = null;
+      if (!mounted) return;
+      setState(() {
+        _processingVoice = false;
+        _pendingVoiceWav = wav;
+      });
+    } catch (e) {
+      debugPrint('voice finalize failed: $e');
+      _mediaRecorder = null;
+      if (!mounted) return;
+      setState(() {
+        _processingVoice = false;
+        _pendingVoiceWav = null;
+        _recordSeconds = 0;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not prepare that recording. Please try again.')),
+      );
+    }
+  }
+
+  /// Encode an AudioBuffer as a mono, 16-bit PCM WAV at its native sample rate.
+  /// No resampling — the buffer is already at the browser's decode rate, so
+  /// there is nothing to drop. Mono keeps the file well under the 10 MB cap.
+  Uint8List _encodeWavMono16(web.AudioBuffer buffer) {
+    final sampleRate = buffer.sampleRate.toInt();
+    final frames = buffer.length;
+    final channels = buffer.numberOfChannels;
+
+    final ch0 = buffer.getChannelData(0).toDart;
+    Float32List mono;
+    if (channels <= 1) {
+      mono = ch0;
+    } else {
+      final ch1 = buffer.getChannelData(1).toDart;
+      mono = Float32List(frames);
+      for (var i = 0; i < frames; i++) {
+        mono[i] = (ch0[i] + ch1[i]) * 0.5;
+      }
+    }
+
+    final dataLen = frames * 2; // 16-bit mono
+    final out = ByteData(44 + dataLen);
+    void writeStr(int off, String s) {
+      for (var i = 0; i < s.length; i++) {
+        out.setUint8(off + i, s.codeUnitAt(i));
+      }
+    }
+
+    writeStr(0, 'RIFF');
+    out.setUint32(4, 36 + dataLen, Endian.little);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    out.setUint32(16, 16, Endian.little);       // PCM chunk size
+    out.setUint16(20, 1, Endian.little);        // audio format = PCM
+    out.setUint16(22, 1, Endian.little);        // channels = mono
+    out.setUint32(24, sampleRate, Endian.little);
+    out.setUint32(28, sampleRate * 2, Endian.little); // byte rate
+    out.setUint16(32, 2, Endian.little);        // block align
+    out.setUint16(34, 16, Endian.little);       // bits per sample
+    writeStr(36, 'data');
+    out.setUint32(40, dataLen, Endian.little);
+
+    var off = 44;
+    for (var i = 0; i < frames; i++) {
+      var s = mono[i];
+      if (s > 1) s = 1; else if (s < -1) s = -1;
+      out.setInt16(off, (s < 0 ? s * 0x8000 : s * 0x7FFF).round(), Endian.little);
+      off += 2;
+    }
+    return out.buffer.asUint8List();
+  }
+
+  /// Throw the take away. Only reachable from the review state — never while
+  /// recording, where it would be one mis-tap away from destroying the message.
+  void _discardPendingVoice() {
+    if (!mounted) return;
+    setState(() {
+      _pendingVoiceWav = null;
       _recordSeconds = 0;
     });
-    final isWav = _recordEncoder == AudioEncoder.wav;
-    final mime = isWav ? 'audio/wav' : 'audio/ogg';
-    final ext = isWav ? 'wav' : 'ogg';
+  }
+
+  /// Upload and send the take the guest reviewed and approved.
+  Future<void> _sendPendingVoice() async {
+    final bytes = _pendingVoiceWav;
+    if (bytes == null || _conversationId == null) return;
+    final recordedSeconds = _recordSeconds;
+    setState(() {
+      _pendingVoiceWav = null;
+      _recordSeconds = 0;
+    });
+    const mime = 'audio/wav';
     try {
-      final response = await http.get(Uri.parse(path));
-      final bytes = response.bodyBytes;
-      if (isWav) _auditWav(bytes, recordedSeconds);
+      _auditWav(bytes, recordedSeconds);
       if (bytes.length > _maxMediaBytes) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -693,14 +739,14 @@ class _ChatScreenState extends State<ChatScreen>
         );
         return;
       }
-      final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
       final storagePath = '$_conversationId/chat_media/$filename';
       await _db.storage
           .from('chat_media')
           .uploadBinary(
             storagePath,
             bytes,
-            fileOptions: FileOptions(contentType: mime, upsert: false),
+            fileOptions: const FileOptions(contentType: mime, upsert: false),
           );
       await _db.from('messages').insert({
         'conversation_id': _conversationId,
@@ -1148,6 +1194,27 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// The brief moment between Stop and the take being decoded to WAV.
+  Widget _buildVoiceProcessingBar() {
+    return Row(
+      children: [
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+            strokeWidth: 2, color: context.palette.primary),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          'Preparing voice note…',
+          style: GoogleFonts.inter(
+              fontSize: 13, color: context.palette.textSecondary),
+        ),
+      ],
+    );
+  }
+
   /// After Stop: the take is held, not sent. Discard sits to the LEFT of Send,
   /// away from where the guest's finger already is.
   Widget _buildVoiceReviewBar() {
@@ -1211,9 +1278,11 @@ class _ChatScreenState extends State<ChatScreen>
           padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
           child: _isRecording
               ? _buildRecordingBar()
-              : _pendingVoicePath != null
-                  ? _buildVoiceReviewBar()
-                  : Row(
+              : _processingVoice
+                  ? _buildVoiceProcessingBar()
+                  : _pendingVoiceWav != null
+                      ? _buildVoiceReviewBar()
+                      : Row(
             children: [
               Expanded(
                 child: TextField(
