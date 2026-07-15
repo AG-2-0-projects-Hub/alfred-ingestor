@@ -88,6 +88,54 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **last_tested:** 2026-06-09 (automated Playwright — PASS; pre-logout, post-logout, and post-refresh screenshots all judged pass)
 - **status:** passing
 
+### A5. Sign-up with email confirmation ON
+- **id:** auth-signup-02
+- **touches:** `frontend/lib/screens/auth_screen.dart`
+- **layer:** 2
+- **setup:** anonymous session; Supabase email-confirmation enabled (it is, on prod)
+- **action:** sign up with a fresh email
+- **host_expected:**
+  1. A password under **8 chars**, or missing upper/lower/digit, or a mismatched confirmation, is rejected **inline**.
+  2. A rejected submit **returns focus to the offending field and the field stays editable** — typing clears the error. (Regression: it became un-editable and the host had to reload the page.)
+  3. A successful sign-up shows the **"Confirm your email"** step and does **NOT** navigate to the dashboard. (Regression: `signUp()` was followed by an unconditional `pushReplacement`, but with confirmation ON it returns a user and **no session** — so the host landed on a dashboard where they weren't signed in: "Email: —", zero stats, nothing loadable.)
+  4. Toggling sign-in ↔ sign-up clears the confirm field and any error.
+- **last_tested:** 2026-07-14 (founder — PASS: the "Confirm your email" step appears)
+- **status:** passing
+- **promoted from intake:** `4e1485a`, `13b651c`
+
+### A6. 🔴 The confirmation link must NOT sign you in
+- **id:** auth-confirm-link-01
+- **touches:** `frontend/lib/main.dart`, `frontend/lib/screens/auth_screen.dart`
+- **layer:** 2
+- **setup:** a fresh sign-up whose confirmation email has arrived
+- **action:** click "Confirm your email address" in the email
+- **host_expected:** lands on the **sign-in screen** with an "Email confirmed" banner — **never** straight into the dashboard. Then signing in with the password works, and the profile dialog shows the email.
+- **also assert:** a normal (non-confirmation) visit with an existing session still goes straight to the dashboard.
+- **why this exists:** Supabase's confirmation link carries **session tokens in the URL**, so clicking it dropped the visitor into the dashboard **signed in, without ever entering the password** — anyone holding a forwarded or shared inbox became the host. The launch URL is now captured *before* `Supabase.initialize` consumes the fragment, the auto-created session is torn down, and the visitor is routed to sign-in.
+- **last_tested:** never — **the flow changed after the bug was found (`13b651c`); this is GATE-2 row P-1 and is still open**
+- **status:** pending
+- **promoted from intake:** `13b651c`
+
+### A7. Delete account
+- **id:** auth-delete-account-01
+- **touches:** `frontend/lib/widgets/profile_dialog.dart`, `backend/routers/properties.py`, `backend/services/supabase_client.py` (`delete_host_account`)
+- **layer:** 2
+- **setup:** a **throwaway** host with at least one property and one guest conversation. **Never run this against a real account.**
+- **action:** Profile → **Delete account** → type `DELETE` → confirm
+- **host_expected:**
+  1. The button is inert until the word `DELETE` is typed (the only typed confirmation in the app).
+  2. On success the host is signed out and returned to the auth screen; **the login no longer works** and the email is free to sign up again.
+- **db_expected:**
+  1. Every property the host owned is a **tombstone**: `status='deleted'`, `deleted_at` set, `master_json`/markdown/history blanked, `learned_knowledge = []`.
+  2. **Conversations SURVIVE**, archived (`archived_at` set), with their guests renamed **`Guest xxxxx`** (last 5 of the booking id). This is the point of the feature — they are retained, pseudonymized.
+  3. `guests.telegram_chat_id` is nulled; `host_profiles` row gone; every object under `host_avatars/{uid}/` removed (the bucket is public and `upload_host_avatar` timestamps rather than overwrites, so a host who changed their picture has several).
+  4. The `auth.users` row is gone. It is deleted **LAST**, so any earlier failure leaves the host able to sign in and retry.
+- **also assert:** the guest of a deleted listing can no longer chat — see **C12**.
+- **not covered:** `learning_events` rows survive with `property_id` intact. They are pseudonymized, but there is no GDPR erasure path yet — that is decision **D4**.
+- **last_tested:** never — **awaiting founder test on a throwaway account**
+- **status:** pending
+- **promoted from intake:** new 2026-07-14 (`59fd4d5`)
+
 ---
 
 ## B. Ingestor (property creation)
@@ -232,6 +280,36 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **last_tested:** 2026-07-01 (manual by user + Supabase MCP verification — PASS: 4 Bungalow-URL tombstones coexist with 1 live `Trained` row; same-nickname re-add `bb59126c`→`7dabad81` created a fresh row; all tombstones retained chats with 100% anonymized guests)
 - **status:** passing
 
+### B11. Ingest under Vertex AI (regression sweep) — incl. the 15 MB cap
+- **id:** ingest-vertex-01
+- **touches:** `backend/services/gemini_client.py`, `backend/services/genai_factory.py`, `frontend/lib/widgets/drop_zone.dart`
+- **layer:** 2
+- **setup:** prod (Vertex transport, `GOOGLE_GENAI_USE_VERTEXAI=true`)
+- **action:** ingest each file type, then a burst, then one oversized file
+- **host_expected:**
+  1. **pdf · docx · image · sheet · audio** all reach `Done`. (Vertex has **no File API** — `client.files.upload()` is Developer-API-only — so bytes now go **inline** via `Part.from_bytes`. Before this, *every* image/PDF ingest failed.)
+  2. A **>15 MB** file is rejected **in the drop zone** and never reaches the backend ("exceeds the 15 MB limit per file"). ⚠️ This is the **Vertex inline cap** and is a *different* limit from guest chat media (**10 MB**, `chat_media` bucket) — see **M5**. Confusing the two is what left this row untested.
+  3. A multi-file ingest does **not** surface a 429 — `generate_with_retry` (2s/4s/8s) absorbs Vertex's dynamic shared quota.
+  4. Merge / conflict-resolve still returns valid JSON.
+- **last_tested:** 2026-07-13 (API sweep — PASS on 1, 3, 4: all 5 types `done` in one 80s run; 5-file burst, zero surfaced 429s). **Assertion 2 is GATE-2 row P-3 and is STILL OPEN — never actually tested.**
+- **status:** pending *(blocked only on assertion 2)*
+- **promoted from intake:** `efd8086`, `5681735`
+
+### B12. Ingest error surfacing, duplicate files, and completion popups
+- **id:** ingest-ux-01
+- **touches:** `frontend/lib/screens/add_property_screen.dart`, `frontend/lib/widgets/drop_zone.dart`, `frontend/lib/widgets/conflict_questionnaire.dart`
+- **layer:** 2
+- **action:** drive an ingest to completion, including a failure and a duplicate file
+- **host_expected:**
+  1. A backend error during ingest is shown **inline** (never silently dropped) and the upload queue is preserved so the host can retry.
+  2. A file whose name is already in the queue is rejected inline ("— already in the queue") and is not re-uploaded. (Regression: it left a duplicate row stuck on "processing" forever.)
+  3. Completion popups: after ingest → **no popup**, only the inline panel + MERGE NOW. After a no-conflict merge (`Merged`) or a conflict-resolved flow (`Trained`) → the "Alfred is now trained" popup, single "Back to Dashboard" button.
+  4. Those popups render on an **opaque** surface — legible over the dimmed barrier, in light and dark. (A tint-only first attempt was overridden by GlassPanel's highlight gradient and didn't take.)
+  5. Submitting conflict resolutions applies the knowledge update automatically; there is no intermediate "Update Knowledge" button.
+- **last_tested:** 2026-06-09
+- **status:** passing
+- **promoted from intake:** `4336ebd`, `0f019f2`, `feaf8fd`, `1dded18`, `55c7efa`
+
 ---
 
 ## C. Chat lifecycle (host + guest perspectives)
@@ -340,6 +418,56 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **db_expected:** `POST /api/guest-token` returns `410` when the booking's property has `deleted_at` set; no new messages are written to the tombstone's conversation
 - **last_tested:** 2026-07-01 (manual by user — PASS: closed-state card shown, input bar hidden)
 - **status:** passing
+- **⚠️ EXTENDED 2026-07-14 (`02e728f`) — the Telegram half was missing entirely.** See **C9**; `guest-token` only ever guarded the *web* link, and Telegram holds no token.
+
+### C9. A deleted listing closes the conversation on BOTH channels
+- **id:** chat-deleted-property-02
+- **touches:** `backend/routers/messages.py` (`process_guest_message`), `backend/routers/telegram.py`, `backend/services/guardrails.py` (`closed_conversation_notice`), migration `2026-07-14_guest_cannot_write_to_deleted_property`
+- **layer:** 2
+- **setup:** a **Telegram-linked** guest whose property is then soft-deleted (or whose host deletes their account — see **A7**)
+- **action:** the guest sends a Telegram message; separately, another guest tries `/start <booking_id>` for the dead listing
+- **guest_expected:**
+  1. The guest reads the **localized closed notice** ("This conversation is no longer available — the host has closed this listing." / "Esta conversación ya no está disponible…"), **not** "something went wrong on my side". (Regression: they got the generic error and kept retrying a conversation that was never coming back.)
+  2. `/start` on a dead listing **refuses to link** the chat and says the same thing — `guests.telegram_chat_id` is not set.
+- **db_expected:**
+  1. **No guest message row is written**, and the conversation does **NOT** un-archive. The guard runs **before the first write** — `insert_message` clears `archived_at`, so a message stored first would resurrect the conversation into a dashboard nobody owns.
+  2. A guest holding a still-valid (≤24h) booking JWT **cannot insert directly** either: the `guest inserts own messages` RLS policy now also requires `conversation_property_is_live(conversation_id)`.
+- **why it was missed:** the only thing stopping Telegram was the `master_json` null-check deep in `process_guest_message` — incidental (soft-delete *happens* to blank it) and firing only *after* the message was already stored.
+- **⚠️ trap for whoever touches that RLS policy:** do **not** "simplify" it to a plain `join properties … deleted_at is null`. RLS is enforced *inside* policy expressions and `anon` cannot read `properties` — the join evaluates to zero rows and **denies every guest insert**, silently breaking guest chat. Measured as anon: conversations visible = 1, properties visible = 0. Hence the `SECURITY DEFINER` function.
+- **last_tested:** 2026-07-14 (RLS policy proven on staging: live property → guest insert **allowed**; deleted property → **blocked**. Telegram leg awaiting founder test.)
+- **status:** pending
+- **promoted from intake:** new 2026-07-14 (`02e728f`)
+
+### C10. A burst of quick guest messages gets ONE reply
+- **id:** chat-burst-01
+- **touches:** `backend/services/burst_buffer.py`, `backend/routers/messages.py`, `frontend/lib/screens/chat_screen.dart`
+- **layer:** 2
+- **setup:** an autopilot conversation
+- **action:** send three quick guest messages ("Chichis con carne y mayonesa" / "Dos perros" / "Y tres gatos")
+- **expected:**
+  1. **Three separate guest bubbles** — the host sees exactly what was typed. Each message is still stored as sent. (Merging them into one row was tried first and was wrong: the host would see a bubble the guest never sent, and the web client reconciles optimistic bubbles by exact content, stranding them.)
+  2. **Exactly ONE** Alfred reply, addressing all three together.
+  3. Holds on **web AND Telegram**.
+  4. Pressing **Enter** keeps the caret in the input field. (Regression: losing focus pushed the guest outside the burst window and split one thought into several turns — the actual cause of the founder's split burst.) Window is **`GUEST_BURST_WINDOW_SECONDS`, default 6s**.
+  5. A lone message is still answered normally (costing the burst window in latency).
+  6. In **intervene** mode the burst produces no Alfred reply at all.
+  7. `web-incoming` returns `{"status":"queued","reply":null}` for text — the reply arrives over realtime.
+  8. Staging/Render (no `CLOUD_TASKS_QUEUE`) still works via the `BackgroundTasks` fallback.
+- **last_tested:** 2026-07-14 (founder — PASS: Telegram burst 3 → 1 reply)
+- **status:** passing
+- **promoted from intake:** `4e1485a`, `13b651c`
+
+### C11. Transition notices follow the guest's language
+- **id:** chat-transition-lang-01
+- **touches:** `backend/services/guardrails.py` (`transition_notice`), `frontend/lib/utils/chat_system_messages.dart`, `backend/routers/guest_auth.py`
+- **layer:** 2
+- **setup:** a conversation held in **Spanish**
+- **action:** escalate it, then resolve it
+- **guest_expected:** *"Ahora estás hablando con tu anfitrión {name}."* and, on resolve, *"Alfred ha retomado la conversación."* — on **both** web and Telegram. An English conversation reads *"You are now speaking with your host {name}."* Unknown/missing language falls back to English.
+- **notes:** web is fed by the `language` field on `/api/guest-token`; both `_isSpanish` helpers match an `es`/`spa` prefix.
+- **last_tested:** 2026-07-14
+- **status:** passing
+- **promoted from intake:** `13b651c`
 
 ---
 
@@ -464,6 +592,54 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **db_expected:** insert denied by RLS policy
 - **last_tested:** 2026-06-10 (automated Supabase query — PASS: anon insert of sender_type='host' denied by "new row violates row-level security policy")
 - **status:** passing
+
+### G4. 🔴 The client bundle must never carry a privileged key
+- **id:** sec-bundle-key-01
+- **touches:** `frontend/lib/main.dart`, `vercel-build.sh`, `_tests/env_parity.py`
+- **layer:** 2
+- **setup:** every deployed frontend
+- **action:** fetch `/assets/.env` from each; then try to boot the app with a bad key
+- **expected:**
+  1. `/assets/.env` on **every** deployed frontend serves either a legacy **`anon`** JWT or an **`sb_publishable_`** key — **never** a `service_role` JWT, never an `sb_secret_` key.
+  2. The app **refuses to boot** (throws at startup, blank page + console error) if `SUPABASE_ANON_KEY` is a service_role JWT **or** starts with `sb_secret_`. (The first guard only decoded JWTs and would have booted with `sb_secret_` — which then briefly reached a public deploy. **A guard that inspects one credential format is not a guard.**)
+  3. With the publishable key and **no session**, every table returns **0 rows** (all 8).
+  4. A host reads ONLY their own properties; a guest JWT reads only their own booking.
+- **why this exists:** prod shipped the **`service_role`** key publicly for ~1 day (2026-07-13). Flutter compiles `.env` into the bundle and serves it at `/assets/.env`, so `alwaysalfred.vercel.app` handed **every visitor** a key that bypassed RLS and could rewrite any table or reset any password.
+- **⚠️ lesson, and it cost a cycle:** the first diagnosis ("RLS is not enforced") was **wrong** — the probe was itself authenticating with the leaked `service_role` key, which bypasses RLS *by design*. **Decode the credential your security probe is actually using before concluding the DB is open.**
+- **⚠️ fixing the env var is not enough:** every past Vercel deployment stays live at its own immutable URL serving the old bundle. **Rotate the credential, don't just re-point it.**
+- **runner:** `python3 _tests/env_parity.py` (audits all three frontends; exits non-zero on a bad key)
+- **last_tested:** 2026-07-14 (all three frontends ship `sb_publishable_` — PASS)
+- **status:** passing
+- **promoted from intake:** `136551d`, `96e5ad8`
+
+### G5. Host endpoints require host auth + ownership
+- **id:** sec-host-endpoints-01
+- **touches:** `backend/routers/messages.py`, `backend/routers/properties.py`, `backend/services/supabase_client.py` (`_require_host*`, `host_owns_*`)
+- **layer:** 2
+- **action:** call each state-changing host endpoint (`/api/messages/host-send`, `/api/conversations/resolve`, `/api/conversations/archive`, `/api/conversations/announce-transition`, `/api/guests`, `/api/host/avatar`, `/api/host/delete-account`)
+- **expected:**
+  1. Missing/invalid bearer token → **401**.
+  2. Valid host token, but a conversation/booking/property owned by a **different** host → **403**.
+  3. The owning host's normal actions all still succeed with the session token attached.
+  4. Guest-facing `web-incoming` and the Telegram webhook are unchanged (no host auth).
+- **why:** the backend runs as **service role**, which bypasses RLS — so these endpoints must police themselves.
+- **note:** `/api/host/delete-account` needs **no** ownership check: the host being deleted *is* the token subject.
+- **last_tested:** 2026-07-14 (`delete-account`: 401 unauthenticated, 401 on a garbage token, 404 on a bogus route — route registered and guarded)
+- **status:** passing
+- **promoted from intake:** `14ed3c0`
+
+### G6. Storage buckets are scoped
+- **id:** sec-storage-01
+- **touches:** migrations `harden_property_assets_remove_anon_policies`, `harden_chat_media_scope_anon_upload_to_own_conversation`, `harden_chat_media_drop_broad_public_listing`
+- **layer:** 2
+- **expected:**
+  1. A guest booking JWT can **no longer read or write `Property_assets`** (cross-tenant host files were exposed before); host flows (add/edit property, thumbnails, ingest) still work via the `authenticated` role.
+  2. A guest can upload chat media **only** under their own conversation folder (`{conversation_id}/chat_media/…` where the conversation's `booking_id` matches the JWT claim); an upload to another conversation's path is denied. Guest image/voice send still works.
+  3. `chat_media` images still display via public URL, but the bucket **cannot be listed**.
+- **open (D4):** `chat_media` is a **public** bucket holding guest photos and voice notes, retained indefinitely after account deletion (**A7**). Public + permanent + guest-identifying needs a retention decision.
+- **last_tested:** 2026-07-12
+- **status:** passing
+- **promoted from intake:** `14ed3c0`
 
 ---
 
@@ -704,22 +880,113 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 ---
 
+## M. Guest multimodal chat (photos & voice)
+
+> Two file-size limits live in this app and they are **not** the same. Confusing them
+> is what left GATE-2 row **P-3** untested for a week:
+> **ingest / training docs = 15 MB** (Vertex inline cap — see **B11**) ·
+> **guest chat media = 10 MB** (the `chat_media` bucket — see **M5**).
+
+### M1. 🔴 A voice note records its full duration
+- **id:** chat-voice-duration-01
+- **touches:** `frontend/lib/screens/chat_screen.dart` (`_recorderSampleRate`, `_auditWav`)
+- **layer:** 2
+- **setup:** guest web chat, on a real browser (this **cannot** be simulated — it needs a real mic + AudioContext)
+- **action:** hold the mic and count out loud to **10**, then stop and send
+- **guest_expected:** the stored WAV is **~10s, not ~7s**. Open the console: `_auditWav` prints the truth every time —
+  `voice: 48000Hz 1ch — audio 9.98s vs wallclock 10s`, and shouts `STILL TRUNCATED` if the audio is >5% short of the clock.
+- **db_expected:** the WAV header reads `numChannels = 1` and `sampleRate =` **the device's real mic rate**; `dataLen / byteRate ≈ wall-clock`.
+- **also assert on a 44.1kHz device (a Mac or iPhone):** this is the case a hardcoded `48000` would have missed.
+- **root cause (twice — read before touching this):** `record_web` routes every buffer through a hand-rolled JS resampler (`record.worklet.js`) unless the requested rate **equals the source**, in which case it takes an identity bypass. That resampler **resets its carry-over (`tailExists`, `lastWeight`) on EVERY call**, so a downsample drops samples on each ~43ms flush — a *compounding* loss, not a missing tail.
+  - **Attempt 1 (wrong):** the default config is 44.1kHz/2ch → forced a resample. Fixed by requesting a rate — but we read `AudioContext().sampleRate`, which is the **OUTPUT** device. On a 44.1kHz-output / 48kHz-mic machine that asks for a *downsample* and walks straight back into the bug (`48000/44100 = 1.088` — exactly the ~9% observed: 9/10s, 8/10s, 9/10s).
+  - **Attempt 2 (correct):** `recorder_delegate.dart:_adjustContext` builds the AudioContext from the **MIC TRACK's** settings (`tracks.first.getSettings().sampleRate`), falling back to a default AudioContext only where the browser hides it (Firefox). We now reproduce **that** decision exactly.
+- **⚠️ do NOT "fix" this by switching to opus:** Gemini **rejects `audio/webm`**. WAV is why transcription works at all.
+- **⚠️ `numChannels: 1` is load-bearing:** the worklet does `input[channel % input.length]`, so the default of 2 duplicates a mono mic into a **fake stereo pair** — double the bytes for zero information. It is also what makes the 60s cap safe (see **M2**).
+- **last_tested:** 2026-07-14 — attempt 1 FAILED (still ~10% short). **Attempt 2 awaiting founder retest.**
+- **status:** failing
+- **promoted from intake:** `d28cb44`, `72ba4c2`
+
+### M2. Voice recording UX — stop, review, discard, 60s cap
+- **id:** chat-voice-ux-01
+- **touches:** `frontend/lib/screens/chat_screen.dart`
+- **layer:** 2
+- **action:** tap the mic, record, stop, then either discard or send
+- **guest_expected:**
+  1. **idle → recording:** the mic becomes a **glowing red Stop**, in the mic's own position. A **live `m:ss` counter** runs and a pulsing dot glows. **Nothing destructive is reachable while recording.**
+  2. **recording → review:** stopping does **not** send. A review bar appears: duration, a **trash** icon on the **left**, **send** on the right.
+  3. Discard throws the take away; send uploads it.
+  4. **60s hard cap** — the counter turns red with `Ns left` in the last 10s and auto-stops **into review** (never auto-sends: the guest still gets to decide).
+  5. Reduce-motion (`MediaQuery.disableAnimations`) pins the glow **on** rather than hiding it — a recording indicator that respects reduce-motion by disappearing would be worse than useless.
+- **why:** the first build put **Discard where the mic button had been**, and made stop-and-send one action. The founder's instinctive "I'm done" tap **deleted their message**. Stop must mean stop.
+- **payload note:** at mono 16-bit, 60s ≈ **5.5 MB** — comfortably under the 10 MB cap. At the old 44.1k **stereo** default it was ~10.6 MB, i.e. a full-length note was **rejected after the guest had already recorded it**.
+- **last_tested:** 2026-07-14 — first build FAILED (destructive button in the mic's position). **Rework awaiting founder retest.**
+- **status:** failing
+- **promoted from intake:** `d28cb44`, `72ba4c2`
+
+### M3. Desktop microphone is reachable
+- **id:** chat-voice-desktop-mic-01
+- **touches:** `frontend/lib/screens/chat_screen.dart`
+- **layer:** 2
+- **action:** tap the mic on **desktop Chrome and Firefox**
+- **guest_expected:** the browser's permission prompt appears and recording starts. A genuine block shows an actionable message; the three failure modes are distinguished — **no device** / **blocked** / **in use by another app** — never a raw DOMException.
+- **why:** the mic was gated behind `hasPermission()`, which on desktop reports false while the permission is merely **un-asked** ("prompt", not "denied") — so `getUserMedia`, the only thing that prompts, was never called. The mic was unreachable **by construction** on desktop; mobile worked only because permission was pre-granted. Now: ask for the mic **by using it**.
+- **note:** the founder's `NotFoundError` during testing was **not a bug** — they had no mic plugged in. The fix had worked; we were just showing the raw exception.
+- **last_tested:** 2026-07-14
+- **status:** passing
+- **promoted from intake:** `7529186`, `13b651c`
+
+### M4. Several photos in one turn, and the escalation threshold
+- **id:** chat-media-burst-01
+- **touches:** `frontend/lib/screens/chat_screen.dart`, `backend/routers/messages.py`, `backend/services/guardrails.py`
+- **layer:** 2
+- **expected:**
+  1. **Web:** selecting **2+ images** sends them all — each its own bubble to the host — and Alfred replies **ONCE** addressing all of them (the web equivalent of a Telegram album). Previously the picker took only one file.
+  2. **One** photo → analyzed and answered, **no** escalation.
+  3. A **voice note** (any number) → transcribed and answered, **never** escalates on volume alone.
+  4. **Two photos within `GUEST_MEDIA_BURST_WINDOW_MINUTES`** (default 10) → escalates with `media_needs_host_review`, and Alfred's analysis still goes out.
+  5. Two photos **further apart** than the window → no escalation.
+- **why:** the old code used a **6-hour** window and counted voice + images together, so a lone benign voice note escalated.
+- **last_tested:** 2026-07-14 (founder, real device — PASS on all five)
+- **status:** passing
+- **promoted from intake:** `c82b419`, `7529186`
+
+### M5. Guests never see a raw StorageException
+- **id:** chat-media-size-01
+- **touches:** `frontend/lib/screens/chat_screen.dart` (`_maxMediaBytes`, `_friendlyUploadError`)
+- **layer:** 2
+- **action:** try to send an oversized chat photo or voice note
+- **guest_expected:** refused **before upload**, with a plain message naming the file and its size — *"that photo is 12.4 MB — the maximum is 10 MB"*. A 413 that still slips through renders as friendly text; the technical detail goes to the console only.
+- **⚠️ this is the 10 MB `chat_media` limit — NOT the 15 MB ingest limit (B11).** They are different limits on different surfaces.
+- **last_tested:** 2026-07-14
+- **status:** passing
+- **promoted from intake:** `13b651c`
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
 |---|---|---|---|---|
-| A. Auth | 4 | — | 4 | — |
-| B. Ingestor | 11 | 5 | 6 | — |
-| C. Chat | 8 | 1 | 7 | — |
+| A. Auth | 7 | — | 7 | — |
+| B. Ingestor | 13 | 5 | 8 | — |
+| C. Chat | 11 | 1 | 10 | — |
 | D. Dashboard | 5 | — | 5 | — |
 | E. Multi-property | 2 | — | 2 | — |
 | F. Theme | 1 | — | 1 | — |
-| G. RLS | 3 | 3 | — | — |
+| G. RLS / security | 6 | 3 | 3 | — |
 | H. Push | 1 | — | 1 | — |
 | J. Telegram | 11 | — | — | 11 |
 | K. Mobile / responsive | 1 | — | — | 1 |
 | L. AI guardrails & learning | 11 | 4 | — | 10 |
-| **Total** | **58** | **13** | **26** | **22** |
+| **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
+| **Total** | **74** | **13** | **42** | **22** |
+
+**Open (not passing):**
+- **A6** — confirm-email link must not sign you in (= GATE-2 **P-1**, retest required, the flow changed)
+- **A7** — delete account (awaiting founder test on a throwaway)
+- **B11** — the **>15 MB ingest** drop-zone rejection (= GATE-2 **P-3**, never actually tested)
+- **C9** — deleted listing closes Telegram too (RLS half proven; Telegram leg awaiting test)
+- **M1 / M2** — voice duration + recording UX (**both failed once**; reworked, awaiting retest)
 
 ---
 
@@ -777,61 +1044,43 @@ Plus the **Phase-C fixes** and the two open builds, all in the Pending-intake qu
 ## Pending intake
 
 Lightweight queue. Each row is a fix or group of related fixes on the same flow.
-**Before next `staging → main` merge:** group by flow, promote to a proper scenario in the A–H sections above, then delete the row.
+**Before every `staging -> main` merge:** group by flow, promote to a proper scenario in the
+sections above, then delete the row.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
-| 2026-07-14 | `13b651c` | 🔴 **Email confirmation link must NOT sign you in** | Clicking the "Confirm your email address" link lands on the **sign-in screen** with an "Email confirmed" banner — **never** straight into the dashboard. Regression: Supabase's confirm link carries session tokens in the URL, so anyone holding the email (forwarded/shared inbox) became the host **without ever entering the password**. Assert too: after signing in with the password, the profile dialog shows the email; and a normal (non-confirmation) visit with an existing session still goes straight to the dashboard. | Sign-up flow |
-| 2026-07-14 | `13b651c` | **Transition notices follow the guest's language** | A guest chatting in **Spanish** who gets escalated sees *"Ahora estás hablando con tu anfitrión {name}."* and, on resolve, *"Alfred ha retomado la conversación."* — on **both** web and Telegram. An English conversation sees *"You are now speaking with your host {name}."* Unknown/missing language falls back to English. (Backend: `guardrails.transition_notice()`; web: `ChatSystemMessages.formatForGuest(language:)` fed by the new `language` field on `/api/guest-token`.) | Telegram guest channel |
-| 2026-07-14 | `13b651c` | **Chat input keeps focus; burst window 6s** | Pressing **Enter** in the guest web chat sends the message and **leaves the caret in the field**, so three quick messages can be typed without clicking back in. Regression: losing focus pushed the guest past the burst window, splitting one thought into several turns (and a lone fragment like "y el otro también" then got misread against older history). Assert 3 quick messages → 3 bubbles → **ONE** reply. | Guest message burst |
-| 2026-07-14 | `13b651c` | **Sign-up form doesn't freeze; strong passwords** | A rejected sign-up (password < 8 chars, or missing upper/lower/digit, or mismatched confirmation) shows an inline error, **returns focus to the offending field, and the field stays editable** (regression: it became un-editable and the host had to reload). Typing clears the error. Assert each rule rejects, and a compliant password is accepted. | Sign-up flow |
-| 2026-07-14 | `13b651c` | **Guests never see a raw StorageException** | Two DIFFERENT limits: **ingest/training docs = 15 MB** (drop zone), **guest chat photos/voice = 10 MB** (`chat_media` bucket). An oversized chat image or voice note is refused **before upload** with a plain message naming the file and its size ("… is 12.4 MB — the maximum is 10 MB"); a 413 that still slips through renders as friendly text, with the technical detail only in the console. | Guest multimodal chat |
-| 2026-07-14 | (pending — NOT FIXED) | 🔴 **Web voice note is truncated (~30%)** | Recording 10 seconds must produce ~10 seconds of audio. Currently loses ~30% (compounding, not a lost tail): `record_web`'s default 44.1kHz/2ch config vs the browser's 48kHz mono AudioContext forces a hand-rolled JS resampler that resets its carry-over on every call. Fix to apply: `RecordConfig(encoder: wav, sampleRate: 48000, numChannels: 1)` → resampler bypass. ⚠️ Do NOT switch to opus (Gemini rejects `audio/webm`). Also assert (once built): **live duration counter**, **60s auto-stop**, and an obvious/glowing recording indicator. | Guest multimodal chat |
-| 2026-07-14 | `136551d` + `96e5ad8` | 🔴 **Client bundle must never carry a privileged key** | (1) `/assets/.env` on **every** deployed frontend serves a key that is either a legacy **`anon`** JWT or an **`sb_publishable_`** key — never a `service_role` JWT and never an `sb_secret_` key. (2) The app **refuses to boot** (throws at startup, blank page + console error) if `SUPABASE_ANON_KEY` is a service_role JWT or starts with `sb_secret_`. (3) With that publishable key and **no session**, every table returns **0 rows** (`properties`, `guests`, `conversations`, `messages`, `learning_events`, `host_profiles`, `scrape_jobs`, `feedback`). (4) A host reads ONLY their own properties; a guest JWT reads only their own booking. Regression: prod shipped the **service_role** key publicly for ~1 day (2026-07-13). Harness: `/tmp/gate2/key_audit.py`, `leak_scan.sh`, `rls_probe.py`. | — |
-| 2026-07-14 | `4e1485a` | **Guest message burst → ONE reply** | (1) Three quick guest messages ("Chichis con carne y mayonesa" / "Dos perros" / "Y tres gatos") produce **three separate guest bubbles** (host sees exactly what was typed; the web guest's optimistic bubbles reconcile, no stranded duplicates) and **exactly ONE** Alfred reply addressing them together. (2) Holds on **web AND Telegram**. (3) A lone message is still answered normally (costs `GUEST_BURST_WINDOW_SECONDS`, default 5s, of extra latency). (4) In **intervene** mode the burst produces no Alfred reply at all. (5) `web-incoming` now returns `{"status":"queued","reply":null}` for text — the reply arrives over realtime. (6) Staging/Render (no Cloud Tasks) still works via the BackgroundTasks fallback. | Telegram guest channel |
-| 2026-07-14 | `4e1485a` | **Sign-up flow** | (1) Sign-up with a **mismatched** confirm-password is rejected inline ("Passwords don't match"), and a password under **8 chars** is rejected. (2) A successful sign-up with email-confirmation ON shows the **"Confirm your email"** step and does **NOT** navigate to the dashboard (previously it did, leaving the host on a dashboard where they had no session — no email shown, zero stats, nothing loadable). (3) After clicking the emailed link, sign-in works and the **profile dialog shows the signed-in email** (not "—"). (4) Toggling sign-in ↔ sign-up clears the confirm field and any error. | — |
-| 2026-07-14 | `7529186` | **Guest chat — desktop microphone** | Tapping the mic on **desktop Chrome and Firefox** triggers the browser's permission prompt and records (previously it silently did nothing: `hasPermission()` returns false while the permission is merely un-asked, so `getUserMedia` — the only thing that prompts — was never called; it worked on mobile only because permission was already granted). A genuine block still shows the actionable "open the padlock…" message. Assert the recorded note reaches Alfred and is transcribed. | Guest multimodal chat |
-| 2026-07-14 | `7529186` | **Guest chat — several photos in one turn (web)** | Selecting **2+ images** in the web chat picker sends them all: each appears as its own bubble to the host, and Alfred replies **ONCE** addressing all of them (not one reply per image) — the web equivalent of a Telegram album. The 2-photo media-burst escalation still fires. Previously the picker accepted only one file. | Guest multimodal chat |
-| 2026-07-13 | `3a1d1e5` (Cloud Run rev 00007) | **Telegram deferred work via Cloud Tasks** (supersedes the rev-00006 CPU-always-on stopgap) | (1) With **zero** follow-up traffic, a Telegram message gets its reply within normal Gemini latency (~15s) — never minutes later or "stacked" behind the next request. This must hold with `cpu-throttling: true` (request-based billing): the work now runs in a Cloud-Tasks-dispatched request (`POST /api/telegram/process`), not a post-response `BackgroundTask` (which Cloud Run freezes the instant the webhook answers — `min-instances=1` does NOT prevent that). (2) The webhook acks in <1s. (3) **Album:** N photos in one send → N fast acks → exactly **ONE** worker run → **ONE** reply + **ONE** transition notice, with all N images analyzed together (a single flush task named after the `media_group_id`; Cloud Tasks rejects the duplicate name). (4) `/api/telegram/process` returns **403** without the correct secret header. (5) Staging/Render (no `CLOUD_TASKS_QUEUE`) still works via the BackgroundTasks fallback. ⚠️ Re-assert whenever the service is redeployed from scratch, min-instances changes, or staging moves to Cloud Run (Phase 8) — and never "simplify" this by making the webhook synchronous: Telegram serialises updates per chat, so blocking would stall an album mid-delivery and re-break `c82b419`. | Telegram guest channel |
-| 2026-07-13 | (pending — working tree) | **Scraper: Make.com webhook removed** | `POST /scrape` still returns `{"status":"success","data":…}` and still upserts `scraped_markdown` to the properties row; a full property ingest with an Airbnb URL completes end-to-end. The deprecated `fire_make_webhook` BackgroundTask (+ its `MAKE_WEBHOOK_URL` env var, never set on prod) is gone, so `/scrape` now runs nothing after the response — the scraper is safe to keep on request-based billing / scale-to-zero. | B0 (scraper health) |
-| 2026-07-13 | (pending — working tree) | **Guest JWT `ref` claim per environment** | `/api/guest-token` on prod mints a JWT whose `ref` claim is the PROD project ref (`ylaooctefesedrecshic`), not the staging one — previously hardcoded to staging in `guest_auth.py`. Functionally harmless today (Supabase validates signature, not `ref`) but wrong-by-construction; now derived from `SUPABASE_URL`. Assert guest chat + realtime still work on BOTH environments after deploy. | RLS + guest JWT — isolation | Regression sweep after moving prod's Gemini to Vertex. (1) Ingest every file type — **pdf, docx, image, sheet, audio** — all succeed (the File API is gone; bytes go inline). (2) A **>15 MB** file is rejected in the drop zone with "exceeds the 15 MB limit per file", never reaching the backend. (3) A multi-file ingest does **not** fail with 429 (retry/backoff absorbs the burst). (4) **Guest chat replies are not empty/refused** — Vertex's safety-filter defaults differ from AI Studio's, so a reply that passed before could be blocked now. (5) Merge/conflict-resolve still returns valid JSON. ⚠️ `gemini_messenger`/`gemini_merge_resolve` have **no** 429 retry yet — watch for throttling there. | Vertex transport |
-| 2026-07-12 | (pending) | Welcome language | A property whose `master_json.location.country` resolves to a Spanish-speaking country (e.g. `Mexico`) gets the **Spanish** welcome; an unrecognised/missing country falls back to English. Regression: a Mexican property greeted in English because `location.country` was absent/unmapped (e.g. `"MX"`). | — |
-| 2026-07-12 | (pending) | Guest media — escalation threshold | (1) A guest sending **one** photo → Alfred analyzes + replies, conversation does **NOT** escalate. (2) A **voice note** (any number) → Alfred transcribes + replies, **never** escalates on volume alone. (3) **Two photos within the burst window** (`GUEST_MEDIA_BURST_WINDOW_MINUTES`, default 10) → escalates with reason `media_needs_host_review`, and Alfred's analysis still goes out. (4) Two photos **further apart than the window** → no escalation. Regression: the old code used a **6-hour** window and counted voice+images together, so a lone benign voice note escalated. | Guest multimodal chat |
-| 2026-07-12 | (pending) | Telegram album (multi-photo) | Sending **2+ photos in one Telegram send** produces exactly **one** Alfred reply addressing all of them and exactly **one** "You are now speaking with «host»" notice — not one per photo. All photos still appear to the host in the dashboard. (Albums arrive as one update per photo sharing `media_group_id`; now debounced.) | Guest multimodal chat |
-| 2026-07-12 | (pending) | Guest voice — web mic permission | With the mic blocked for the origin, tapping the mic shows an **actionable** message ("Microphone blocked. Open the padlock … set Microphone to Allow, then reload") rather than a dead tap. On a fresh origin the browser prompts normally and the note records + sends. | Guest multimodal chat |
-| 2026-06-08 | `4336ebd` + uncommitted `add_property_screen.dart` | Add-property — completion popup lifecycle | (1) After ingest completes: no popup shown, only inline panel + MERGE NOW button. (2) After no-conflict merge → status=`Merged`: "Alfred is now trained" popup appears, single "Back to Dashboard" button. (3) After conflict-resolved flow → status=`Trained`: same popup appears. | — |
-| 2026-06-08 | `feaf8fd` | Merge / edit-property UX | (1) Merge request does not time out before 120 s. (2) On `edit_property_screen`: conflict questionnaire section renders above JSON viewer. (3) Status badge on submit transitions correctly. (4) Resolved status surfaces in UI after merge completes. | — |
-| 2026-06-08 | `0f019f2` | Ingest error surfacing | Backend errors during ingest are shown inline to the user (not silently dropped); upload queue is preserved on failure so user can retry. | Add-property — completion popup lifecycle |
-| 2026-06-08 | `1f266ea` | Property dedup / ownership | Re-ingesting an existing URL under the same owner updates the existing row (no duplicate). Re-ingesting the same URL under a different owner creates a separate row. `owner_id` is never overwritten on upsert. | — |
-| 2026-06-08 | `2a75a4e` | Scraper model | Scraper does not crash when called; structured markdown returned. (Already covered by B0 — **skip**, no new scenario needed.) | — |
-| 2026-06-08 | `5626f1f` | Scraper health endpoint | `HEAD /health` on staging scraper returns 200 (not 405). (Lightweight extension of B0 — **merge into B0** when promoting.) | B0 |
-| 2026-07-03 | uncommitted `feedback_dialog.dart`, `dashboard_screen.dart` + migration `create_feedback_table` | In-app feedback box | (1) Feedback icon in dashboard app bar opens the dialog. (2) Submitting with a type + message inserts one row into `feedback` (host_id = auth.uid via default, host_email + route populated). (3) Success state ("Thanks — got it") shows; Cancel closes with no insert. (4) RLS: an authenticated host can insert but cannot select from `feedback`. | — |
-| 2026-07-03 | uncommitted `routers/telegram.py`, `services/telegram_client.py`, `routers/messages.py`, `services/supabase_client.py` + migration `add_telegram_to_guests` | Telegram guest channel | (1) `/start <booking_id>` links the chat: `guests.telegram_chat_id` set, bot confirms property name. (2) Unknown booking → "couldn't find that booking". (3) Linked guest text → AI replies in Telegram; guest+ai rows stored. (4) Escalation → dashboard shows `requires_attention`; host reply from dashboard arrives in the guest's Telegram. (5) Dedupe: identical consecutive guest message is not double-inserted (web retry + TG re-delivery). (6) Webhook rejects a request without the correct `X-Telegram-Bot-Api-Secret-Token`. | — |
-| 2026-06-09 | `1dded18` | Guest chat — display & system messages | (1) Guest chat header shows the official Airbnb listing name (from `master_json.property_identity`, fallback chain → nickname) as a prominent header with an "Alfred · Concierge" sub-line. (2) Consecutive identical system markers render only once (no double "You are now speaking with …"). (3) A sentence-like or >40-char host name renders as "the host" instead of leaking extraction noise into the banner. | — |
-| 2026-06-09 | `1dded18` | Ingest extraction quality (merge prompt) | New merges store the host display name only in `host_profile.name` (no sentences/instructions) and always expose the listing title at `property_identity.property_name`. NOTE: existing rows need re-ingestion to clean stored values. | Guest chat — display & system messages |
-| 2026-06-09 | `1dded18` | Add-property — duplicate file in queue | Dropping/selecting a file whose name is already in the ingest queue is rejected with an inline "— already in the queue" message and is NOT re-uploaded (previously left a duplicate row stuck on "processing" forever). | — |
-| 2026-06-09 | `1dded18` | Add-property — completion popup contrast | Ingested / conflict / trained completion popups use an opaque surface so text stays readable over the dimmed barrier (no dark bleed-through). | Add-property — completion popup lifecycle |
-| 2026-06-09 | `1dded18` | Conflict resolution — auto-apply | Submitting conflict resolutions applies the knowledge update automatically and shows the completion popup directly; the intermediate "Update Knowledge" button is removed. | — |
-| 2026-06-09 | `55c7efa` | Add-property — completion popup contrast (real fix) | Completion dialogs (ingested / conflict / trained) render with an opaque surface backing so text is readable; the `1dded18` tint-only attempt was overridden by GlassPanel's highlight gradient and didn't take. Assert dialog text contrast is legible in both light and dark mode. | Add-property — completion popup contrast |
-| 2026-06-09 | `55c7efa` | Dashboard — property card image | Every ready property card shows an image: stored hero image if present, else fallback to `master_json.media.thumbnail_url` (Airbnb CDN). Assert a re-ingested property with no stored hero still shows its Airbnb photo (not the gradient placeholder). | — |
-| 2026-06-09 | `55c7efa` | Guest chat — header on open | Property-name header appears as soon as the guest opens the chat link (resolved via `guests.booking_id → property_id`), before any message is sent. | Guest chat — display & system messages |
-| 2026-06-09 | `55c7efa` | Guest chat — instant message echo | The guest's own message appears immediately on send (optimistic), before Alfred's reply / typing dots; the realtime stream reconciles and de-dupes it. Covers the first-message case where no subscription exists yet. | Guest chat — display & system messages |
-| 2026-06-10 | RLS migration + `<pending>` | RLS + guest JWT — isolation (promote into G2/G3/C7) | (1) Bare anon key reads 0 rows from guests/conversations/messages (G2 verified PASS). (2) Anon insert with sender_type≠'guest' or wrong booking is denied (G3 verified PASS). (3) Guest with a valid booking JWT sees ONLY their booking's conversation + messages, never another booking's (C7). (4) Host dashboard still reads its own properties' guests/conversations/messages and can take over / resolve (host write policies). Assert guest chat works end-to-end via `/api/guest-token` JWT (header, send, AI reply, image/voice, realtime). | — |
-| 2026-06-10 | RLS migration + `<pending>` | Guest token lifecycle | `/api/guest-token` returns a signed JWT for a valid booking_id and 404 for unknown bookings. Token auto-refreshes near expiry without interrupting the chat. Requires `SUPABASE_JWT_SECRET` env var on the backend. | RLS + guest JWT — isolation |
-| 2026-06-10 | `<pending>` | Guest chat — header under RLS | Property name + host name come from the `/api/guest-token` response (server-resolved from `master_json`, since RLS blocks the anon guest reading `properties`). Header shows on open before any message, with no direct `properties` read. | RLS + guest JWT — isolation |
-| 2026-06-10 | `<pending>` | Guest chat — realtime under RLS | Guest realtime socket is authed with the booking JWT (`realtime.setAuth`), so live AI/host replies appear without refresh. Assert: guest sees Alfred's reply and a host take-over message arrive live (previously the stream delivered 0 rows once RLS was on). | RLS + guest JWT — isolation |
-| 2026-06-10 | `<pending>` | System markers — no DB-level duplicates | DB trigger `suppress_dup_system_marker` skips a system marker whose content equals the immediately-preceding system marker in the same conversation. Assert: AI auto-escalation + host chat-live both firing produce ONE `__SYS_INTERVENE__` row (not two), on both host and guest views. Non-identical sequences (intervene→resume→intervene) are preserved. | Guest chat — display & system messages |
-| 2026-07-07 | `archived_chats_dialog.dart` | **Mobile — Chat History opens the fixed chat view** (deploy-to-test) | Opening a past conversation from a property card's "Chat History" (history icon) opens the consolidated **`ChatLiveDialog`** (mobile-responsive, stacked on top of the history list) for that specific guest — NOT the old full-page `HostPanelScreen → ChatLiveScreen` (which showed the pre-fix crushed layout: sideways "Conversation" label, 320px panel squeezing the messages). Closing the chat returns to the history list. **Fold into K1** once verified. | K1 (mobile-host-layout-01) |
-| 2026-07-07 | `property_card.dart` | **Property card — conversation pills never overlap the action row** (deploy-to-test) | On a property card with many conversations, the pill preview list stays within its own area and never overlaps the `+ Guest / Settings / calendar / history` row below it (previously the pills spilled down over the buttons). Root cause: the per-pill height estimate was 32px but a real compact pill is ~48px, so too many were rendered; fixed the estimate, reserved the "+N more active" line's height, and wrapped the list in a `ClipRect` as a hard guarantee. Applies to both mobile and desktop cards. | K1 (mobile-host-layout-01) |
-| 2026-07-07 | `chat_live_dialog.dart` | **Resolve button only on real escalation** | In a conversation, toggling **Intervene** manually (no conflict) shows the reply box but NO "Mark Issue as Resolved" button. When the conversation is genuinely escalated (backend set `requires_attention` + `escalation_reason`, e.g. a guest emergency), the resolve button appears; resolving returns it to autopilot and hides the button. Gated on escalation, not on `mode=='intervene'`. | — |
-| 2026-07-07 | `chat_live_dialog.dart`, `dashboard_screen.dart`, `property_expanded_view.dart`, `archived_chats_dialog.dart`, `messages.py`, `supabase_client.py` + migrations `add_checkin_checkout_to_guests` / `add_archived_at_to_conversations` / `enable_pg_cron_auto_archive` | **Conversation archive lifecycle + manual archive** | (1) New guest link sets `guests.check_in=now` and `check_out=now+96h`. (2) Once `check_out` passes, the hourly `pg_cron` job `auto-archive-conversations` sets `conversations.archived_at` (skips conversations with `requires_attention` or activity after check_out); the conversation drops off the dashboard active list + card badge and appears under **Archived** / **Chat History**. (3) Host "Archive conversation" from the chat dialog overflow menu shows the warning copy and archives immediately (dashboard refreshes optimistically). (4) A new guest message (web or Telegram) on an archived conversation clears `archived_at` and returns it to active. (5) Existing guests with NULL `check_out` are never auto-archived. | — |
-| 2026-07-07 | `profile_dialog.dart` (new), `dashboard_screen.dart` + migrations `create_host_profiles` / `create_host_avatars_bucket` / `create_get_host_stats_rpc` | **Host profile menu + dashboard stats** | (1) "Profile" opens from the account menu (narrow) and the app-bar person icon (wide) → dialog shows/edits name, nickname, bio, avatar (upload → `host_avatars`), read-only email + # properties; values persist to `host_profiles` (owner-only RLS). (2) Dashboard stats strip renders 4 tiles — Alfred replies, Hours saved (est.), Autopilot rate %, Guests helped — from the `get_host_stats` RPC (scoped by `auth.uid()`); numbers match direct SQL counts. (3) RPC not callable by `anon`. | — |
-| 2026-07-09 | migrations `harden_property_assets_remove_anon_policies` / `harden_chat_media_scope_anon_upload_to_own_conversation` / `harden_chat_media_drop_broad_public_listing` | **Storage bucket hardening** | (1) A guest booking JWT can NO LONGER read or write `Property_assets` (cross-tenant host files were exposed before); host flows (add/edit property, file thumbnails, ingest) still upload/read via the authenticated role. (2) A guest can upload chat media ONLY under their own conversation folder (`{conversation_id}/chat_media/…` where the conversation's `booking_id` matches the JWT claim); an upload to another conversation's path is denied. Guest image/voice send in chat still works. (3) `chat_media` images still display via public URL, but the bucket can no longer be listed. | RLS + guest JWT — isolation |
-| 2026-07-09 | `messages.py`, `supabase_client.py` (`host_owns_*` + `_require_host`), `chat_live_dialog.dart`, `chat_live_screen.dart` | **Host endpoints require host auth + ownership** | State-changing host endpoints (`/api/messages/host-send`, `/api/conversations/resolve`, `/api/conversations/archive`, `/api/conversations/announce-transition`, `/api/guests`) now require a valid host bearer token: (1) missing/invalid token → **401**; (2) valid host token but a conversation/booking/property owned by a DIFFERENT host → **403**; (3) the owning host's normal actions (reply, resolve, archive, mode toggle, generate guest link) all still succeed with the session token attached. Guest-facing `web-incoming` + the Telegram webhook are unchanged (no host auth). | — |
+| _(empty)_ | | | | |
 
-> **Promoted 2026-07-01 → B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
+> **PROMOTED 2026-07-14 - the queue was cleared before the `v1.0.0-beta.1` merge.**
+> All 47 rows were grouped by flow and promoted. Where they went:
+>
+> | Rows | Promoted to |
+> |---|---|
+> | sign-up flow, password rules, form freeze (`4e1485a`, `13b651c`) | **A5** |
+> | confirmation link must NOT sign you in (`13b651c`) | **A6** (= GATE-2 P-1, OPEN) |
+> | delete account (new) | **A7** (OPEN) |
+> | Vertex regression sweep + the 15 MB ingest cap (`efd8086`, `5681735`) | **B11** (= GATE-2 P-3, OPEN) |
+> | ingest errors, duplicate file in queue, completion popups, merge UX (`4336ebd`, `0f019f2`, `feaf8fd`, `1dded18`, `55c7efa`) | **B12** |
+> | scraper: Make.com webhook removed, `/health` (`a5924a2`, `5626f1f`, `2a75a4e`) | **B0** (extended) |
+> | deleted listing closes BOTH channels + the RLS policy (`02e728f`) | **C8** (extended) + **C9** |
+> | guest message burst -> ONE reply; input keeps focus (`4e1485a`, `13b651c`) | **C10** |
+> | transition notices follow the guest language (`13b651c`) | **C11** |
+> | guest chat header, instant echo, system markers, welcome language (`1dded18`, `55c7efa`, `5681735`) | **C6**, **C7** (extended) |
+> | archive lifecycle; resolve gating; profile + stats; feedback box; card image (`96ce00a`) | **D1-D5** (extended) |
+> | client bundle must never carry a privileged key (`136551d`, `96e5ad8`) | **G4** |
+> | host endpoints require auth + ownership (`14ed3c0`) | **G5** |
+> | storage bucket hardening (`14ed3c0`) | **G6** |
+> | RLS + guest-JWT isolation, token lifecycle, realtime under RLS (2026-06-10) | **G1-G3**, **C7** (already covered) |
+> | Telegram via Cloud Tasks; album debounce; `/start` linking (`3a1d1e5`, `c82b419`) | **J1-J11** (already covered) |
+> | mobile Chat History + card pill overlap (`60c782f`, `fb4e7e2`, `2883f12`) | **K1** (folded in) |
+> | voice-note truncation + recording UX (`d28cb44`, `72ba4c2`) | **M1**, **M2** (both OPEN - failed once) |
+> | desktop mic; multi-photo; media escalation; file-size errors (`7529186`, `c82b419`, `13b651c`) | **M3**, **M4**, **M5** |
+>
+> A malformed row (the "Guest JWT `ref` claim" entry carried a stray extra cell, with a
+> Vertex row's text concatenated onto its end) was repaired during the promotion.
 
----
+> **Promoted 2026-07-01 -> B10, C8, D5 (all `passing`):** the soft-delete (ISSUE-B) + re-add rows, the guest-link closed-state row, and the dashboard live-drop row were promoted to proper scenarios and removed from this queue.
+
 
 ## Gate-1 staging verification — 2026-07-10 (security commit `14ed3c0` + follow-up fixes)
 
