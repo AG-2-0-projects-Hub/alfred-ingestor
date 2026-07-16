@@ -1,4 +1,6 @@
 import os
+import random
+import time
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -40,6 +42,34 @@ def get_gemini_client():
     if not key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
     return genai.Client(api_key=key)
+
+
+_RETRY_ATTEMPTS = 4
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = str(exc)
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
+
+
+def _generate_with_retry(client, **kwargs):
+    """Vertex serves Gemini from a *dynamic shared* quota, so a burst can
+    transiently 429. This standalone service can't import the backend's
+    genai_factory.generate_with_retry, so mirror it: retry only on 429 with a
+    short, jittered back-off (~0.5s, 1s, 2s), and let anything else propagate
+    immediately (we never want to paper over a real error by retrying it)."""
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return client.models.generate_content(**kwargs)
+        except Exception as exc:
+            if not _is_rate_limited(exc) or attempt == _RETRY_ATTEMPTS - 1:
+                raise
+            backoff = 0.5 * (2 ** attempt) * random.uniform(0.85, 1.15)
+            print(
+                f"Gemini rate-limited (429) on attempt {attempt + 1}/{_RETRY_ATTEMPTS}; "
+                f"backing off {backoff:.1f}s"
+            )
+            time.sleep(backoff)
 
 
 def get_supabase_client():
@@ -114,7 +144,8 @@ async def scrape_airbnb(req: ScrapeRequest):
     try:
         client = get_gemini_client()
         final_prompt = get_gemini_prompt(extracted_markdown)
-        response = client.models.generate_content(
+        response = _generate_with_retry(
+            client,
             model="gemini-2.5-flash",
             contents=final_prompt,
             config=genai.types.GenerateContentConfig(
