@@ -1047,7 +1047,9 @@ sections above, then delete the row.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
-| _(empty)_ | | | | |
+| 2026-07-16 | (prod SQL, no commit) | RLS / deleted listing | Guest with a valid booking JWT CANNOT insert a message onto a **deleted** listing's conversation, on **prod** (`conversation_property_is_live` was rolled back on 07-15 and re-applied 07-16). Live listing insert still allowed. | A6/RLS |
+| 2026-07-16 | infra (Cloud Run) | Platform parity | Staging web guest chat + Telegram (`@AlfredHostW_bot`) + host dashboard all work against **Cloud Run** staging (`alfred-backend-staging`, Vertex, min=0, own `telegram-updates-staging` queue). Smoke-tested PASS this session. | infra |
+| 2026-07-16 | BUG (unfixed) | Telegram / web-search reply | A guest question needing the **grounded web-search 2nd pass** must return within `GEMINI_TIMEOUT_S` (45s) — on 07-16 staging it exceeded 45s → `504` → "Sorry, that took a little too long." Suspected Vertex 429 retry-backoff + `min=0` cold start. Regression scenario BEFORE fix. | telegram-timeout |
 
 > **PROMOTED 2026-07-14 - the queue was cleared before the `v1.0.0-beta.1` merge.**
 > All 47 rows were grouped by flow and promoted. Where they went:
