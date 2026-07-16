@@ -14,6 +14,7 @@ Model ids are identical across both, so callers don't care which is active.
 import asyncio
 import logging
 import os
+import random
 import time
 
 from google import genai
@@ -48,8 +49,13 @@ async def generate_with_retry(client: genai.Client, *, label: str = "gemini", **
     the back-off it is about to wait) plus an INFO whenever a call only lands
     after retrying. Without this the retry loop was silent, so a request that
     trips the 45s chat ceiling gave no way to tell genuine grounded-search
-    latency apart from time lost to 429 back-off (2+4+8s). `label` lets us see
-    which pass — first_pass vs the grounded second_pass — actually stalled.
+    latency apart from time lost to 429 back-off. `label` lets us see which
+    pass — first_pass vs the grounded second_pass — actually stalled.
+
+    Back-off is short and jittered (~0.5s, 1s, 2s ±15%). A transient Vertex 429
+    clears near-instantly, so the old 2/4/8s waits mostly added dead air and were
+    the main way a cold-start burst of 429s stacked past the 45s chat ceiling;
+    the jitter keeps concurrent guests from retrying in lockstep.
     """
     started = time.monotonic()
     for attempt in range(_RETRY_ATTEMPTS):
@@ -71,9 +77,9 @@ async def generate_with_retry(client: genai.Client, *, label: str = "gemini", **
                     str(exc)[:200],
                 )
                 raise
-            backoff = 2 * (2 ** attempt)  # 2s, 4s, 8s
+            backoff = 0.5 * (2 ** attempt) * random.uniform(0.85, 1.15)  # ~0.5s, 1s, 2s
             log.warning(
-                "%s: rate-limited (429) on attempt %d/%d after %.1fs; backing off %ds",
+                "%s: rate-limited (429) on attempt %d/%d after %.1fs; backing off %.1fs",
                 label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, backoff,
             )
             await asyncio.sleep(backoff)
