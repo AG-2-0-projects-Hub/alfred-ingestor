@@ -12,9 +12,13 @@ Set `GOOGLE_GENAI_USE_VERTEXAI=true` (with `GOOGLE_CLOUD_PROJECT`) to pick Verte
 Model ids are identical across both, so callers don't care which is active.
 """
 import asyncio
+import logging
 import os
+import time
 
 from google import genai
+
+log = logging.getLogger(__name__)
 
 _TRUE = {"1", "true", "yes", "on"}
 
@@ -34,19 +38,45 @@ def is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
-async def generate_with_retry(client: genai.Client, **kwargs):
+async def generate_with_retry(client: genai.Client, *, label: str = "gemini", **kwargs):
     """`client.aio.models.generate_content(**kwargs)`, retrying only on 429.
 
     Anything that is not a rate limit propagates immediately — we never want to
     paper over a real error by retrying it.
+
+    Emits one WARNING per rate-limited attempt (naming the caller via `label` and
+    the back-off it is about to wait) plus an INFO whenever a call only lands
+    after retrying. Without this the retry loop was silent, so a request that
+    trips the 45s chat ceiling gave no way to tell genuine grounded-search
+    latency apart from time lost to 429 back-off (2+4+8s). `label` lets us see
+    which pass — first_pass vs the grounded second_pass — actually stalled.
     """
+    started = time.monotonic()
     for attempt in range(_RETRY_ATTEMPTS):
         try:
-            return await client.aio.models.generate_content(**kwargs)
+            response = await client.aio.models.generate_content(**kwargs)
+            if attempt:
+                log.info(
+                    "%s: succeeded on attempt %d/%d after %.1fs total",
+                    label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started,
+                )
+            return response
         except Exception as exc:
-            if not is_rate_limited(exc) or attempt == _RETRY_ATTEMPTS - 1:
+            if not is_rate_limited(exc):
                 raise
-            await asyncio.sleep(2 * (2 ** attempt))  # 2s, 4s, 8s
+            if attempt == _RETRY_ATTEMPTS - 1:
+                log.warning(
+                    "%s: rate-limited on final attempt %d/%d, giving up after %.1fs: %s",
+                    label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started,
+                    str(exc)[:200],
+                )
+                raise
+            backoff = 2 * (2 ** attempt)  # 2s, 4s, 8s
+            log.warning(
+                "%s: rate-limited (429) on attempt %d/%d after %.1fs; backing off %ds",
+                label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, backoff,
+            )
+            await asyncio.sleep(backoff)
 
 
 def make_client() -> genai.Client:

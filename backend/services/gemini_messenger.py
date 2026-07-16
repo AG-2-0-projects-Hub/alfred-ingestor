@@ -621,6 +621,7 @@ async def first_pass(
         parts.append(types.Part.from_bytes(data=data, mime_type=mime))
     response = await genai_factory.generate_with_retry(
         client,
+        label="first_pass",
         model=MODEL,
         contents=[types.Content(role="user", parts=parts)],
         config=types.GenerateContentConfig(
@@ -645,6 +646,7 @@ async def second_pass_with_search(
     )
     response = await genai_factory.generate_with_retry(
         client,
+        label="second_pass_search",
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(
@@ -764,6 +766,7 @@ async def summarize_escalation(messages: list[dict]) -> dict:
     client = _get_client()
     response = await genai_factory.generate_with_retry(
         client,
+        label="summarize_escalation",
         model=SUMMARIZER_MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=prompt_text)])],
         config=types.GenerateContentConfig(
