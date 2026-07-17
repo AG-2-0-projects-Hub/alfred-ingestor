@@ -1002,8 +1002,8 @@ mobile breakpoints so the web/desktop layout is unchanged.
 - **action:** merge `staging→main` (or push to `main`)
 - **db_expected:** a Cloud Build runs and **deploys backend + scraper to prod Cloud Run**, **code-only** — no `--set-env-vars`/`--set-secrets`, so prod env + secrets are preserved; both prod services take a new revision serving the merged commit
 - **notes:** ⚠️ a **regional** trigger MUST specify `--service-account` (this new secure-by-default project has no legacy Cloud Build SA); `cloudbuild.yaml` sets `logging: CLOUD_LOGGING_ONLY`, which a user SA requires
-- **last_tested:** 2026-07-17 (first real fire = the staging→main merge this session — see result at merge time)
-- **status:** pending (verified at this merge)
+- **last_tested:** 2026-07-17 — ✅ **PASS (first real fire).** PR #4 (`staging`→`main`, merge `d9b7998`) fired build `160ddb3e` → **SUCCESS in ~4 min**; prod `alfred-backend` 00017→**00018** + `alfred-scraper`→**00003** deployed from image `:d9b7998`, both `/health` 200, env/secrets preserved.
+- **status:** passing
 - **promoted from intake:** `ci-trigger`
 
 ### N3. Public domains resolve to the right environment
