@@ -1,0 +1,46 @@
+# Continuous deploy to PROD Cloud Run on push to `main`.
+#
+# Cloud Run does NOT auto-deploy on merge; this trigger closes that gap.
+# IMPORTANT: env vars + secrets already configured on each service are
+# PRESERVED (we never pass --set-env-vars/--set-secrets here), so this ships
+# CODE ONLY and never mutates prod configuration. Change env/secrets by hand.
+#
+# Wired to the `main` branch via a Cloud Build trigger (see CONTEXT.md).
+
+substitutions:
+  _REGION: europe-west3
+  _AR: europe-west3-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy
+
+steps:
+  # ---- backend ----
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_AR}/alfred-backend:${SHORT_SHA}', '-t', '${_AR}/alfred-backend:latest', './backend']
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_AR}/alfred-backend']
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: ['run', 'deploy', 'alfred-backend', '--image', '${_AR}/alfred-backend:${SHORT_SHA}', '--region', '${_REGION}', '--quiet']
+
+  # ---- scraper ----
+  - id: build-scraper
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_AR}/alfred-scraper:${SHORT_SHA}', '-t', '${_AR}/alfred-scraper:latest', './scraper']
+  - id: push-scraper
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_AR}/alfred-scraper']
+  - id: deploy-scraper
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: ['run', 'deploy', 'alfred-scraper', '--image', '${_AR}/alfred-scraper:${SHORT_SHA}', '--region', '${_REGION}', '--quiet']
+
+images:
+  - '${_AR}/alfred-backend:${SHORT_SHA}'
+  - '${_AR}/alfred-scraper:${SHORT_SHA}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 2400s

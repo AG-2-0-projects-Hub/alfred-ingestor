@@ -242,10 +242,11 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **layer:** 1
 - **runs_on:** [smart, full]
 - **setup:** known stable test Airbnb URL (e.g. an existing Dos Rios listing URL); FIRECRAWL_API_KEY + GEMINI_API_KEY configured on the scraper service
-- **action:** `POST https://scraper-staging-bn7w.onrender.com/scrape` with body `{"url": "<test_url>"}`
+- **action:** `POST https://alfred-scraper-staging-798387479883.europe-west3.run.app/scrape` with body `{"url": "<test_url>"}` (was Render `scraper-staging-bn7w.onrender.com` — the staging scraper moved to Cloud Run on 2026-07-16)
 - **db_expected:** HTTP 200, response body has `{"status": "success", "data": "<non-empty structured markdown>"}`
+- **resilience (`01033c1`, 2026-07-16):** the Gemini structuring call now goes through a local `_generate_with_retry` (429-only, jittered ~0.5/1/2s), so a transient Vertex dynamic-shared-quota 429 no longer fails the ingest outright. This was the one raw `generate_content` in the repo with no retry.
 - **why this is in the matrix:** regression guardrail for the 2026-06-02 incident (BUG-006: Gemini preview model `gemini-3-flash-preview` was retired, scraper crashed on every call). Any future preview-model retirement or model name change shows up here before it breaks the whole ingest flow.
-- **last_tested:** 2026-06-08
+- **last_tested:** 2026-06-08 (200 + markdown on Render); 429-retry code-verified 2026-07-16 (deploy-to-test on Cloud Run staging rev 00002)
 - **status:** passing
 
 ### B9. Generate guest link creates a new guest record
@@ -437,9 +438,9 @@ Not all fields are required for every scenario — drop irrelevant ones.
   2. A guest holding a still-valid (≤24h) booking JWT **cannot insert directly** either: the `guest inserts own messages` RLS policy now also requires `conversation_property_is_live(conversation_id)`.
 - **why it was missed:** the only thing stopping Telegram was the `master_json` null-check deep in `process_guest_message` — incidental (soft-delete *happens* to blank it) and firing only *after* the message was already stored.
 - **⚠️ trap for whoever touches that RLS policy:** do **not** "simplify" it to a plain `join properties … deleted_at is null`. RLS is enforced *inside* policy expressions and `anon` cannot read `properties` — the join evaluates to zero rows and **denies every guest insert**, silently breaking guest chat. Measured as anon: conversations visible = 1, properties visible = 0. Hence the `SECURITY DEFINER` function.
-- **last_tested:** 2026-07-14 (RLS policy proven on staging: live property → guest insert **allowed**; deleted property → **blocked**. Telegram leg awaiting founder test.)
-- **status:** pending
-- **promoted from intake:** new 2026-07-14 (`02e728f`)
+- **last_tested:** 2026-07-16 — RLS policy proven on staging (live property → guest insert **allowed**; deleted → **blocked**) **and re-applied + verified on PROD**. (⚠️ `conversation_property_is_live` had been silently rolled back on 07-15 — a `begin/…/rollback` verify block pasted into the Supabase editor *with* the DDL reverted the `create function`+`create policy` under the editor's implicit transaction, while printing PASS in-transaction. Re-applied DDL-only 07-16 → `env_parity.py` zero-delta.) **The Telegram closed-notice leg still awaits a founder test.**
+- **status:** pending (RLS write-block ✅ on both envs; the Telegram-side closed-notice leg is the only unverified part)
+- **promoted from intake:** new 2026-07-14 (`02e728f`); PROD-RLS re-apply/verify 2026-07-16 (intake row `A6/RLS`)
 
 ### C10. A burst of quick guest messages gets ONE reply
 - **id:** chat-burst-01
@@ -471,6 +472,20 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **last_tested:** 2026-07-14
 - **status:** passing
 - **promoted from intake:** `13b651c`
+
+### C12. A grounded web-search reply returns within the timeout (no 504)
+- **id:** chat-web-search-timeout-01
+- **touches:** `backend/routers/messages.py` (`process_guest_message`, `GEMINI_TIMEOUT_S`), `backend/services/gemini_messenger.py` (`second_pass_with_search`), `backend/services/genai_factory.py` (`generate_with_retry`)
+- **layer:** 2
+- **setup:** an autopilot conversation; a `min=0` (scale-to-zero) backend so a cold start is possible
+- **action:** ask a **local-recommendations** question that triggers the grounded web-search **2nd pass** (e.g. "recommend good restaurants / bakeries / clothing shops nearby"), on **web AND Telegram**
+- **guest_expected:** a proper recommendation reply — **never** "Sorry, that took a little too long." (the `_TOO_LONG` / `504`).
+- **db_expected:** the request completes inside `GEMINI_TIMEOUT_S` (45s); the conversation is not left at `ai_status="error"`.
+- **why it was a bug (2026-07-16):** on the new `min=0` Cloud Run staging, a **cold** instance's first Vertex call hit dynamic-shared-quota **429s** that stacked with the old **2/4/8s** retry backoff past the 45s ceiling → 504. Confirmed by the per-attempt logging (`d2444b1`): `first_pass: rate-limited (429) … after 8.2s; backing off 2s` on the cold call, then zero 429s once warm.
+- **fix:** shorter **jittered backoff ~0.5/1/2s** (`a0c1fdc`) so retries can't stack past 45s, plus the **UptimeRobot keep-warm** ping on staging `/health` (no cold starts). Prod is `min=1` (always warm), so it was never really at risk.
+- **last_tested:** 2026-07-16 (founder — PASS: 3 back-to-back local-rec queries on `@AlfredHostW_bot`, all proper replies; only 1 cold 429, recovered on retry)
+- **status:** passing
+- **promoted from intake:** `telegram-timeout` (`d2444b1`, `a0c1fdc`)
 
 ---
 
@@ -964,13 +979,53 @@ mobile breakpoints so the web/desktop layout is unchanged.
 
 ---
 
+## N. Infrastructure, deployment & environment parity
+
+> Deployment-state assertions (not user behaviour). These verify the platform the app runs on — CI/CD, environment parity, and public domains — so an infra regression (a broken trigger, a stale env var, a dead domain) is caught the same way a code regression is. Promoted 2026-07-16 from the Batch-5/6 infra work.
+
+### N1. Staging and prod run the same platform (Cloud Run + Vertex) at parity
+- **id:** infra-parity-01
+- **touches:** `_tests/env_parity.py`, `_tests/env_parity.sql`, both Cloud Run projects
+- **layer:** 1
+- **setup:** prod (`alfred-backend`/`alfred-scraper`, `min=1`) and staging (`alfred-backend-staging`/`alfred-scraper-staging`, `min=0`) both in `alfred-prod-502215`/europe-west3 on **Vertex/ADC**; staging keeps the old shared Supabase, prod the isolated `alfred-prod` DB
+- **action:** run `env_parity.py` (staging via MCP, prod via the SQL-editor JSON) and smoke-test staging web guest chat + Telegram (`@AlfredHostW_bot`) + host dashboard
+- **db_expected:** `env_parity.py` reports **zero delta** (RLS flags, `supabase_realtime` publication, buckets + size limits, storage policies, functions, triggers, cron, extensions, and the API key every frontend ships); all three staging surfaces work
+- **last_tested:** 2026-07-16 (zero-delta after the prod RLS re-apply — see C9; staging Cloud Run smoke PASS)
+- **status:** passing
+- **promoted from intake:** `infra` (platform parity)
+
+### N2. Push to `main` auto-deploys prod (Cloud Build trigger)
+- **id:** infra-ci-trigger-01
+- **touches:** `cloudbuild.yaml`, Cloud Build trigger `deploy-prod-on-main`
+- **layer:** 1
+- **setup:** trigger `deploy-prod-on-main` (europe-west3) linked to `AG-2-0-projects-Hub/alfred-ingestor`, branch `^main$`, config `cloudbuild.yaml`, runs as the compute SA (`798387479883-compute@`, holds `run.admin` + `iam.serviceAccountUser`)
+- **action:** merge `staging→main` (or push to `main`)
+- **db_expected:** a Cloud Build runs and **deploys backend + scraper to prod Cloud Run**, **code-only** — no `--set-env-vars`/`--set-secrets`, so prod env + secrets are preserved; both prod services take a new revision serving the merged commit
+- **notes:** ⚠️ a **regional** trigger MUST specify `--service-account` (this new secure-by-default project has no legacy Cloud Build SA); `cloudbuild.yaml` sets `logging: CLOUD_LOGGING_ONLY`, which a user SA requires
+- **last_tested:** 2026-07-17 (first real fire = the staging→main merge this session — see result at merge time)
+- **status:** pending (verified at this merge)
+- **promoted from intake:** `ci-trigger`
+
+### N3. Public domains resolve to the right environment
+- **id:** infra-domains-01
+- **touches:** Vercel projects `alwaysalfred` (prod) + `alfred-staging` (staging); `FRONTEND_URL` on both backends
+- **layer:** 1
+- **setup:** prod frontend `alwaysalfred.vercel.app` ← `main`; staging frontend `alwaysalfred-staging.vercel.app` ← `staging` (old `alfred-ingestor.vercel.app` 307-redirects to it)
+- **action:** `curl /assets/.env` on each domain; hit the old staging domain and follow the redirect
+- **db_expected:** prod serves the isolated `alfred-prod` Supabase + prod Cloud Run backend; staging serves the shared Supabase + `alfred-backend-staging`; `alfred-ingestor.vercel.app` → `307` → `alwaysalfred-staging.vercel.app`. `FRONTEND_URL` on `alfred-backend-staging` leads with the new domain (guest links) and retains the old ones (CORS)
+- **last_tested:** 2026-07-16 (rename + 307 redirect + `FRONTEND_URL` all verified via curl; staging backend rev 00005)
+- **status:** passing
+- **promoted from intake:** `vercel-rename`
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
 |---|---|---|---|---|
 | A. Auth | 7 | — | 7 | — |
 | B. Ingestor | 13 | 5 | 8 | — |
-| C. Chat | 11 | 1 | 10 | — |
+| C. Chat | 12 | 1 | 11 | — |
 | D. Dashboard | 5 | — | 5 | — |
 | E. Multi-property | 2 | — | 2 | — |
 | F. Theme | 1 | — | 1 | — |
@@ -980,7 +1035,8 @@ mobile breakpoints so the web/desktop layout is unchanged.
 | K. Mobile / responsive | 1 | — | — | 1 |
 | L. AI guardrails & learning | 11 | 4 | — | 10 |
 | **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
-| **Total** | **74** | **13** | **42** | **22** |
+| **N. Infrastructure & deploy** | **3** | **3** | — | — |
+| **Total** | **78** | **16** | **43** | **22** |
 
 **Open (not passing) — as of 2026-07-15:**
 - **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.
@@ -1048,6 +1104,8 @@ sections above, then delete the row.
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
 | _(empty)_ | | | | |
+
+> **PROMOTED 2026-07-16 (later) — the queue was cleared before the second `staging→main` merge.** The 6 rows went: RLS-on-deleted-listing (prod verify) → **C9** (extended); platform parity → **N1**; Telegram/web-search timeout → **C12** (new); scraper 429-retry → **B0** (extended); CI trigger → **N2** (new); Vercel staging rename → **N3** (new). New section **N. Infrastructure, deployment & environment parity** was added for the infra-state rows.
 
 > **PROMOTED 2026-07-14 - the queue was cleared before the `v1.0.0-beta.1` merge.**
 > All 47 rows were grouped by flow and promoted. Where they went:

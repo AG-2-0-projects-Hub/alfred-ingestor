@@ -299,6 +299,7 @@ async def process_guest_message(
     else:
         prompt_message = message
 
+    phase = "first_pass"
     try:
         first_result = await asyncio.wait_for(
             gemini_messenger.first_pass(
@@ -313,6 +314,7 @@ async def process_guest_message(
         )
 
         if first_result.get("requires_web_search") and first_result.get("search_query"):
+            phase = "second_pass_search"
             reply = await asyncio.wait_for(
                 gemini_messenger.second_pass_with_search(
                     master_json=property_data["master_json"],
@@ -327,8 +329,8 @@ async def process_guest_message(
             reply = first_result["reply_to_guest"]
     except asyncio.TimeoutError:
         log.warning(
-            "Gemini call exceeded %ss for booking=%s; returning 504 so the client gets a CORS-friendly error",
-            GEMINI_TIMEOUT_S, booking_id,
+            "Gemini %s exceeded %ss for booking=%s; returning 504 so the client gets a CORS-friendly error",
+            phase, GEMINI_TIMEOUT_S, booking_id,
         )
         await asyncio.to_thread(
             supabase_client.update_conversation,
