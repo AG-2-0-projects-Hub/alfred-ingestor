@@ -200,3 +200,19 @@ Two traps when designing that fix:
 **Debugging trap that bit twice:** a conversation whose host has replied is in `intervene` mode and Alfred stays silent BY DESIGN — both a "frozen task" probe and a realtime probe on such a conversation return false negatives. Always probe a clean **autopilot** conversation.
 
 **Global Candidate:** Yes — "min-instances ≠ CPU-always-allocated" applies to every Cloud Run service in AG that does post-response background work.
+
+---
+
+## 2026-07-17 — Cloud Build trigger on a new secure-by-default GCP project needs `--service-account`; and `*.vercel.app` is a global namespace
+
+**Context:** Wiring the `deploy-prod-on-main` Cloud Build trigger (auto-deploy prod Cloud Run on push to `main`) and renaming the staging Vercel project — two infra areas that each cost a round-trip.
+
+**Discovery:**
+1. **A regional Cloud Build trigger on a new "secure by default" project MUST specify `--service-account`.** `gcloud builds triggers create github … --region=europe-west3` failed with a bare `INVALID_ARGUMENT` (no field detail even at `--verbosity=debug`). Cause: the project (`alfred-prod-502215`) has **no legacy Cloud Build SA** (`…@cloudbuild.gserviceaccount.com`) that a regional trigger would otherwise use. Fix: `--service-account=<num>-compute@developer.gserviceaccount.com`. That SA needs `roles/run.admin` + `roles/iam.serviceAccountUser`, and the build config must set `options.logging: CLOUD_LOGGING_ONLY` (a user-specified SA cannot write the default logs bucket).
+2. **A 2nd-gen "host connection" is not a linked repo.** Creating the GitHub↔Cloud Build connection in the console leaves the repo unlinked; `--repository` needs `gcloud builds repositories create <id> --remote-uri=<url>.git --connection=<conn> --region=<r>` first — doable from gcloud, no dashboard trip.
+3. **You cannot dry-run a trigger whose build config isn't on the target branch yet.** `triggers run --branch=main` → `NOT_FOUND: cloudbuild.yaml` because the file only reaches `main` at the merge; running it against `staging` would deploy **unmerged** code to the **prod** services the config names. No safe dry-run — validation is the real merge.
+4. **`*.vercel.app` is a GLOBAL namespace, not team-scoped.** Renaming a Vercel *project* changes only its internal slug, not the live domain. The obvious matching domain (`alfred-staging.vercel.app`) was already owned by an unrelated team. Probe a candidate (`curl …/assets/.env`) before planning a rename; we used `alwaysalfred-staging.vercel.app`. The git-branch **preview** domain slug is sticky to first creation and does NOT follow a rename.
+
+**Impact:** Trigger live + validated on its first real fire (PR #4 → prod backend 00018 + scraper 00003). Staging frontend now `alwaysalfred-staging.vercel.app` (old domain 307-redirects). Captured in `CONTEXT.md` + `_tests/scenarios.md` section **N**.
+
+**Global Candidate:** Yes (#1–#3) — every new GCP project under the AG org's secure defaults will hit the Cloud Build `--service-account` requirement; promote to `_global_lessons/lessons.md`.
