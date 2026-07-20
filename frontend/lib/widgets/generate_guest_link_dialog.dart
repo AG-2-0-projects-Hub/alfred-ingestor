@@ -168,6 +168,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final guestUrl = _result!['guest_chat_url'] as String;
     final hostUrl = _result!['host_chat_url'] as String;
     final telegramUrl = _result!['telegram_link'] as String?;
+    final whatsappUrl = _result!['whatsapp_link'] as String?;
 
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
@@ -176,6 +177,15 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _urlRow('Guest link (web)', guestUrl),
+          // WhatsApp before Telegram: it is the primary channel for the
+          // Mexico/LATAM beta, and the first link a host sees is the one they
+          // send. The link carries a PREFILLED message holding the booking id —
+          // that text is how the guest gets connected, so it must not be edited
+          // away (see routers/whatsapp.py).
+          if (whatsappUrl != null && whatsappUrl.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _urlRow('Guest link (WhatsApp)', whatsappUrl),
+          ],
           if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
             const SizedBox(height: 16),
             _urlRow('Guest link (Telegram)', telegramUrl),
