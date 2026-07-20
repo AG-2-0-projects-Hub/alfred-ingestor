@@ -34,12 +34,20 @@ def enqueue(
     *,
     delay_seconds: int = 0,
     name: str | None = None,
+    queue: str | None = None,
 ) -> bool:
     """POST `payload` to `path` on this service via Cloud Tasks.
 
     `name` makes the task idempotent: Cloud Tasks rejects a duplicate name, which
     is how a Telegram album (delivered as one update per photo, all sharing a
     media_group_id) schedules exactly ONE flush no matter how many photos land.
+
+    `queue` overrides CLOUD_TASKS_QUEUE so each channel can own its queue. They
+    are kept apart deliberately: the queues carry retry and rate-limit settings,
+    so a backlog or a retry storm on one channel would otherwise delay replies on
+    the other, and a queue named for Telegram holding WhatsApp tasks makes the
+    console lie about what is stuck. Falls back to CLOUD_TASKS_QUEUE when unset,
+    so an environment that has not defined a per-channel queue still works.
 
     Returns True if the task was created, False if a task with that name already
     existed — the caller treats that as "someone else already scheduled it".
@@ -50,7 +58,7 @@ def enqueue(
 
     project = os.environ["GOOGLE_CLOUD_PROJECT"]
     location = os.environ["CLOUD_TASKS_LOCATION"]
-    queue = os.environ["CLOUD_TASKS_QUEUE"]
+    queue = queue or os.environ["CLOUD_TASKS_QUEUE"]
     base_url = os.environ["SERVICE_BASE_URL"].rstrip("/")
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 

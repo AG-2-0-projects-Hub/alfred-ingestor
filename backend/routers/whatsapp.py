@@ -340,12 +340,20 @@ def _enqueue(
     background_tasks: BackgroundTasks, fallback_fn, payload: dict,
     *, name: str, delay: int = 0, args: tuple = (),
 ) -> None:
-    """Cloud Tasks where configured, in-process BackgroundTask otherwise."""
+    """Cloud Tasks where configured, in-process BackgroundTask otherwise.
+
+    WHATSAPP_TASKS_QUEUE keeps this channel's work off Telegram's queue. Sharing
+    one queue would let a WhatsApp backlog delay Telegram replies (and the
+    reverse), and would leave the console showing Telegram's queue full of
+    WhatsApp tasks. Unset, it falls back to CLOUD_TASKS_QUEUE, so nothing breaks
+    in an environment that has not defined a per-channel queue.
+    """
     if not task_queue.enabled():
         background_tasks.add_task(fallback_fn, *args)
         return
     task_queue.enqueue(
         "/api/whatsapp/process", payload, delay_seconds=delay, name=name,
+        queue=os.environ.get("WHATSAPP_TASKS_QUEUE") or None,
     )
 
 
