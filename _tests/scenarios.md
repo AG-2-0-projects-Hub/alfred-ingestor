@@ -441,6 +441,7 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **last_tested:** 2026-07-16 — RLS policy proven on staging (live property → guest insert **allowed**; deleted → **blocked**) **and re-applied + verified on PROD**. (⚠️ `conversation_property_is_live` had been silently rolled back on 07-15 — a `begin/…/rollback` verify block pasted into the Supabase editor *with* the DDL reverted the `create function`+`create policy` under the editor's implicit transaction, while printing PASS in-transaction. Re-applied DDL-only 07-16 → `env_parity.py` zero-delta.) **The Telegram closed-notice leg still awaits a founder test.**
 - **status:** pending (RLS write-block ✅ on both envs; the Telegram-side closed-notice leg is the only unverified part)
 - **promoted from intake:** new 2026-07-14 (`02e728f`); PROD-RLS re-apply/verify 2026-07-16 (intake row `A6/RLS`)
+- **⚠️ EXTENDED 2026-08-27 — a THIRD channel now shares this guard.** `routers/whatsapp.py`'s message handler and its `/link` path run through the same `process_guest_message` + RLS guard as Telegram, so a WhatsApp guest whose listing is soft-deleted should get the same localized closed notice, and a `wa.me` link should refuse to attach to a dead listing. Covered offline by `_tests/whatsapp_channel.py`; **the live WhatsApp leg is untested**, same status as the Telegram leg above. (promoted from intake row `wa-channel, C9`)
 
 ### C10. A burst of quick guest messages gets ONE reply
 - **id:** chat-burst-01
@@ -1017,6 +1018,81 @@ mobile breakpoints so the web/desktop layout is unchanged.
 - **status:** passing
 - **promoted from intake:** `vercel-rename`
 
+### N4. WhatsApp webhook security + staging infra
+- **id:** infra-whatsapp-01
+- **touches:** `backend/routers/whatsapp.py`, `_tests/whatsapp_channel.py`, Cloud Tasks queue `whatsapp-updates-staging`
+- **layer:** 1
+- **setup:** staging Cloud Run backend rev 00006+ with `staging-whatsapp-access-token` / `-app-secret` / `-verify-token` resolved from Secret Manager
+- **action:** `GET` the webhook with Meta's verify challenge + correct/wrong token; `POST` with a valid/forged/missing `X-Hub-Signature-256`; confirm the `whatsapp-updates-staging` Cloud Tasks queue exists in europe-west3 and drains
+- **db_expected:** verify-challenge echoes `hub.challenge` as plaintext on the correct token, 403 on wrong token; unsigned/forged POST → 403; correctly signed POST → 200 + task enqueued
+- **last_tested:** 2026-07-20 — live on staging rev 00006: `/health` 200, verify-challenge echoed plaintext, wrong token 403, unsigned POST 403 (proves `WHATSAPP_APP_SECRET` resolved — unset would 500), no Telegram regression
+- **status:** passing
+- **promoted from intake:** `wa-channel, N-infra` (webhook security + staging infra rows)
+
+---
+
+## O. WhatsApp guest channel
+
+Guest-side WhatsApp (port of the Telegram channel onto Meta Cloud API direct). Host stays on the dashboard. Built 2026-07-20, deployed to staging rev 00006 on Meta's test WABA (`+1 555-612-7233`). 49 offline tests pass (`_tests/whatsapp_channel.py`) covering every scenario below at the unit/integration level. A founder e2e round trip on the test number was confirmed working in a session prior to 2026-08-26 — but that was a general "it works" pass, not a per-scenario check, so every row below stays **pending** until exercised individually against the live deploy.
+
+### O1. Guest links a booking via a wa.me deep link
+- **id:** wa-link-01
+- **touches:** `backend/routers/whatsapp.py`, `backend/services/supabase_client.py`
+- **layer:** 4
+- **setup:** trained property with a guest booking; a WhatsApp account
+- **action:** open the `wa.me` link (booking id rides in an editable prefilled message, since WhatsApp has no `/start`-style payload) and send it
+- **guest_expected:** chat links and returns the localized welcome
+- **dashboard_expected:** the conversation appears with `active_channel='whatsapp'`
+- **status:** pending
+
+### O2. Text parsing: unlinked fallback, unknown code, and burst coalescing don't false-match the booking regex
+- **id:** wa-text-parsing-01
+- **touches:** `backend/routers/whatsapp.py`, `backend/services/burst_buffer.py`
+- **layer:** 4
+- **setup:** an unlinked WhatsApp number, and a linked autopilot conversation
+- **action:** (1) send a message with no booking code from an unlinked number; (2) send a booking-shaped but unknown code; (3) send three quick messages where one contains the word "check-out"
+- **guest_expected:** (1) "not connected to a booking… open the link" — never silence, never the generic error; (2) "couldn't find that booking"; (3) three guest bubbles, exactly ONE Alfred reply — "check-out" must coalesce as ordinary conversation, not get diverted down the linking path (the id-regex requires a 6-char final segment specifically to avoid this — see 2026-07-20 lesson)
+- **status:** pending
+
+### O3. Photos + voice draw one reply; unsupported media is declined
+- **id:** wa-multimodal-01
+- **touches:** `backend/services/whatsapp_client.py`, `backend/routers/whatsapp.py`
+- **layer:** 4
+- **setup:** a linked autopilot conversation
+- **action:** send several photos together, then separately a voice note, then a video or document
+- **guest_expected:** the photos draw ONE reply addressing all of them; the voice note is transcribed and answered; video/document gets a polite decline
+- **dashboard_expected:** media appears in the host dashboard (both download hops carry the bearer token — the CDN hop 401s silently without it)
+- **status:** pending
+
+### O4. Escalation + host reply routes to the active channel
+- **id:** wa-escalation-01
+- **touches:** `backend/routers/messages.py` (`_notify_channel_transition`), `backend/routers/whatsapp.py` (`host_send`)
+- **layer:** 4
+- **setup:** a linked conversation
+- **action:** trigger auto-escalation, then send a host reply from the dashboard
+- **guest_expected:** Alfred's reply arrives FIRST, then the italic "you are now speaking with «host»" notice
+- **host_expected:** the dashboard reply is delivered to WhatsApp only when it is the guest's active channel
+- **status:** pending
+
+### O5. The 24h service window is enforced, not silently swallowed
+- **id:** wa-24h-window-01
+- **touches:** `backend/routers/whatsapp.py` (`host_send`), `conversations.last_guest_inbound_at`
+- **layer:** 4
+- **setup:** a linked conversation whose guest last messaged >24h ago
+- **action:** host sends a reply from the dashboard
+- **host_expected:** the dashboard shows a "24-hour reply window has closed" warning instead of a false "sent"; the message is still stored. Inside the window it delivers normally (Meta refuses free-form sends outside it — error `131047`)
+- **⚠️ cost note:** guest-initiated messages are free only until **2026-10-01**; re-baseline before then (see ROADMAP D2)
+- **status:** pending
+
+### O6. Meta's webhook redelivery produces exactly one stored message
+- **id:** wa-redelivery-01
+- **touches:** `backend/routers/whatsapp.py`
+- **layer:** 4
+- **setup:** a linked conversation
+- **action:** the same `wamid` is delivered twice (Meta retries any non-200 response)
+- **db_expected:** ONE stored guest message, ONE reply — guarded by an in-process seen-set of `wamid` plus Cloud Tasks names keyed on it; the webhook always answers 200 so a 500 never triggers Meta's retry storm
+- **status:** pending
+
 ---
 
 ## Index summary
@@ -1035,8 +1111,9 @@ mobile breakpoints so the web/desktop layout is unchanged.
 | K. Mobile / responsive | 1 | — | — | 1 |
 | L. AI guardrails & learning | 11 | 4 | — | 10 |
 | **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
-| **N. Infrastructure & deploy** | **3** | **3** | — | — |
-| **Total** | **78** | **16** | **43** | **22** |
+| **N. Infrastructure & deploy** | **4** | **4** | — | — |
+| **O. WhatsApp** | **6** | — | — | **6** |
+| **Total** | **85** | **17** | **43** | **28** |
 
 **Open (not passing) — as of 2026-07-15:**
 - **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.
@@ -1103,16 +1180,8 @@ sections above, then delete the row.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
-| 2026-07-20 | `71324b7` | WhatsApp — guest links a booking | Opening the `wa.me` link and sending the prefilled message links the chat and returns the localized welcome; the conversation appears on the dashboard with `active_channel='whatsapp'`. | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — guest CLEARS the prefilled text | Sending a message with no booking code from an unlinked number replies "not connected to a booking… open the link", NOT silence and NOT the generic error. Booking-shaped-but-unknown code replies "couldn't find that booking". | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — text burst coalescing | Three quick messages store as three guest bubbles on the dashboard but draw exactly ONE Alfred reply. A message containing "check-out" must still coalesce (it must not be mistaken for a booking code). | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — photos + voice | Several photos sent together draw ONE reply addressing all of them; a voice note is transcribed and answered; media appears in the host dashboard. Video/document is politely declined. | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — escalation + host reply | On auto-escalation the guest gets Alfred's reply FIRST, then the italic "you are now speaking with <host>" notice. A host reply from the dashboard is delivered to WhatsApp only when it is the active channel. | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — 24h service window | A host reply >24h after the guest's last inbound is NOT silently swallowed: it is stored, and the dashboard shows the "24-hour reply window has closed" warning. Inside the window it delivers normally. | wa-channel |
-| 2026-07-20 | `71324b7` | WhatsApp — deleted listing | A guest whose listing was soft-deleted gets the localized closed-conversation notice on WhatsApp, and `/link` refuses to attach a chat to a dead listing. | wa-channel, C9 |
-| 2026-07-20 | `71324b7` | WhatsApp — webhook security | Meta's GET verify echoes `hub.challenge` as plaintext; a forged/missing `X-Hub-Signature-256` is rejected 403; the worker endpoint rejects a wrong shared secret. Covered offline by `_tests/whatsapp_channel.py` — assert once against the live deploy. | wa-channel, N-infra |
-| 2026-07-20 | `71324b7` | WhatsApp — Meta redelivery | The same `wamid` delivered twice produces ONE stored guest message and ONE reply (Meta retries on any non-200). | wa-channel |
-| 2026-07-20 | (infra) | WhatsApp — staging infra | Cloud Tasks queue `whatsapp-updates-staging` exists in europe-west3 and drains; secrets resolve on the Cloud Run service; `/api/whatsapp/webhook` returns the challenge from the public URL. | wa-channel, N-infra |
+
+> **PROMOTED 2026-08-27 — the 10 `wa-channel` rows were grouped and promoted.** Link/welcome → **O1**; unlinked-fallback + unknown-code + burst-vs-"check-out" regex → **O2** (combined, same flow); photos + voice + declined media → **O3**; escalation + host-reply routing → **O4**; 24h service window → **O5**; deleted listing → **C9** (extended with a WhatsApp leg); webhook security + staging infra → **N4** (new, combined — both are infra-state assertions); Meta redelivery idempotency → **O6**. New section **O. WhatsApp guest channel** added (6 scenarios, layer 4 — mirrors J's Telegram structure). All new rows are `status: pending`: the 49 offline tests in `_tests/whatsapp_channel.py` cover the logic, and a general e2e round trip was founder-confirmed working in a prior session, but no row had an individual live-test result recorded, so none were marked `passing` on that basis alone.
 
 > **PROMOTED 2026-07-16 (later) — the queue was cleared before the second `staging→main` merge.** The 6 rows went: RLS-on-deleted-listing (prod verify) → **C9** (extended); platform parity → **N1**; Telegram/web-search timeout → **C12** (new); scraper 429-retry → **B0** (extended); CI trigger → **N2** (new); Vercel staging rename → **N3** (new). New section **N. Infrastructure, deployment & environment parity** was added for the infra-state rows.
 
