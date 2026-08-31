@@ -40,6 +40,10 @@ heading before proceeding.
 ## Session Start
 **Before any other action:** read `CONTEXT.md` and `_Context/session-digest.md` (if present) to know exactly where the project stands and what happened last session.
 
+**Conditional:** if `graphify-out/GRAPH_REPORT.md` exists for this project, consult it before raw
+files for architecture/structure questions (see root `CLAUDE.md` §10). Skip if it doesn't exist —
+nothing else changes.
+
 ### Updating `_Context/session-digest.md`
 This file holds the **last 3 sessions** as separate dated entries (newest first) — including parallel sessions — so a fresh session sees everything recent, not just whichever session updated it last.
 - **Never fully replace the file.** Re-read it fresh immediately before editing, **prepend** a new dated entry for the current session, and if that makes more than 3 entries, delete only the oldest one.
@@ -57,6 +61,12 @@ This file holds the **last 3 sessions** as separate dated entries (newest first)
    immediately below), and refresh `## Pending`/`## Unresolved Decisions` at the top of the file
    to drop resolved items and add new ones.
 2. `_Context/session-digest.md` — prepend a new dated entry per the rules above (cap at 3).
+3. **Conditional — Graphify:** if `graphify-out/` exists for this project, refresh it
+   (`graphify update .` — free/local unless docs changed), then re-export the Obsidian vault
+   notes for this project (`graphify export obsidian --dir ~/AG_master_files/.obsidian-vault/Projects/the-ingestor`)
+   so the vault reflects the refreshed graph — and fold any touched
+   `~/AG_master_files/.obsidian-vault/Global/` notes into this same commit — never a separate
+   one. Skip entirely if graphify isn't installed/run for this project yet.
 
 ### `CONTEXT.md`'s entry-length target (keeps it from re-bloating without splitting the file)
 
