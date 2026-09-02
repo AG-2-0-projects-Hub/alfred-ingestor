@@ -110,6 +110,13 @@ Always use the safe-commit-n-push workflow:
 
 This applies to ALL commits — documentation, fixes, features, everything. No exceptions, no matter how small the change.
 
+This project is a standalone git repo (`projects/the-ingestor/.git`, remote
+`origin` → `AG-2-0-projects-Hub/alfred-ingestor`) — it is not tracked by
+AG_master_files' root repo.
+1. Push using plain `git -C projects/the-ingestor push origin main` — no
+   subtree command needed.
+2. Verify remote SHA matches local after pushing.
+
 ---
 
 ## Supabase Connection
