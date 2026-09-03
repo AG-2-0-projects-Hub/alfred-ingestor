@@ -1180,6 +1180,7 @@ sections above, then delete the row.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
+| 2026-09-03 | 5f86ccd (main) | WhatsApp guest channel — PROD go-live | Guest message to `+52 1 56 2916 1884` reaches webhook → Cloud Tasks → backend → correct reply, in prod (not staging): confirmed twice live — unlinked number gets the "not connected to a booking" fallback, and a real booking-linked `wa.me` link gets a real AI reply | O (O1-O6, now prod-verified not just staging) |
 
 > **PROMOTED 2026-08-27 — the 10 `wa-channel` rows were grouped and promoted.** Link/welcome → **O1**; unlinked-fallback + unknown-code + burst-vs-"check-out" regex → **O2** (combined, same flow); photos + voice + declined media → **O3**; escalation + host-reply routing → **O4**; 24h service window → **O5**; deleted listing → **C9** (extended with a WhatsApp leg); webhook security + staging infra → **N4** (new, combined — both are infra-state assertions); Meta redelivery idempotency → **O6**. New section **O. WhatsApp guest channel** added (6 scenarios, layer 4 — mirrors J's Telegram structure). All new rows are `status: pending`: the 49 offline tests in `_tests/whatsapp_channel.py` cover the logic, and a general e2e round trip was founder-confirmed working in a prior session, but no row had an individual live-test result recorded, so none were marked `passing` on that basis alone.
 
