@@ -42,7 +42,8 @@ google-chrome-stable_current_amd64.deb
 .aider-desk/
 .augment/
 .bob/
-.claude/
+.claude/*
+!.claude/settings.json
 .codeartsdoer/
 .codebuddy/
 .codemaker/
@@ -87,3 +88,7 @@ _tests/runner/node_modules/
 _tests/runner/test-results/
 _tests/runner/playwright-report/
 _tests/runner/.playwright/
+.mcp.json
+
+# Graphify knowledge-graph output — regenerated locally, not committed
+graphify-out/

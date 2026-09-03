@@ -322,7 +322,8 @@ def get_guest_by_booking_id(booking_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("guests")
-        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
+        .select("id, name, booking_id, property_id, preferred_language, "
+                "telegram_chat_id, whatsapp_wa_id")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
@@ -335,7 +336,8 @@ def get_guest_by_telegram_chat_id(chat_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("guests")
-        .select("id, name, booking_id, property_id, preferred_language, telegram_chat_id")
+        .select("id, name, booking_id, property_id, preferred_language, "
+                "telegram_chat_id, whatsapp_wa_id")
         .eq("telegram_chat_id", str(chat_id))
         .maybe_single()
         .execute()
@@ -357,6 +359,41 @@ def link_guest_telegram(booking_id: str, chat_id: str) -> None:
     client.table("guests").update({"telegram_chat_id": None}) \
         .eq("telegram_chat_id", cid).neq("booking_id", booking_id).execute()
     client.table("guests").update({"telegram_chat_id": cid}) \
+        .eq("booking_id", booking_id).execute()
+
+
+def get_guest_by_whatsapp_wa_id(wa_id: str) -> dict | None:
+    """Find the guest linked to a WhatsApp sender.
+
+    `wa_id` is Meta's identifier for the sender: their phone number in E.164
+    WITHOUT the leading '+' (e.g. "5215512345678"). Always compare as text.
+    """
+    client = get_client()
+    result = (
+        client.table("guests")
+        .select("id, name, booking_id, property_id, preferred_language, "
+                "telegram_chat_id, whatsapp_wa_id")
+        .eq("whatsapp_wa_id", str(wa_id))
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def link_guest_whatsapp(booking_id: str, wa_id: str) -> None:
+    """Attach a WhatsApp sender to a guest booking.
+
+    Same contract as link_guest_telegram: one WhatsApp account maps to at most one
+    booking (partial unique index on whatsapp_wa_id), so RELEASE the id from any
+    other booking first, then attach it here. That makes a returning guest's new
+    booking MOVE the link instead of hitting a unique violation — and lets one
+    phone test several bookings.
+    """
+    client = get_client()
+    wid = str(wa_id)
+    client.table("guests").update({"whatsapp_wa_id": None}) \
+        .eq("whatsapp_wa_id", wid).neq("booking_id", booking_id).execute()
+    client.table("guests").update({"whatsapp_wa_id": wid}) \
         .eq("booking_id", booking_id).execute()
 
 
@@ -641,11 +678,40 @@ def record_learning_event(
 
 
 def set_active_channel(conversation_id: str, channel: str) -> None:
-    """Record the channel the guest is currently using ('web' | 'telegram').
-    Guest-facing pushes route only to this channel."""
+    """Record the channel the guest is currently using ('web' | 'telegram' |
+    'whatsapp'). Guest-facing pushes route only to this channel."""
     get_client().table("conversations").update(
         {"active_channel": channel}
     ).eq("id", conversation_id).execute()
+
+
+def touch_guest_inbound(conversation_id: str) -> None:
+    """Stamp the guest's latest inbound message time.
+
+    WhatsApp-specific: Meta only allows a free-form send within 24h of the guest's
+    last inbound message, so this is what host_send checks before promising the
+    host their reply was delivered. Currently written by the WhatsApp router only
+    — the column stays NULL for web and Telegram conversations, which is correct
+    since neither has a send window.
+    """
+    get_client().table("conversations").update(
+        {"last_guest_inbound_at": _now()}
+    ).eq("id", conversation_id).execute()
+
+
+def get_last_guest_inbound_at(conversation_id: str) -> str | None:
+    """Timestamp of the guest's last inbound message, or None if never recorded."""
+    result = (
+        get_client()
+        .table("conversations")
+        .select("last_guest_inbound_at")
+        .eq("id", conversation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (result and result.data):
+        return None
+    return result.data.get("last_guest_inbound_at")
 
 
 def get_active_channel(conversation_id: str) -> str:

@@ -76,6 +76,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   String _guestName = 'the guest';
   bool _copiedLink = false;
   bool _copiedTg = false;
+  bool _copiedWa = false;
 
   /// Telegram deep link for this booking, built from the bot username env var.
   /// Null when the app wasn't configured with a bot username.
@@ -94,6 +95,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         ? dotenv.env['TELEGRAM_LINK_DOMAIN']!.trim()
         : 't.me';
     return 'https://$domain/${u.replaceFirst('@', '')}?start=${widget.bookingId}';
+  }
+
+  /// WhatsApp deep link for this booking, built from the shared Alfred number.
+  /// Null when the app wasn't configured with one.
+  ///
+  /// Unlike Telegram's `?start=`, which carries the booking id invisibly,
+  /// wa.me can only carry it inside a PREFILLED MESSAGE the guest is free to
+  /// edit or delete before sending. The id therefore sits at the end of the
+  /// text, and routers/whatsapp.py parses it back out — with a spoken fallback
+  /// for when it never arrives. Keep this string in step with the backend's
+  /// version in messages.create_guest.
+  String? get _whatsappUrl {
+    final raw = dotenv.env['WHATSAPP_NUMBER']?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    // wa.me wants E.164 digits only — no '+', spaces or punctuation.
+    final number = raw.replaceAll(RegExp(r'\D'), '');
+    if (number.isEmpty) return null;
+    final text = Uri.encodeComponent(
+      'Hola Alfred, mi reserva es ${widget.bookingId}',
+    );
+    return 'https://wa.me/$number?text=$text';
   }
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
@@ -206,6 +228,18 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       setState(() => _copiedTg = true);
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) setState(() => _copiedTg = false);
+      });
+    }
+  }
+
+  Future<void> _copyWhatsappLink() async {
+    final url = _whatsappUrl;
+    if (url == null) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) {
+      setState(() => _copiedWa = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _copiedWa = false);
       });
     }
   }
@@ -428,11 +462,26 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     _scrollToBottom();
 
     try {
-      await ApiClient.postJson(
+      final result = await ApiClient.postJson(
         '/api/messages/host-send',
         {'conversation_id': _conversationId, 'message': text},
         bearer: Supabase.instance.client.auth.currentSession?.accessToken,
       );
+
+      // WhatsApp — and only WhatsApp — refuses free-form messages more than 24h
+      // after the guest's last one. The message IS saved (so the optimistic
+      // bubble stays), but the guest has NOT received it. Saying nothing here
+      // would let the host believe they had answered someone they hadn't.
+      final delivery = result['delivery'] as String?;
+      if (delivery != null && delivery.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(delivery),
+            duration: const Duration(seconds: 8),
+            backgroundColor: context.palette.warning,
+          ),
+        );
+      }
     } on ApiException catch (e) {
       if (mounted) {
         setState(() => _messages = _messages.where((m) => m['id'] != optimisticId).toList());
@@ -821,6 +870,68 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                           fontSize: 11, color: context.palette.success),
                     ),
                   ],
+                ),
+              ],
+              // WhatsApp first — it is the primary channel for the MX/LATAM
+              // beta, so it is the link a host should reach for by default.
+              if (_whatsappUrl != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Guest WhatsApp Link',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: context.palette.textPrimary),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: context.palette.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: context.palette.border),
+                  ),
+                  child: Text(
+                    _whatsappUrl!,
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: context.palette.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                // The booking id travels inside the prefilled message, so a
+                // guest who clears it arrives unrecognised. Alfred recovers by
+                // asking them to reopen the link, but the host should know why.
+                Text(
+                  'Opens WhatsApp with a message ready to send. The guest must '
+                  'send it as-is so Alfred can match their booking.',
+                  style: GoogleFonts.inter(
+                      fontSize: 10, color: context.palette.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _copiedWa ? null : _copyWhatsappLink,
+                    icon: Icon(
+                      _copiedWa
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.copy_rounded,
+                      size: 16,
+                    ),
+                    label: Text(_copiedWa ? 'Copied!' : 'Copy WhatsApp Link'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _copiedWa
+                          ? context.palette.success
+                          : context.palette.primary,
+                      side: BorderSide(
+                          color: _copiedWa
+                              ? context.palette.success
+                              : context.palette.border),
+                    ),
+                  ),
                 ),
               ],
               if (_telegramUrl != null) ...[

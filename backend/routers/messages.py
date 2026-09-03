@@ -6,11 +6,12 @@ import re
 import string
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
 from services import (
     burst_buffer, guardrails, learning_triage, supabase_client, gemini_messenger,
-    task_queue, telegram_client, welcome,
+    task_queue, telegram_client, welcome, whatsapp_client,
 )
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
@@ -38,28 +39,45 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _notify_tg_transition(
+async def _notify_channel_transition(
     guest: dict | None, host_name: str | None, kind: str,
     active_channel: str = "telegram",
 ) -> None:
-    """Push the same transition notice the web shows to a Telegram-linked guest.
+    """Push the same transition notice the web shows to a messaging-app guest.
 
     kind: 'intervene' (a human takes over) or 'resume' (Alfred is back). Copy
-    mirrors ChatSystemMessages.formatForGuest. No-op unless the guest's ACTIVE
-    channel is Telegram (a web guest sees the marker via realtime — don't ping
-    their Telegram) and they have a telegram_chat_id. Best-effort.
+    mirrors ChatSystemMessages.formatForGuest. Routes ONLY to the guest's ACTIVE
+    channel — a web guest sees the marker via realtime, so pinging their Telegram
+    or WhatsApp as well would be a duplicate notice on a channel they've left.
+    No-op for 'web' and for a guest with no id on the active channel.
+    Best-effort: a notice that fails to send must never break the caller.
     """
-    if active_channel != "telegram":
+    if not guest:
         return
-    if not guest or not guest.get("telegram_chat_id"):
+
+    # (identifier field, sender) per channel. Adding a channel means adding a row.
+    senders = {
+        "telegram": ("telegram_chat_id", telegram_client.send_italic),
+        "whatsapp": ("whatsapp_wa_id", whatsapp_client.send_italic),
+    }
+    entry = senders.get(active_channel)
+    if not entry:
         return
+    field, send = entry
+
+    recipient = guest.get(field)
+    if not recipient:
+        return
+
     text = guardrails.transition_notice(
         kind, host_name, guest.get("preferred_language"),
     )
     try:
-        await telegram_client.send_italic(guest["telegram_chat_id"], text)
+        await send(recipient, text)
     except Exception as exc:
-        log.warning("telegram transition notice (%s) failed: %s", kind, exc)
+        log.warning(
+            "%s transition notice (%s) failed: %s", active_channel, kind, exc
+        )
 
 
 class WebMediaItem(BaseModel):
@@ -565,26 +583,92 @@ async def host_send(req: HostSendRequest, authorization: str | None = Header(def
         ai_status="paused",
     )
 
-    # Deliver the host's reply to Telegram ONLY if Telegram is the guest's active
-    # channel. A web guest reads it live via Supabase realtime — don't also ping
-    # their Telegram. Best-effort — never fail the host send if delivery hiccups.
+    # Deliver the host's reply to their messaging app ONLY if that is the guest's
+    # active channel. A web guest reads it live via Supabase realtime — don't also
+    # ping their Telegram/WhatsApp. Best-effort: never fail the host send if
+    # delivery hiccups, the message is already stored and visible on the dashboard.
+    delivery: str | None = None
+    active_channel: str | None = None
     try:
         active_channel = await asyncio.to_thread(
             supabase_client.get_active_channel, req.conversation_id
         )
-        if active_channel == "telegram":
+        if active_channel in ("telegram", "whatsapp"):
             guest = await asyncio.to_thread(
                 supabase_client.get_guest_by_conversation_id, req.conversation_id
             )
-            if guest and guest.get("telegram_chat_id"):
+            if active_channel == "telegram" and (guest or {}).get("telegram_chat_id"):
                 await telegram_client.send_message(
                     guest["telegram_chat_id"], req.message
                 )
+            elif active_channel == "whatsapp" and (guest or {}).get("whatsapp_wa_id"):
+                delivery = await _deliver_host_whatsapp(
+                    req.conversation_id, guest["whatsapp_wa_id"], req.message
+                )
     except Exception as exc:
-        log.warning("host_send: Telegram delivery failed for conv=%s: %s",
-                    req.conversation_id, exc)
+        log.warning("host_send: %s delivery failed for conv=%s: %s",
+                    active_channel or "?", req.conversation_id, exc)
 
+    # `delivery` is set only when the guest is on WhatsApp and Meta would not (or
+    # did not) accept the message. The host must be told — silently reporting
+    # "sent" for something the guest will never receive is the worst outcome here.
+    if delivery:
+        return {"status": "sent", "delivery": delivery}
     return {"status": "sent"}
+
+
+# Meta only permits a free-form message within 24h of the guest's last inbound
+# one. Checked slightly under the limit so a reply composed right at the boundary
+# doesn't fail between our check and Meta's.
+_WA_WINDOW = timedelta(hours=23, minutes=55)
+
+_WA_WINDOW_CLOSED = (
+    "WhatsApp's 24-hour reply window has closed, so this message could not be "
+    "delivered. It is saved here, and the guest will see it as soon as they "
+    "message again."
+)
+_WA_UNDELIVERED = (
+    "WhatsApp did not accept this message, so the guest has not received it. "
+    "It is saved here."
+)
+
+
+async def _deliver_host_whatsapp(
+    conversation_id: str, wa_id: str, message: str,
+) -> str | None:
+    """Send the host's reply to a WhatsApp guest. Returns None on success, or a
+    host-facing explanation of why it was not delivered.
+
+    This branch exists because WhatsApp — unlike Telegram and web — refuses
+    free-form messages outside a 24-hour window from the guest's last inbound
+    message. A host answering an escalation the next morning is the ordinary case
+    that hits it, so it is checked BEFORE sending rather than discovered from an
+    error code. Sending an approved template instead is deliberately out of scope
+    for the beta.
+    """
+    last_inbound = await asyncio.to_thread(
+        supabase_client.get_last_guest_inbound_at, conversation_id
+    )
+    if last_inbound:
+        try:
+            stamp = datetime.fromisoformat(last_inbound.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - stamp > _WA_WINDOW:
+                log.info("host_send: WhatsApp window closed for conv=%s",
+                         conversation_id)
+                return _WA_WINDOW_CLOSED
+        except ValueError:
+            # An unparseable stamp must not block a send that would have worked —
+            # let Meta be the authority and fall through to the error code below.
+            log.warning("host_send: bad last_guest_inbound_at %r for conv=%s",
+                        last_inbound, conversation_id)
+
+    result = await whatsapp_client.send_message(wa_id, message)
+    code = whatsapp_client.send_failed_code(result)
+    if code == whatsapp_client.WINDOW_EXPIRED_CODE:
+        return _WA_WINDOW_CLOSED
+    if code:
+        return _WA_UNDELIVERED
+    return None
 
 
 # ── Resolve escalation + learn ────────────────────────────────────────────────
@@ -694,7 +778,7 @@ async def resolve_conversation(req: ResolveRequest, authorization: str | None = 
     active_channel = await asyncio.to_thread(
         supabase_client.get_active_channel, conv_id
     )
-    await _notify_tg_transition(guest, None, "resume", active_channel)
+    await _notify_channel_transition(guest, None, "resume", active_channel)
 
     return {"status": "resolved", "learned": learned_entry}
 
@@ -748,7 +832,7 @@ async def announce_transition(req: TransitionRequest, authorization: str | None 
             supabase_client.get_property_for_chat, guest["property_id"]
         )
         _, host_name = _resolve_identity(prop)
-    await _notify_tg_transition(guest, host_name, req.kind, active_channel)
+    await _notify_channel_transition(guest, host_name, req.kind, active_channel)
     return {"status": "ok"}
 
 
@@ -791,6 +875,8 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
     # telegram.me stayed up, which would otherwise have left every guest unable
     # to reach the bot with no lever on our side.
     tg_domain = os.environ.get("TELEGRAM_LINK_DOMAIN", "t.me").strip().strip("/")
+    # wa.me wants the number in E.164 WITHOUT the '+' or any separators.
+    wa_number = re.sub(r"\D", "", os.environ.get("WHATSAPP_NUMBER", ""))
 
     # Retry on booking_id collision (very unlikely but safe)
     for _ in range(5):
@@ -802,6 +888,16 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
         telegram_link = (
             f"https://{tg_domain}/{bot_username}?start={booking_id}"
             if bot_username else None
+        )
+        # WhatsApp has no equivalent of Telegram's invisible ?start= payload — the
+        # ONLY way to carry the booking id is a prefilled message the guest can
+        # edit or delete before sending. So the id is put at the very END of the
+        # text, where it survives casual trimming, and routers/whatsapp.py parses
+        # it back out with a fallback for when it doesn't arrive at all.
+        whatsapp_link = (
+            f"https://wa.me/{wa_number}"
+            f"?text={quote(f'Hola Alfred, mi reserva es {booking_id}')}"
+            if wa_number else None
         )
         try:
             await asyncio.to_thread(
@@ -830,6 +926,7 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
                 "guest_chat_url": guest_chat_url,
                 "host_chat_url": host_chat_url,
                 "telegram_link": telegram_link,
+                "whatsapp_link": whatsapp_link,
             }
         except Exception as exc:
             if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():

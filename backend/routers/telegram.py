@@ -32,7 +32,7 @@ from services import (
     welcome,
 )
 from routers import messages as messages_router
-from routers.messages import process_guest_message, _notify_tg_transition
+from routers.messages import process_guest_message, _notify_channel_transition
 from routers.guest_auth import _resolve_identity
 
 router = APIRouter()
@@ -451,6 +451,6 @@ async def _emit_escalation_notice(guest: dict, result: dict) -> None:
     # notice doesn't make the reply look like the host wrote it. (A web guest
     # renders the __SYS_INTERVENE__ marker via realtime; this is Telegram-only.)
     if result.get("requires_escalation"):
-        await _notify_tg_transition(
+        await _notify_channel_transition(
             guest, result.get("host_name"), "intervene", "telegram"
         )
