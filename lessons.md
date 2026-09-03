@@ -3,6 +3,16 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-03 — Bash-tool→WSL: `$(...)` command substitution silently returns empty; use files/pipes instead
+
+**Context:** Debugging why a WhatsApp Graph API `curl` call kept returning "An access token is required," despite a token that had just been confirmed present and correctly formatted via `gcloud secrets versions access`.
+
+**Discovery:** `TOKEN=$(some_command)` inside a `wsl bash -lc '...'` invocation from this session's Bash tool silently captures **nothing** — confirmed down to the trivial case `X=$(cat /tmp/file); echo "${#X}"` printing `0` even though the file demonstrably had content. Direct piping (`cmd | othercmd`) and file redirection (`cmd > file`, then `cat file`) both work reliably every time. This cost real diagnostic time: an earlier `curl` POST that used `$(...)` to build its Authorization header returned a *plausible-looking* Graph API business-logic error ("object does not exist or missing permissions"), which read as a real permissions problem — it was actually an empty header, and the "error" was Graph API's generic fallback for an unauthenticated request on that route. Working pattern: write the secret to a local temp file, then either pipe it directly into the next command, or build a header file (`printf "Authorization: Bearer " > f && cat token.txt >> f`) and pass it to curl via `-H @f` (curl supports one-header-per-line from a file since 7.55.0). Delete temp files immediately after use.
+
+**Impact:** No app code changed — this is a debugging-environment gotcha, not a project bug. Re-derive the correct diagnostic pattern (file-based, not variable-capture) any time a `curl`/API call from this tool behaves as if a token or argument is empty despite looking correct upstream. **Global Candidate: Yes** — this is a property of the Bash-tool→WSL invocation path itself, not anything specific to this project, and would recur anywhere the same tool combination is used.
+
+---
+
 ## 2026-07-21 — Config health check: stray project-local `.mcp.json` with an unregistered Supabase ref
 
 **Context:** Full AG_master + the-ingestor config audit before starting a new project (symlinks, MCP profile chain, git state, live Supabase connectivity).
