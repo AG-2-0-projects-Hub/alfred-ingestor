@@ -119,6 +119,25 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **status:** passing
 - **promoted from intake:** `13b651c`, + PKCE fix
 
+### A8. Password reset (forgot password)
+- **id:** auth-password-reset-01
+- **touches:** `frontend/lib/main.dart`, `frontend/lib/screens/auth_screen.dart`, `frontend/lib/screens/reset_password_screen.dart`
+- **layer:** 2
+- **setup:** an existing host account on the environment under test; Supabase's default (unedited) email templates — no custom SMTP or template configuration required on either project
+- **action:** sign-in screen → "Forgot password?" → enter email → submit → open the emailed link → set a new password
+- **host_expected:**
+  1. Submitting shows a "Check your email" panel naming the address, mirroring the sign-up confirmation panel.
+  2. Clicking the emailed link lands **directly** on "Set a new password" — no forced re-login, no flash of the sign-in screen.
+  3. Submitting a valid new password lands straight in the dashboard (no sign-out step — unlike **A6**, the recovery click itself is the identity proof).
+  4. The new password works on a subsequent normal sign-in.
+  5. Reusing the same link a second time lands on sign-in with an "invalid or expired" banner and a "Send a new one" action — never a silent sign-in.
+  6. **Regression:** a signup-confirmation link (**A6**) still tears down its session exactly as before — the two link shapes must stay mutually exclusive.
+- **why this exists:** founder lockout incident, 2026-09-03 — no password-reset flow existed at all. The obvious implementation (customize the Reset Password email template with a `token_hash`+`type=recovery` link) hit two real walls: the prod Supabase project refuses to let the template body be edited without custom SMTP, and even where editable, the same bare `token_hash` this app already watched for (`main.dart`'s pre-existing confirmation-link detection) would have caught a recovery link too and immediately signed it back out before a new password could be set. Fixed by having the app supply its own `flow=recovery` marker via `resetPasswordForEmail`'s `redirectTo` argument instead — confirmed against GoTrue's own source that a PKCE redirect preserves whatever query params were already in `redirectTo` and just appends `code=` alongside them, so no email template edit is needed on either project.
+- **also required:** both Supabase projects' Site URL / Redirect URLs must actually match their live deployed domain — staging's was found stale (`alfred-ingestor.vercel.app`, dead; real domain is `alwaysalfred-staging.vercel.app`) and had **zero** Redirect URLs configured, which would have silently broken this (and any other) auth email link regardless of this feature. Fixed same session.
+- **last_tested:** 2026-09-07 (founder) — **PASS** on staging (`alwaysalfred-staging.vercel.app`) and prod (`alwaysalfred.vercel.app`), both end-to-end with a real inbox.
+- **status:** passing
+- **promoted from intake:** `16b501f`
+
 ### A7. Delete account
 - **id:** auth-delete-account-01
 - **touches:** `frontend/lib/widgets/profile_dialog.dart`, `backend/routers/properties.py`, `backend/services/supabase_client.py` (`delete_host_account`)
@@ -1181,7 +1200,6 @@ sections above, then delete the row.
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
 | 2026-09-03 | 5f86ccd (main) | WhatsApp guest channel — PROD go-live | Guest message to `+52 1 56 2916 1884` reaches webhook → Cloud Tasks → backend → correct reply, in prod (not staging): confirmed twice live — unlinked number gets the "not connected to a booking" fallback, and a real booking-linked `wa.me` link gets a real AI reply | O (O1-O6, now prod-verified not just staging) |
-| 2026-09-03 | uncommitted | Host password reset (built after founder lockout incident) | "Forgot password?" on sign-in → email arrives with a `?flow=recovery&code=...` link (default, unedited Supabase template — no dashboard template edit needed on either project, since the marker rides in via `resetPasswordForEmail`'s `redirectTo`) → clicking lands directly on "Set a new password" screen (no forced re-login) → new password works on next sign-in → reusing the same link a second time shows the "invalid or expired" banner, not a silent sign-in. Also regression-check the existing signup-confirmation link still tears down the session as before. | A5/A6 (sign-up/auth flows) |
 
 > **PROMOTED 2026-08-27 — the 10 `wa-channel` rows were grouped and promoted.** Link/welcome → **O1**; unlinked-fallback + unknown-code + burst-vs-"check-out" regex → **O2** (combined, same flow); photos + voice + declined media → **O3**; escalation + host-reply routing → **O4**; 24h service window → **O5**; deleted listing → **C9** (extended with a WhatsApp leg); webhook security + staging infra → **N4** (new, combined — both are infra-state assertions); Meta redelivery idempotency → **O6**. New section **O. WhatsApp guest channel** added (6 scenarios, layer 4 — mirrors J's Telegram structure). All new rows are `status: pending`: the 49 offline tests in `_tests/whatsapp_channel.py` cover the logic, and a general e2e round trip was founder-confirmed working in a prior session, but no row had an individual live-test result recorded, so none were marked `passing` on that basis alone.
 

@@ -113,18 +113,33 @@ This applies to ALL commits — documentation, fixes, features, everything. No e
 This project is a standalone git repo (`projects/the-ingestor/.git`, remote
 `origin` → `AG-2-0-projects-Hub/alfred-ingestor`) — it is not tracked by
 AG_master_files' root repo.
-1. Push using plain `git -C projects/the-ingestor push origin main` — no
-   subtree command needed.
-2. Verify remote SHA matches local after pushing.
+1. **Pushing to `staging`** — plain `git push origin staging` (or
+   `git -C projects/the-ingestor push origin staging` from the AG root) works
+   directly, no PR needed.
+2. **Shipping to `main`** — a plain push to `main` is **rejected** (GitHub
+   branch protection requires a pull request, error `GH013`; confirmed twice,
+   2026-09-03 and 2026-09-07). Open a PR from `staging`→`main` (GitHub UI
+   "Compare & pull request", or `gh pr create` if `gh` is available — it
+   wasn't in either session that hit this) and merge it there. **The founder
+   merges these PRs manually on purpose, as their own final QA gate before
+   anything reaches real users — do not try to script or bypass this step.**
+3. Verify remote SHA matches local after pushing/merging.
 
 ---
 
 ## Supabase Connection
-**MCP name:** `supabase-the-ingestor`
-**project_ref:** `gcxxilzfhwlsjcvtpsvj`
-**Scoped to this project only.**
-Use ONLY this MCP for all database operations in this project.
-Never use the global `supabase` MCP when working inside this project.
+Two separate Supabase projects, one MCP each — never mix them up:
+
+| Environment | MCP name | project_ref | Dashboard shows it as |
+|---|---|---|---|
+| Staging | `supabase-the-ingestor` | `gcxxilzfhwlsjcvtpsvj` | "Scraper + Ingestor" (shared DB with the scraper project, intentional) |
+| Prod | `supabase-the-ingestor-prod` | `ylaooctefesedrecshic` | "alfred-prod" |
+
+**Scoped to this project only** — never use the global `supabase` MCP when working here.
+For the matching Vercel projects/domains and the Auth URL Configuration each Supabase
+project needs, see `CONTEXT.md`'s "Vercel projects, domains & Supabase URL config" section
+— this has silently broken once already (a stale Site URL + empty Redirect URLs on staging),
+so don't assume it's still correct without checking if you're touching Auth-related code.
 
 ---
 
