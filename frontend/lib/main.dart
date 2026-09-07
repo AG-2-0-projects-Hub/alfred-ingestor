@@ -9,6 +9,7 @@ import 'screens/add_property_screen.dart';
 import 'screens/host_panel_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/chat_live_screen.dart';
+import 'screens/reset_password_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'widgets/inactivity_wrapper.dart';
@@ -63,19 +64,38 @@ void _assertNotAServiceRoleKey(String key) {
 /// shape, so the link still dropped you into the dashboard. This app has no
 /// social OAuth, so a bare `?code=` can only be a confirmation link.
 ///
+/// A password-reset link is deliberately EXCLUDED here (see
+/// `_openedFromPasswordRecovery` below) — that flow must NOT be signed out,
+/// it needs the session alive to let the user set a new password. The reset
+/// email's link is a PKCE `?code=` too (same shape as confirmation), so it
+/// carries an extra `flow=recovery` marker — added by this app itself via
+/// `resetPasswordForEmail`'s `redirectTo` argument, not the email template
+/// (Supabase's default, unconfigurable-without-custom-SMTP template still
+/// works: `redirectTo`'s own query params ride along with whatever `code` it
+/// appends, confirmed against GoTrue's `prepPKCERedirectURL`) — to tell the
+/// two apart, since a bare `code=` alone is ambiguous between them.
+///
 /// Captured BEFORE Supabase.initialize, which consumes both.
 bool _openedFromEmailConfirmation = false;
+
+/// True when the URL carries the `flow=recovery` marker this app adds to its
+/// own password-reset links (see above). Checked in `_IngestorAppState.
+/// initState()` once a session is confirmed to exist post-init, to route to
+/// ResetPasswordScreen instead of tearing the session down.
+bool _openedFromPasswordRecovery = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final launchUri = Uri.base;
   final q = launchUri.queryParameters;
+  _openedFromPasswordRecovery = q['flow'] == 'recovery';
+
   _openedFromEmailConfirmation =
       launchUri.fragment.contains('type=signup') ||
           launchUri.fragment.contains('type=email_change') ||
           q.containsKey('confirmed') ||
-          q.containsKey('code') ||       // PKCE confirmation code
+          (q.containsKey('code') && !_openedFromPasswordRecovery) || // PKCE confirmation code
           q.containsKey('token_hash');   // older verify-OTP links
 
   await dotenv.load(fileName: '.env');
@@ -107,9 +127,28 @@ class _IngestorAppState extends State<IngestorApp> {
   /// so the sign-in screen can say "email confirmed" and we don't loop.
   bool _confirmedNeedsSignIn = false;
 
+  /// True once a password-recovery link's PKCE code was already exchanged for
+  /// a real session during Supabase.initialize — same timing as the
+  /// confirmation-link check below, since it's the same underlying exchange
+  /// mechanism, just with a `flow=recovery` marker riding alongside `code=`.
+  /// Routes straight to ResetPasswordScreen instead of tearing the session down.
+  bool _recoverySessionReady = false;
+
+  /// True when a recovery link's code was present but no session resulted
+  /// (expired or already used). Routes to sign-in with an explanatory banner.
+  bool _recoveryLinkInvalid = false;
+
   @override
   void initState() {
     super.initState();
+
+    if (_openedFromPasswordRecovery) {
+      if (Supabase.instance.client.auth.currentSession != null) {
+        _recoverySessionReady = true;
+      } else {
+        _recoveryLinkInvalid = true;
+      }
+    }
 
     // The PKCE code is exchanged DURING Supabase.initialize, so a session may
     // already exist right now — before any listener could fire. Catch that case
@@ -168,6 +207,16 @@ class _IngestorAppState extends State<IngestorApp> {
       final session = Supabase.instance.client.auth.currentSession;
       if (session == null) return _app(const AuthScreen(), wrapInactivity: false);
       return _app(HostPanelScreen(propertyId: params['property']!));
+    }
+
+    // Password-recovery link: a valid recovery session is already established
+    // (see main()) — go straight to setting a new password, never through
+    // sign-in and never idle-timed-out mid-reset.
+    if (_recoverySessionReady) {
+      return _app(const ResetPasswordScreen(), wrapInactivity: false);
+    }
+    if (_recoveryLinkInvalid) {
+      return _app(const AuthScreen(recoveryLinkExpired: true), wrapInactivity: false);
     }
 
     // Arriving from the confirmation link must never drop you straight into the

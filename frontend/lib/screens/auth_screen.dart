@@ -10,7 +10,16 @@ class AuthScreen extends StatefulWidget {
   /// sign anyone holding the email straight in), so tell them why they're here.
   final bool justConfirmed;
 
-  const AuthScreen({super.key, this.justConfirmed = false});
+  /// True when the host arrived via a password-reset link that turned out to
+  /// be expired or already used (main.dart already tried and failed to
+  /// establish a recovery session). Shows a banner offering to send a new one.
+  final bool recoveryLinkExpired;
+
+  const AuthScreen({
+    super.key,
+    this.justConfirmed = false,
+    this.recoveryLinkExpired = false,
+  });
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -28,6 +37,16 @@ class _AuthScreenState extends State<AuthScreen> {
   /// Set once a sign-up succeeds but returns no session, i.e. the account needs
   /// email confirmation. The form is replaced by a "check your inbox" panel.
   String? _awaitingConfirmationFor;
+
+  /// True while showing the "forgot password" mini-form instead of the normal
+  /// sign-in/sign-up form. Only ever reachable from sign-in mode.
+  bool _showForgotPassword = false;
+
+  /// Set once a password-reset email has been sent; swaps the mini-form for a
+  /// "check your inbox" panel, mirroring _awaitingConfirmationFor.
+  String? _resetSentTo;
+
+  bool _isSendingReset = false;
 
   static const _minPasswordLength = 8;
 
@@ -132,6 +151,49 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Sends the Supabase password-reset email. No `redirectTo` is passed: the
+  /// The `flow=recovery` marker on redirectTo is how main.dart tells this
+  /// link apart from a signup-confirmation link — both are a bare PKCE
+  /// `?code=` otherwise. Supabase's default email template (unconfigurable on
+  /// projects without custom SMTP — confirmed empirically on prod) still
+  /// works fine here: redirectTo's own query params ride along with whatever
+  /// `code` Supabase appends, so no template edit is needed on either project.
+  Future<void> _sendPasswordReset() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _fieldError = 'Enter your email address.');
+      return;
+    }
+    setState(() {
+      _isSendingReset = true;
+      _fieldError = null;
+    });
+    try {
+      final redirectTo = '${Uri.base.scheme}://${Uri.base.host}/?flow=recovery';
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: redirectTo,
+      );
+      if (mounted) setState(() => _resetSentTo = email);
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: context.palette.danger),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: context.palette.danger),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingReset = false);
     }
   }
 
@@ -368,9 +430,150 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  // ── "Check your inbox" step after a password-reset email is sent ─────────
+  Widget _buildResetSent() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Icon(Icons.mark_email_unread_outlined,
+            size: 44, color: context.palette.primary),
+        const SizedBox(height: 20),
+        Text(
+          'Check your email',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 26,
+            fontWeight: FontWeight.w300,
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'We sent a password reset link to $_resetSentTo.\n'
+          'Open it to choose a new password.',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            height: 1.5,
+            color: context.palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 28),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: () => setState(() {
+              _resetSentTo = null;
+              _showForgotPassword = false;
+            }),
+            child: Text(
+              'Back to sign in',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── "Forgot password" mini-form ───────────────────────────────────────────
+  Widget _buildForgotPasswordForm() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Reset your password',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 26,
+            fontWeight: FontWeight.w300,
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Enter your email and we'll send you a reset link",
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            color: context.palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 32),
+        TextField(
+          controller: _emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email address',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.done,
+          autofocus: true,
+          onSubmitted: (_) => _isSendingReset ? null : _sendPasswordReset(),
+        ),
+        if (_fieldError != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _fieldError!,
+            style: GoogleFonts.inter(
+                fontSize: 13, color: context.palette.danger),
+          ),
+        ],
+        const SizedBox(height: 24),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: _isSendingReset ? null : _sendPasswordReset,
+            child: _isSendingReset
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(
+                    'Send reset link',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Center(
+          child: TextButton(
+            onPressed: _isSendingReset
+                ? null
+                : () => setState(() {
+                      _showForgotPassword = false;
+                      _fieldError = null;
+                    }),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'Back to sign in',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.palette.primary,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── Login / Sign-up form ──────────────────────────────────────────────────
   Widget _buildForm() {
     if (_awaitingConfirmationFor != null) return _buildAwaitingConfirmation();
+    if (_resetSentTo != null) return _buildResetSent();
+    if (_showForgotPassword) return _buildForgotPasswordForm();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -393,6 +596,45 @@ class _AuthScreenState extends State<AuthScreen> {
                     'Email confirmed. Sign in to continue.',
                     style: GoogleFonts.inter(
                         fontSize: 13, color: context.palette.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+        if (widget.recoveryLinkExpired) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.palette.danger.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.error_outline,
+                    size: 18, color: context.palette.danger),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'That reset link is invalid or has expired.',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, color: context.palette.textPrimary),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _showForgotPassword = true),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Send a new one',
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.palette.primary),
                   ),
                 ),
               ],
@@ -468,6 +710,33 @@ class _AuthScreenState extends State<AuthScreen> {
               _isLogin ? TextInputAction.done : TextInputAction.next,
           onSubmitted: (_) => _isLoading ? null : _submit(),
         ),
+        if (_isLogin) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () => setState(() {
+                        _showForgotPassword = true;
+                        _fieldError = null;
+                      }),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Forgot password?',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: context.palette.primary,
+                ),
+              ),
+            ),
+          ),
+        ],
         // Confirm password — sign-up only. A typo here otherwise locks the host
         // out of an account they can no longer guess the password to.
         if (!_isLogin) ...[
