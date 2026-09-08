@@ -15,9 +15,11 @@ import '../widgets/glass_panel.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
+import '../widgets/add_property_walkthrough_panel.dart';
 
 class AddPropertyScreen extends StatefulWidget {
-  const AddPropertyScreen({super.key});
+  final bool showWalkthrough;
+  const AddPropertyScreen({super.key, this.showWalkthrough = false});
 
   @override
   State<AddPropertyScreen> createState() => _AddPropertyScreenState();
@@ -26,6 +28,11 @@ class AddPropertyScreen extends StatefulWidget {
 class _AddPropertyScreenState extends State<AddPropertyScreen> {
   final _nicknameController = TextEditingController();
   final _urlController = TextEditingController();
+  final _scrollController = ScrollController();
+  final _urlSectionKey = GlobalKey();
+  final _uploadSectionKey = GlobalKey();
+  final _trainSectionKey = GlobalKey();
+  WalkthroughScreen? _walkthroughScreen;
   late final String _propertyId;
   String? _resolvedPropertyId;
   bool _isIngesting = false;
@@ -53,13 +60,67 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     super.initState();
     _propertyId = _generateUuidV4();
     _urlController.addListener(() => setState(() {}));
+    if (widget.showWalkthrough) {
+      _walkthroughScreen = WalkthroughScreen.url;
+    }
   }
 
   @override
   void dispose() {
     _nicknameController.dispose();
     _urlController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  GlobalKey _keyFor(WalkthroughScreen screen) => switch (screen) {
+        WalkthroughScreen.url => _urlSectionKey,
+        WalkthroughScreen.upload => _uploadSectionKey,
+        WalkthroughScreen.train => _trainSectionKey,
+      };
+
+  void _goToWalkthroughScreen(WalkthroughScreen screen) {
+    setState(() => _walkthroughScreen = screen);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _keyFor(screen).currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: 0.1);
+      }
+    });
+  }
+
+  void _dismissWalkthrough() => setState(() => _walkthroughScreen = null);
+
+  Widget _walkthroughHighlight({
+    required WalkthroughScreen screen,
+    required Widget child,
+  }) {
+    final active = _walkthroughScreen == screen;
+    return AnimatedContainer(
+      key: _keyFor(screen),
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: active ? context.palette.primary : Colors.transparent,
+          width: 2,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: context.palette.primary.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: child,
+    );
   }
 
   String _generateUuidV4() {
@@ -597,6 +658,52 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     );
   }
 
+  Widget _buildTrainingTipsCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.palette.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.palette.primary.withValues(alpha: 0.2), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lightbulb_outline_rounded,
+                  size: 16, color: context.palette.primary),
+              const SizedBox(width: 8),
+              Text('What trains Alfred best',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: context.palette.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final tip in kAlfredTrainingTips)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text('•  $tip',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: context.palette.textSecondary,
+                      height: 1.4)),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(kAlfredTrainingTipsClosing,
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    color: context.palette.textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatusBadge(String status) {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
@@ -756,9 +863,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           ),
         ),
       ),
-      body: AuroraBackground(
+      body: Stack(
+        children: [
+        AuroraBackground(
         intensity: 0.45,
         child: SingleChildScrollView(
+          controller: _scrollController,
           padding: EdgeInsets.fromLTRB(
               24, kToolbarHeight + 24, 24, 48),
           child: Center(
@@ -772,43 +882,63 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                TextField(
-                  controller: _nicknameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nickname (Optional)',
-                    hintText: 'e.g. Beach House Malibu',
-                    border: OutlineInputBorder(),
+                _walkthroughHighlight(
+                  screen: WalkthroughScreen.url,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _nicknameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Nickname (Optional)',
+                          hintText: 'e.g. Beach House Malibu',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _urlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Airbnb URL *',
+                          hintText: 'https://www.airbnb.com/rooms/...',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.url,
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _urlController,
-                  decoration: const InputDecoration(
-                    labelText: 'Airbnb URL *',
-                    hintText: 'https://www.airbnb.com/rooms/...',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.url,
                 ),
                 const SizedBox(height: 28),
-                Text('Upload Files',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                DropZoneWidget(
-                  propertyId: _propertyId,
-                  onFileAdded: _onFileAdded,
-                  onFileResult: _onFileResult,
-                  isDuplicate: (filename) =>
-                      _filesToIngest.any((e) => e['file'] == filename),
-                ),
-                const SizedBox(height: 16),
-                VoiceRecorderWidget(
-                  propertyId: _propertyId,
-                  onFileAdded: _onFileAdded,
-                  onRecordingResult: _onFileResult,
+                _walkthroughHighlight(
+                  screen: WalkthroughScreen.upload,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('Upload Files',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      if (_walkthroughScreen == null) ...[
+                        _buildTrainingTipsCard(context),
+                        const SizedBox(height: 12),
+                      ],
+                      DropZoneWidget(
+                        propertyId: _propertyId,
+                        onFileAdded: _onFileAdded,
+                        onFileResult: _onFileResult,
+                        isDuplicate: (filename) =>
+                            _filesToIngest.any((e) => e['file'] == filename),
+                      ),
+                      const SizedBox(height: 16),
+                      VoiceRecorderWidget(
+                        propertyId: _propertyId,
+                        onFileAdded: _onFileAdded,
+                        onRecordingResult: _onFileResult,
+                      ),
+                    ],
+                  ),
                 ),
                 if (_filesToIngest.isNotEmpty) ...[
                   const SizedBox(height: 20),
@@ -821,29 +951,32 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   FileStatusList(statuses: _filesToIngest),
                 ],
                 const SizedBox(height: 28),
-                FilledButton(
-                  onPressed: canIngest ? _startIngest : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    textStyle: GoogleFonts.plusJakartaSans(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 1.2),
+                _walkthroughHighlight(
+                  screen: WalkthroughScreen.train,
+                  child: FilledButton(
+                    onPressed: canIngest ? _startIngest : null,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      textStyle: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 1.2),
+                    ),
+                    child: _isIngesting
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.5, color: Colors.white)),
+                              SizedBox(width: 12),
+                              Text('Ingesting...'),
+                            ],
+                          )
+                        : const Text('INGEST NOW'),
                   ),
-                  child: _isIngesting
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.5, color: Colors.white)),
-                            SizedBox(width: 12),
-                            Text('Ingesting...'),
-                          ],
-                        )
-                      : const Text('INGEST NOW'),
                 ),
                 if (_fileStatuses.isNotEmpty) ...[
                   const SizedBox(height: 28),
@@ -983,6 +1116,19 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
             ),
           ),
         ),
+        ),
+        if (_walkthroughScreen != null && MediaQuery.of(context).size.width >= 1000)
+          Positioned(
+            right: 24,
+            top: kToolbarHeight + 40,
+            width: 300,
+            child: AddPropertyWalkthroughPanel(
+              current: _walkthroughScreen!,
+              onScreenChange: _goToWalkthroughScreen,
+              onDismiss: _dismissWalkthrough,
+            ),
+          ),
+        ],
       ),
     );
   }

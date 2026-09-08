@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/aurora_background.dart';
@@ -369,7 +370,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _openAddProperty() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AddPropertyScreen()),
+      MaterialPageRoute(
+        builder: (_) => AddPropertyScreen(showWalkthrough: _properties.isEmpty),
+      ),
     );
     _loadProperties();
   }
@@ -606,6 +609,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                     icon: _profileGlyph(22, palette.textSecondary),
                     onPressed: _openProfile,
                   ),
+                IconButton(
+                  tooltip: 'Host setup guide',
+                  icon: const Icon(Icons.help_outline_rounded, size: 18),
+                  onPressed: () => launchUrl(
+                    Uri.base.resolve('guide.html'),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                ),
                 IconButton(
                   tooltip: 'Send feedback',
                   icon: const Icon(Icons.feedback_outlined, size: 18),
