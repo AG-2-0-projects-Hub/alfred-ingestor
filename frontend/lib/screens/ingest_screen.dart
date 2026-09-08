@@ -207,7 +207,14 @@ class _IngestScreenState extends State<IngestScreen> {
     if (markdown == null) return null;
     final match =
         RegExp(r'\*\*Property Name:\*\*\s*(.+)').firstMatch(markdown);
-    return match?.group(1)?.trim();
+    final name = match?.group(1)?.trim();
+    // Gemini writes this literal placeholder when it can't find a real title —
+    // treat it as "no name" so callers fall back to the host's nickname instead
+    // of displaying the placeholder as if it were real data.
+    if (name == null || name.toLowerCase().startsWith('not specified')) {
+      return null;
+    }
+    return name;
   }
 
   // Generate a 1-hour signed URL for the hero image (REQ-18)

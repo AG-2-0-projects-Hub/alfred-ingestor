@@ -83,6 +83,24 @@ def rate_limit_reply(language: str | None) -> str:
     )
 
 
+def not_yet_trained_reply(language: str | None) -> str:
+    """A guest link exists but the property has no master_json yet (still
+    Ingesting/Ingest_Error, or a link was generated before Merge ever ran).
+    Link creation should normally block this (see routers/messages.py
+    create_guest's guard) — this is the safety net for an already-shared link."""
+    if _is_spanish(language):
+        return (
+            "Todavía estoy aprendiendo sobre este alojamiento, así que aún no "
+            "puedo responder preguntas. Vuelve a intentarlo en un rato, o "
+            "contacta directamente a tu anfitrión si es urgente."
+        )
+    return (
+        "I'm still learning about this property, so I can't answer questions "
+        "just yet. Please try again shortly, or contact your host directly if "
+        "it's urgent."
+    )
+
+
 def holding_reply(language: str | None) -> str:
     """Safe reply when the high-stakes backstop forces an escalation."""
     if _is_spanish(language):

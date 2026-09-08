@@ -68,7 +68,9 @@ async def merge_property(property_id: str):
         )
 
     try:
-        result = await gemini_merge_resolve.run_merger(scraped, ingested)
+        result = await gemini_merge_resolve.run_merger(
+            scraped, ingested, prop.get("name") or "", prop.get("curated_photos")
+        )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

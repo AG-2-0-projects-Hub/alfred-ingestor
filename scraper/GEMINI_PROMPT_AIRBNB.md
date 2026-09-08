@@ -19,6 +19,7 @@ CRITICAL REQUIREMENTS:
 3. Extract ALL information from the CSV - no filtering, no summarization
 4. Create logical category sections based on what data is actually present
 5. Do NOT invent or hallucinate any information - if a field is empty, omit it or state "Not specified in listing"
+6. EXCEPTION to rule 5 — **Property Name is REQUIRED and must never be "Not specified in listing".** Every real listing has a title; search the entire input thoroughly (it is virtually always present near the top of the data, e.g. as a page title/H1). Only if truly absent after an exhaustive search, use the most specific location/property-type description available (e.g. "Entire bungalow in Tulum") instead of the generic placeholder.
 
 INPUT DATA (Raw CSV from Apify):
 [INSERT_DATA_HERE]
@@ -42,7 +43,7 @@ data_completeness: [High/Medium/Low - assess based on filled fields]
 
 ### 🏠 Property Identity
 
-**Property Name:** [Title from listing]
+**Property Name:** [REQUIRED — the listing's title. Do NOT write "Not specified in listing" here under any circumstance; see rule 6 above.]
 **Property Type:** [e.g., "Entire bungalow"]
 **Listing ID:** [ID number]
 

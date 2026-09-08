@@ -113,6 +113,22 @@ def save_scraped_markdown(property_id: str, scraped_markdown: str) -> None:
     ).eq("id", property_id).execute()
 
 
+def save_photo_triage(
+    property_id: str, curated_photos: list[dict], rejected_photos: list[dict]
+) -> None:
+    """Write the two-phase photo triage results to the property row. Non-fatal
+    if it fails — the scraper wraps triage in try/except and simply never
+    calls this on error, leaving both columns at their `[]` default."""
+    client = get_client()
+    client.table("properties").update(
+        {
+            "curated_photos": curated_photos,
+            "rejected_photos": rejected_photos,
+            "updated_at": _now(),
+        }
+    ).eq("id", property_id).execute()
+
+
 def append_ingested_markdown(property_id: str, new_markdown: str) -> None:
     """Fetch existing ingested_markdown, append new_markdown, and save back."""
     client = get_client()
@@ -246,7 +262,7 @@ def get_property_for_merge(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("status, scraped_markdown, ingested_markdown, master_json")
+        .select("status, scraped_markdown, ingested_markdown, master_json, curated_photos")
         .eq("id", property_id)
         .maybe_single()
         .execute()

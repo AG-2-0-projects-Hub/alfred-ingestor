@@ -277,6 +277,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       // Scroll to dropzone — no-op; user can see it
     } else if (status == 'Ingested') {
       _runMerge();
+    } else if (status == 'Ingest_Error') {
+      _startIngest();
     }
     // Conflict_Pending: conflicts panel is visible below; Merged: no train endpoint yet
   }

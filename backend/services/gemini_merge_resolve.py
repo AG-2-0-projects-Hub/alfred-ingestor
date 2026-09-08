@@ -4,7 +4,7 @@ from google.genai import types
 
 from services import genai_factory
 
-MODEL = "gemini-2.5-pro"
+MODEL = "gemini-3.8-flash"
 
 
 def _get_client() -> genai.Client:
@@ -218,7 +218,8 @@ Include complete media section:
 - Property name(s), type, listing ID/URL
 - Full address, coordinates, Google Maps link
 - Neighborhood description, community/gate access
-- **ALWAYS store the official listing title under the key `property_identity.property_name`** (a normalized, consistent key). This is the public Airbnb listing name as it appears in the scraped/ingested source — keep it short and clean (the title only, no descriptions or instructions). You may keep additional variants (e.g. `alternate_names`, `property_complex_name`) but `property_name` must always be present when a title exists.
+- **ALWAYS store the official listing title under the key `property_identity.property_name`** (a normalized, consistent key). This is the public Airbnb listing name as it appears in the scraped/ingested source — keep it short and clean (the title only, no descriptions or instructions). You may keep additional variants (e.g. `alternate_names`, `property_complex_name`) but `property_name` must always be present when a title exists. **If no real listing title can be found in either source, use the host-provided nickname from the user message instead** — never write "Not specified in listing" or leave this field blank.
+- **Photos:** the SCRAPED_PHOTOS block in the user message (if present) is a pre-classified, room-labeled gallery from the Airbnb listing. Build `media.gallery` from it. If the ingested/host data includes its own photo analyses (they will read as image descriptions with a room or content type — e.g. "Outdoor Area", "Kitchen"), treat those as **authoritative for that room** where they overlap with or add to a scraped photo's coverage — the host's own upload is more trustworthy than a scrape guess. If the host's photos cover a room the scraped set missed entirely, include them too.
 
 ### Host Profile (Separate from Listing)
 - **`host_profile.name` = the host's display name ONLY** (e.g. "Eduardo Rafael", "Ilse"). It must be a person's or company's name — short, typically 1–3 words. NEVER put sentences, check-in instructions, notes, or directives in this field. If the source contains guidance like "Host is Ilse, mention Rogelio at the entrance", extract only the name ("Ilse") here and store the instruction under a separate field such as `check_in.special_instructions` or `host_profile.notes`.
@@ -318,7 +319,13 @@ Please analyze these two sources and generate the JSON based on the system instr
 {scraped_markdown}
 
 === INGESTED DATA ===
-{ingested_markdown}\
+{ingested_markdown}
+
+=== HOST-PROVIDED NICKNAME (fallback only — use ONLY if no real listing title exists in the sources above) ===
+{nickname}
+
+=== SCRAPED_PHOTOS (pre-classified, room-labeled gallery — see the Photos rule above) ===
+{curated_photos}\
 """
 
 # ── Resolver prompts (verbatim from implementation_plan_merger_resolver.md) ───
@@ -609,13 +616,20 @@ Host Resolutions:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-async def run_merger(scraped_markdown: str, ingested_markdown: str) -> dict:
+async def run_merger(
+    scraped_markdown: str,
+    ingested_markdown: str,
+    nickname: str = "",
+    curated_photos: list[dict] | None = None,
+) -> dict:
     """Call Gemini Merger. Returns the full parsed master_json dict."""
     client = _get_client()
     user_prompt = _fill(
         MERGER_USER_TEMPLATE,
         scraped_markdown=scraped_markdown or "(no data)",
         ingested_markdown=ingested_markdown or "(no data)",
+        nickname=nickname or "(none provided)",
+        curated_photos=json.dumps(curated_photos, indent=2, ensure_ascii=False) if curated_photos else "(none)",
     )
     response = await genai_factory.generate_with_retry(
         client,

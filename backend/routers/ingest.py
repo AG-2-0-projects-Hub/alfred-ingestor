@@ -29,6 +29,12 @@ import services.gemini_client as gemini_client
 
 router = APIRouter()
 
+# A single file's Gemini call has no timeout of its own (genai_factory only
+# retries on 429) — without a ceiling here, one stalled file blocks the whole
+# sequential loop indefinitely, and the request can outlive the client's own
+# stream-read timeout with the row parked at "Ingesting" forever.
+_PER_FILE_TIMEOUT_S = 90
+
 
 class IngestRequest(BaseModel):
     property_id: str
@@ -202,12 +208,19 @@ async def ingest(req: IngestRequest, request: Request):
                         current_task = asyncio.create_task(
                             file_processor.process_file(name, data)
                         )
+                        elapsed = 0
                         while not current_task.done():
+                            if elapsed >= _PER_FILE_TIMEOUT_S:
+                                current_task.cancel()
+                                raise TimeoutError(
+                                    f"No response after {_PER_FILE_TIMEOUT_S}s — try again"
+                                )
                             try:
                                 await asyncio.wait_for(
                                     asyncio.shield(current_task), timeout=10
                                 )
                             except asyncio.TimeoutError:
+                                elapsed += 10
                                 yield _event(name, "heartbeat", "Still processing...")
                         markdown = await current_task
                         current_task = None
@@ -221,6 +234,7 @@ async def ingest(req: IngestRequest, request: Request):
                     except Exception as exc:
                         yield _event(name, "error", str(exc))
                         error_count += 1
+                        current_task = None
 
                 # Persist all fingerprint updates (REQ-22)
                 await asyncio.to_thread(
@@ -249,8 +263,18 @@ async def ingest(req: IngestRequest, request: Request):
             except Exception:
                 pass
         except BaseException:
+            # Covers client disconnect (frontend's own stream-read timeout gives
+            # up and the ASGI server cancels this generator) as much as a real
+            # crash — every other failure path above updates status; this one
+            # must too, or the row is stuck at "Ingesting" with no way out.
             if current_task and not current_task.done():
                 current_task.cancel()
+            try:
+                await asyncio.to_thread(
+                    supabase_client.update_status, property_id, "Ingest_Error"
+                )
+            except Exception:
+                pass
             raise
 
     origin = request.headers.get("origin", "")

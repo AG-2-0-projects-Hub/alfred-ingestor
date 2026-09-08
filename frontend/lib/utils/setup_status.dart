@@ -50,6 +50,15 @@ SetupStep? nextStepFor(
         icon: Icons.merge_rounded,
         accent: (ctx) => Theme.of(ctx).colorScheme.primary,
       );
+    case 'Ingest_Error':
+      return SetupStep(
+        headline: "Some files didn't finish processing",
+        subtext: 'Alfred hit a snag partway through — files that already '
+            'succeeded are saved. Retry to pick up the rest.',
+        actionLabel: 'Retry',
+        icon: Icons.refresh_rounded,
+        accent: (ctx) => ctx.palette.warning,
+      );
     case 'Conflict_Pending':
       return SetupStep(
         headline: 'Some details need your review',
