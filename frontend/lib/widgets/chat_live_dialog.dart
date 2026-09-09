@@ -10,6 +10,8 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
+import '../utils/walkthrough_prefs.dart';
+import 'glass_panel.dart';
 
 enum _EscalationState { none, active, resolved }
 
@@ -25,6 +27,9 @@ class ChatLiveDialog extends StatefulWidget {
   // several seconds on the free tier, but the host knows the state changed
   // the instant the API returns, so we can refresh dashboard data right then.
   final VoidCallback? onResolved;
+  // Part C of the User-mode post-training walkthrough, continued from
+  // GenerateGuestLinkDialog's steps 1-2 — steps 3-9 live here.
+  final bool startWalkthrough;
 
   const ChatLiveDialog({
     super.key,
@@ -32,6 +37,7 @@ class ChatLiveDialog extends StatefulWidget {
     required this.propertyId,
     required this.propertyName,
     this.onResolved,
+    this.startWalkthrough = false,
   });
 
   static Future<void> show(
@@ -40,6 +46,7 @@ class ChatLiveDialog extends StatefulWidget {
     required String propertyId,
     required String propertyName,
     VoidCallback? onResolved,
+    bool startWalkthrough = false,
   }) {
     return showGeneralDialog(
       context: context,
@@ -52,6 +59,7 @@ class ChatLiveDialog extends StatefulWidget {
         propertyId: propertyId,
         propertyName: propertyName,
         onResolved: onResolved,
+        startWalkthrough: startWalkthrough,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -125,7 +133,12 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   // A conversation is "escalated" only when the backend flagged it
   // (requires_attention + escalation_reason). A manual Intervene toggle sets
   // neither — so the resolve button must not appear just because mode==intervene.
-  bool get _isEscalated => _requiresAttention || _escalationReason != null;
+  // Local-only override — the escalation shown during the walkthrough's
+  // scripted demo is never written to the real conversation row (see
+  // _wtTriggerEscalation), so _isEscalated needs to know about it too.
+  bool _wtSimulatedEscalation = false;
+  bool get _isEscalated =>
+      _requiresAttention || _escalationReason != null || _wtSimulatedEscalation;
   bool _isSending = false;
   bool _isResolving = false;
   final _hostController = TextEditingController();
@@ -133,10 +146,23 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
 
+  // Part C walkthrough state. Local step numbering 0-6 maps to the plan's
+  // steps 3-9 (display label adds +3). null = not showing.
+  int? _wtStep;
+  static const _wtLocalStepCount = 7;
+  final List<Map<String, dynamic>> _wtFakeMessages = [];
+  bool _wtReplySent = false;
+  final _wtHeaderKey = GlobalKey();
+  final _wtLinksKey = GlobalKey();
+  final _wtModeKey = GlobalKey();
+  final _wtPillKey = GlobalKey();
+  final _wtResolveKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _loadConversation();
+    if (widget.startWalkthrough) _wtStep = 0;
   }
 
   @override
@@ -145,6 +171,11 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     _convSubscription?.cancel();
     _hostController.dispose();
     _scrollController.dispose();
+    // Mark seen the moment this flow reaches the live chat window — regardless
+    // of how it's exited from here on. Cancelling earlier, back in
+    // GenerateGuestLinkDialog (Cancel / backdrop-dismiss), deliberately does
+    // NOT mark it — that's a "not right now," not "I've seen this."
+    if (widget.startWalkthrough) WalkthroughPrefs.markGuestLinkWalkthroughSeen();
     super.dispose();
   }
 
@@ -357,16 +388,23 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           _mode = 'autopilot';
           _escalationReason = null;
           _requiresAttention = false;
+          _wtSimulatedEscalation = false;
         });
         await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
         widget.onResolved?.call();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Issue resolved. Alfred is back on autopilot.'),
-              backgroundColor: context.palette.success,
-            ),
-          );
+          if (_wtStep != null && _wtStepInfo(_wtStep!).finalStep) {
+            // Walkthrough's "Your turn" step — advance instead of the normal
+            // snackbar, straight into the wrap-up step.
+            _wtGoToStep(_wtStep! + 1);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Issue resolved. Alfred is back on autopilot.'),
+                backgroundColor: context.palette.success,
+              ),
+            );
+          }
         }
       }
     } on ApiException catch (e) {
@@ -448,6 +486,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     final optimisticId = 'local-${DateTime.now().millisecondsSinceEpoch}';
     setState(() {
       _isSending = true;
+      _wtReplySent = true; // unlocks Mark Issue as Resolved during the walkthrough
       _messages = [
         ..._messages,
         <String, dynamic>{
@@ -501,40 +540,340 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
   }
 
+  // ── Part C walkthrough (steps 3-9 of the plan; local 0-6 here) ────────────
+
+  ({
+    String title,
+    String body,
+    GlobalKey? anchor,
+    GlobalKey? extraAnchor,
+    VoidCallback? onEnter,
+    bool finalStep,
+    bool hideBack,
+    bool closingStep,
+  }) _wtStepInfo(int step) {
+    switch (step) {
+      case 0:
+        return (
+          title: 'Always know who and where',
+          body: "This is my live view of that guest's conversation — the "
+              "header always shows the property and who's booked.",
+          anchor: _wtHeaderKey,
+          extraAnchor: null,
+          onEnter: null,
+          finalStep: false,
+          hideBack: false,
+          closingStep: false,
+        );
+      case 1:
+        return (
+          title: 'Same links, right here too',
+          body: 'Handy to resend without leaving this view.',
+          anchor: _wtLinksKey,
+          extraAnchor: null,
+          onEnter: null,
+          finalStep: false,
+          hideBack: false,
+          closingStep: false,
+        );
+      case 2:
+        return (
+          title: "Right now, I'm on Autopilot",
+          body: "I'm handling this conversation myself. Watch what happens "
+              "when a guest asks something I'm not fully confident about →",
+          anchor: _wtModeKey,
+          extraAnchor: _wtPillKey,
+          onEnter: null,
+          finalStep: false,
+          hideBack: false,
+          closingStep: false,
+        );
+      case 3:
+        return (
+          title: 'Escalated — I flagged this for you',
+          body: 'I switch us to Intervene automatically whenever something '
+              "needs your OK, or anything I'm not confident about. You can "
+              'also flip to Intervene yourself anytime, escalation or not.',
+          anchor: _wtModeKey,
+          extraAnchor: _wtPillKey,
+          onEnter: _wtTriggerEscalation,
+          finalStep: false,
+          hideBack: false,
+          closingStep: false,
+        );
+      case 4:
+        return (
+          title: 'Your turn',
+          body: "I've drafted a reply below — hit Send first. Once it's "
+              'sent, click Mark Issue as Resolved so I can resume control — '
+              'resolving before the guest actually has an answer would leave '
+              'them hanging.',
+          anchor: _wtResolveKey,
+          extraAnchor: null,
+          onEnter: _wtPrefillReply,
+          finalStep: true,
+          hideBack: false,
+          closingStep: false,
+        );
+      case 5:
+        return (
+          title: 'All yours again',
+          body: "Nice work — I've resumed handling this conversation myself. "
+              'Questions along the way? Check the FAQ. Want to run through '
+              "everything again sometime? The full tutorial's always in the "
+              'Host Setup Guide.',
+          anchor: null,
+          extraAnchor: null,
+          onEnter: null,
+          finalStep: false,
+          hideBack: true,
+          closingStep: false,
+        );
+      default:
+        return (
+          title: 'See it from both sides',
+          body: 'Now, go use the test links you already generated — use '
+              'your preferred channel link and talk to me as if you were '
+              'the guest, and see both sides in action.',
+          anchor: null,
+          extraAnchor: null,
+          onEnter: null,
+          finalStep: false,
+          hideBack: true,
+          closingStep: true,
+        );
+    }
+  }
+
+  void _wtGoToStep(int step) {
+    setState(() => _wtStep = step);
+    final info = _wtStepInfo(step);
+    info.onEnter?.call();
+    final anchor = info.anchor;
+    if (anchor != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = anchor.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              alignment: 0.1);
+        }
+      });
+    }
+  }
+
+  void _wtNext() {
+    if (_wtStep == null) return;
+    if (_wtStepInfo(_wtStep!).closingStep || _wtStep! >= _wtLocalStepCount - 1) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _wtGoToStep(_wtStep! + 1);
+  }
+
+  void _wtBack() {
+    if (_wtStep == null || _wtStep == 0) return;
+    _wtGoToStep(_wtStep! - 1);
+  }
+
+  bool _wtEscalationTriggered = false;
+  void _wtTriggerEscalation() {
+    if (_wtEscalationTriggered) return;
+    _wtEscalationTriggered = true;
+    final now = DateTime.now().toIso8601String();
+    setState(() {
+      _wtSimulatedEscalation = true;
+      _wtFakeMessages.addAll([
+        <String, dynamic>{
+          'id': 'wt-guest-1',
+          'sender_type': 'guest',
+          'content': '¿Puedo invitar a unos amigos a la fiesta este finde?',
+          'status': 'delivered',
+          'created_at': now,
+        },
+        <String, dynamic>{
+          'id': 'wt-ai-1',
+          'sender_type': 'ai',
+          'content': '¡Hola! Voy a confirmarte eso en un momento — dame un segundo.',
+          'status': 'delivered',
+          'created_at': now,
+          'is_escalated_interaction': true,
+        },
+      ]);
+    });
+    // Reuses the real, already-host-permitted mode write (same call the manual
+    // toggle uses) — announce:false matches how a genuine backend-triggered
+    // escalation behaves (no separate transition notice on top of it).
+    _setMode('intervene', announce: false);
+    _scrollToBottom();
+  }
+
+  bool _wtReplyPrefilled = false;
+  void _wtPrefillReply() {
+    if (_wtReplyPrefilled) return;
+    _wtReplyPrefilled = true;
+    _hostController.text =
+        '¡Hola! Sí, sin problema — solo dime cuántas personas serán en total 😊';
+  }
+
+  Widget _wtHighlight({required GlobalKey key, required bool active, required Widget child}) {
+    return Container(
+      key: key,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: active ? context.palette.primary : Colors.transparent,
+          width: 2,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: context.palette.primary.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildWalkthroughPanel() {
+    final step = _wtStep!;
+    final info = _wtStepInfo(step);
+    final palette = context.palette;
+    return GlassPanel(
+      radius: 20,
+      blurSigma: AppTheme.glassBlurSigmaHeavy,
+      tint: palette.glassTintStrong,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('🤖', style: GoogleFonts.inter(fontSize: 13)),
+              const SizedBox(width: 5),
+              Text(
+                '${step + 3} of 9',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                  color: palette.primary,
+                ),
+              ),
+              const Spacer(),
+              Tooltip(
+                message: 'Close walkthrough',
+                child: InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.close_rounded, size: 16, color: palette.textMuted),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            info.title,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: palette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            info.body,
+            style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+          ),
+          if (!info.finalStep) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (!info.hideBack && step > 0)
+                  TextButton(onPressed: _wtBack, child: const Text('Back')),
+                const Spacer(),
+                FilledButton(
+                  onPressed: _wtNext,
+                  child: Text(info.closingStep ? 'Done' : 'Next'),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: isMobile
-          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 16)
-          : const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 1320,
-          maxHeight: MediaQuery.of(context).size.height * 0.88,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                color: palette.glassTintStrong,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: palette.glassBorderStrong),
-              ),
-              child: Column(
-                children: [
-                  _buildDialogAppBar(isMobile),
-                  const Divider(height: 1),
-                  Expanded(child: _buildBody(isMobile)),
-                ],
-              ),
+    final insetPadding = isMobile
+        ? const EdgeInsets.symmetric(horizontal: 8, vertical: 16)
+        : const EdgeInsets.symmetric(horizontal: 24, vertical: 32);
+
+    final card = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: 1320,
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: palette.glassTintStrong,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: palette.glassBorderStrong),
+            ),
+            child: Column(
+              children: [
+                _buildDialogAppBar(isMobile),
+                const Divider(height: 1),
+                Expanded(child: _buildBody(isMobile)),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+
+    if (_wtStep == null || screenW < 1000) {
+      return Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: insetPadding,
+        child: card,
+      );
+    }
+
+    // Docked walkthrough panel — desktop-only, matching Add Property's and
+    // Part B's own docking gate. Dialog's own centering is replicated by hand
+    // since the panel needs to sit alongside the card, not inside it.
+    return Center(
+      child: Padding(
+        padding: insetPadding,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8, right: 20),
+              child: SizedBox(width: 300, child: _buildWalkthroughPanel()),
+            ),
+            Flexible(child: card),
+          ],
         ),
       ),
     );
@@ -557,7 +896,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       child: Row(
         children: [
           Expanded(
-            child: Column(
+            child: _wtHighlight(
+              key: _wtHeaderKey,
+              active: _wtStep == 0,
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -603,22 +945,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   ],
                 ),
               ],
+              ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: modeColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: modeColor.withValues(alpha: 0.45)),
-            ),
-            child: Text(
-              modeLabel,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: modeColor,
-                letterSpacing: 0.2,
+          _wtHighlight(
+            key: _wtPillKey,
+            active: _wtStep == 2 || _wtStep == 3,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: modeColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: modeColor.withValues(alpha: 0.45)),
+              ),
+              child: Text(
+                modeLabel,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: modeColor,
+                  letterSpacing: 0.2,
+                ),
               ),
             ),
           ),
@@ -685,8 +1032,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   /// The messages area (empty state or the scrolling bubble list). Extracted so
   /// the desktop two-pane layout and the mobile stacked layout share one source.
+  // Real messages plus the walkthrough's scripted escalation demo (never
+  // written to Supabase — see _wtTriggerEscalation), merged for display only.
+  List<Map<String, dynamic>> get _displayMessages =>
+      _wtFakeMessages.isEmpty ? _messages : [..._messages, ..._wtFakeMessages];
+
   Widget _buildMessagesList() {
-    if (_messages.isEmpty) {
+    if (_displayMessages.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -705,12 +1057,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
     final states = _computeEscalationWindow();
     final isEmergency = _escalationReason?.startsWith('emergency_') == true;
+    final messages = _displayMessages;
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
-      itemCount: _messages.length,
+      itemCount: messages.length,
       itemBuilder: (_, i) => _buildBubble(
-        _messages[i],
+        messages[i],
         escalationState: states[i],
         isEmergency: isEmergency,
       ),
@@ -768,8 +1121,16 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildGuestLinkSection(),
-              _buildModeToggle(),
+              _wtHighlight(
+                key: _wtLinksKey,
+                active: _wtStep == 1,
+                child: _buildGuestLinkSection(),
+              ),
+              _wtHighlight(
+                key: _wtModeKey,
+                active: _wtStep == 2 || _wtStep == 3,
+                child: _buildModeToggle(),
+              ),
               if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
               if (_mode == 'autopilot' && _escalationReason != null)
                 _buildUnresolvedBanner(),
@@ -1096,20 +1457,21 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   // after the host's replies — NOT on the escalated reply's resolution_status
   // (that sits early in the chain and would wrongly exclude everything after it).
   List<_EscalationState> _computeEscalationWindow() {
+    final messages = _displayMessages;
     final out =
-        List<_EscalationState>.filled(_messages.length, _EscalationState.none);
+        List<_EscalationState>.filled(messages.length, _EscalationState.none);
     bool inWindow = false;
     int windowStart = -1;
-    for (int i = 0; i < _messages.length; i++) {
-      final m = _messages[i];
+    for (int i = 0; i < messages.length; i++) {
+      final m = messages[i];
       final content = m['content'];
       // Open at the escalation trigger: the guest message right before an
       // escalated reply, or the escalated reply itself. (A manual Intervene is
       // not an escalation, so it intentionally does not open a window.)
       if (!inWindow &&
           m['sender_type'] == 'guest' &&
-          i + 1 < _messages.length &&
-          _messages[i + 1]['is_escalated_interaction'] == true) {
+          i + 1 < messages.length &&
+          messages[i + 1]['is_escalated_interaction'] == true) {
         inWindow = true;
         windowStart = i;
       }
@@ -1136,12 +1498,18 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   }
 
   Widget _buildResolveButton() {
+    // During the walkthrough's "Your turn" step, stays locked until the host
+    // actually sends a reply — resolving first would leave the guest hanging.
+    final wtLocked = _wtStep != null && _wtStepInfo(_wtStep!).finalStep && !_wtReplySent;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: SizedBox(
         width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _isResolving ? null : _resolveIssue,
+        child: _wtHighlight(
+          key: _wtResolveKey,
+          active: _wtStep != null && _wtStepInfo(_wtStep!).finalStep,
+          child: ElevatedButton.icon(
+          onPressed: (_isResolving || wtLocked) ? null : _resolveIssue,
           icon: _isResolving
               ? const SizedBox(
                   width: 14,
@@ -1160,6 +1528,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
+          ),
           ),
         ),
       ),

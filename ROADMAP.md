@@ -124,6 +124,42 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
   2. **Partial ingest timeout on a larger batch, property stuck at `Status: Ingesting` with no recovery path.** Repro: 11 screenshots ingested fine ("Done"), the last 3 screenshots + 1 PDF all show "Timeout — try again" in the per-file list, and the property itself is left sitting at `Status: Ingesting` in the UI with no retry action, no error state, nothing actionable — founder called this "very confusing, poor UX." Likely related to the known **`_startIngest`'s 90s SSE stream timeout** (`add_property_screen.dart`) and/or the documented Vertex 429/cold-start backoff behavior (see the Vertex-transport watch item above) — more files in one batch means more chances to outrun either. **Open questions:** should per-file ingest have its own retry independent of the other files in the batch; should a property that ends a run with any file still `queued`/`processing`/`timeout` ever be allowed to sit at `Ingesting` with no host-facing next step (retry button, partial-failure banner, etc.); is the 90s frontend timeout even the right layer to fix this at vs. backend-side batching/concurrency.
 - 🟡 **M1 — Split Add Property into a Dev view and a User (beta) view (queued 2026-09-07, founder request):** the current Add Property screen exposes the full internal pipeline (separate `INGEST NOW`/`MERGE NOW` steps, the raw "Extracted Knowledge" markdown dump, the Master JSON viewer) — useful for debugging but "too many steps" and overwhelming for a real beta host, per the founder testing it live. Wants two modes: a **Developer view** keeping today's full pipeline visibility (for debugging exactly this kind of ingest failure), and a **User/Beta view** simplified to one **"Train Now"** action (Ingest+Merge collapsed behind a single button) plus conflict review only — no Extracted Knowledge, no Master JSON. Founder's own framing: "do you think that's too hard? I don't want to overcomplicate things." **Open questions:** how is dev vs. user mode gated (env flag, per-account flag, hidden toggle?); does "Train Now" become one new backend call or just one button triggering the existing two calls sequentially under the hood; does the simplified view still surface per-file ingest errors (e.g. the timeout bug above) in some form, or hide those too; how does this interact with the partial-failure/stuck-`Ingesting` bug above — a simplified view makes a stuck state even more opaque unless that's fixed first. Likely sequenced *after* the two bugs above, not before. Not scoped yet — deferred to its own session.
 - 🟡 **M1 — Post-training walkthrough panel for the Overview/Files/Knowledge tabs (queued 2026-09-08, founder request):** a docked, synced walkthrough (same panel pattern as the new Add Property one — highlight + auto-scroll to the real UI) that fires once a property's first training run completes, showing the host how to modify/retrain: add or delete files, correct a detail via Add New Knowledge, review Automated Learning suggestions, chat with the Knowledge Base to sanity-check answers. `guide.html`'s new "Property Enhancement" section is the quick-overview placeholder for this; founder explicitly wants the deeper, interactive version as a follow-up, not folded into this session's scope. **Open questions:** trigger condition (first successful Merge only, or every property's first visit to its detail drawer); does it live inside `property_detail_drawer.dart` docked next to the drawer's tabs, matching the Add Property panel's docking approach; does it need its own dismiss-once-per-property state or can it reuse the "zero properties" style heuristic. Not scoped yet — deferred to its own session.
+- 🟢 **M2 — Alfred mascot / persona (queued 2026-09-09, founder request, own mini-project):** a
+  visual character for Alfred — floated during the post-training walkthrough design review as a way
+  to make it clear *who* is narrating first-person walkthrough copy ("I've learned...", "I flag..."),
+  rather than relying on plain text alone. Reference point raised: Microsoft Word's old Clippy
+  assistant, as a shape to riff on, not to imitate directly. Deliberately scoped as its own
+  standalone project, not part of the walkthrough work it was raised during — the walkthrough ships
+  with a placeholder generic robot icon in the meantime. **Open questions:** static illustration vs.
+  simple animated states (idle/talking/thinking); where it appears beyond the walkthrough (chat
+  screens? loading states?); build vs. commission. Not scoped yet — deferred to its own session.
+- 🟡 **M1 — Restructure `guide.html` into three sections mirroring the walkthrough panels (queued
+  2026-09-09, founder request):** the existing static Host Setup Guide predates this session's
+  post-training walkthrough work and isn't organized to match it. Reorganize into three sections:
+  (1) Getting Alfred live on a first property — the original Add Property walkthrough content;
+  (2) Generating a Guest link — mirrors the new interactive Guest+ walkthrough (9 steps, including
+  the live Autopilot/Intervene/escalation demo); (3) Settings/training review — mirrors the new
+  post-training drawer walkthrough (5 steps: Files, Add Knowledge, Automated Learning, Ask the
+  Knowledge Base). The wrap-up step of the Guest+ walkthrough now promises "the full tutorial's
+  always in the Host Setup Guide" — this needs to exist for that promise to be true. Deliberately
+  deferred, not built alongside the walkthrough panels themselves — same real screenshots/step-number
+  style as the existing guide. Not scoped yet — deferred to its own session.
+- 🟡 **M1/M2 — Revisit the "Update a Property" feature (queued 2026-09-09, founder request):** once
+  a property is trained, what's the real workflow when its underlying Airbnb listing changes — new
+  photos, a new house entry code, updated house rules? Today a host can always add fresh info via
+  "Add New Knowledge" (Knowledge tab), but there's no clear path to *retract or correct* something
+  already trained in — confirmed while building the Dev/User split: deleting a file in Edit Property
+  removes it from storage and `file_fingerprints`, but does **not** strip its already-extracted
+  content from `ingested_markdown`/`master_json` (`backend/routers/ingest.py`'s fingerprint check
+  only skips *unchanged* files on re-ingest — it never removes content for files no longer present;
+  the existing "knowledge database still contains data from removed files" warning in
+  `edit_property_screen.dart` already flags this, it's just never been resolved). **Open questions:**
+  should file deletion trigger the backend to actually strip that file's contribution before the next
+  merge, instead of just updating fingerprints; should "Add New Knowledge" support corrections/
+  deletions, not just additions; does a changed Airbnb listing (e.g. new photos) need a manual
+  "re-scrape" action, or should a property periodically re-check itself against the live listing.
+  Founder wants real beta-tester input first — what actually changes on a property over time in
+  practice — before scoping this. Not scoped yet — deferred to its own session.
 - 🟢 **M1/M3 — AI assistant for host support (queued 2026-09-08, founder tangent, not committed):** while reviewing the guide's closing line ("Questions along the way? Just ask") the founder mused that an actual in-app AI assistant answering host questions/walking them through issues live "would actually be cool and valuable" — explicitly floated as an idea, not a decision to build. Distinct from Alfred (which talks to guests) — this would be a host-facing support agent. This session's fix instead pointed the closing line at the existing feedback icon rather than building anything. **Open questions:** scope (FAQ bot vs. something that can actually see the host's own property state); would it reuse Alfred's existing Gemini/RAG plumbing or need its own; is this better served by a much simpler non-AI help-center/FAQ page first. Needs an explicit founder decision to move from idea to scoped work.
 
 ### Track 2 — Brand & Identity

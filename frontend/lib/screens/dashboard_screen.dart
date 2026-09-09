@@ -17,6 +17,7 @@ import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
 import '../services/push_notification_service.dart';
+import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -38,6 +39,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   // Host impact stats (get_host_stats RPC). Null until first load.
   Map<String, dynamic>? _hostStats;
   String? _hostAvatarUrl;
+  bool _isDev = false;
+  // Part A of the User-mode post-training walkthrough (Step 0) — property IDs
+  // that have already had their dashboard nudge dismissed.
+  Set<String> _walkthroughSeenIds = {};
+
+  static const _readyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
 
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
@@ -56,6 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _notifPermission = PushNotificationService.permissionState;
     _loadHostStats();
     _loadHostAvatar();
+    _loadWalkthroughSeenIds();
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
@@ -329,15 +337,30 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (uid == null) return;
       final row = await Supabase.instance.client
           .from('host_profiles')
-          .select('avatar_url')
+          .select('avatar_url, is_dev')
           .eq('id', uid)
           .maybeSingle();
       if (mounted) {
-        setState(() => _hostAvatarUrl = row?['avatar_url'] as String?);
+        setState(() {
+          _hostAvatarUrl = row?['avatar_url'] as String?;
+          _isDev = row?['is_dev'] as bool? ?? false;
+        });
       }
     } catch (_) {
       // Ignore — fall back to the default person glyph.
     }
+  }
+
+  Future<void> _loadWalkthroughSeenIds() async {
+    final ids = await WalkthroughPrefs.seenPostTrainingPropertyIds();
+    if (mounted) setState(() => _walkthroughSeenIds = ids);
+  }
+
+  bool _showStep0Hint(Map<String, dynamic> property) {
+    if (_isDev) return false;
+    final status = property['status'] as String? ?? '';
+    if (!_readyStatuses.contains(status)) return false;
+    return !_walkthroughSeenIds.contains(property['id'] as String);
   }
 
   Widget _profileGlyph(double size, Color color) {
@@ -371,7 +394,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _openAddProperty() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => AddPropertyScreen(showWalkthrough: _properties.isEmpty),
+        builder: (_) => AddPropertyScreen(
+          showWalkthrough: _properties.isEmpty,
+          isDev: _isDev,
+        ),
       ),
     );
     _loadProperties();
@@ -389,6 +415,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: PropertyDetailDrawer(
           property: property,
           onRefresh: _loadProperties,
+          isDev: _isDev,
         ),
       ),
       transitionBuilder: (_, anim, __, child) => SlideTransition(
@@ -396,7 +423,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             .animate(CurvedAnimation(parent: anim, curve: AppTheme.standardEasing)),
         child: child,
       ),
-    );
+      // The drawer's own Part B walkthrough (User mode) may mark the shared
+      // post-training flag seen while open — refresh so Step 0's dashboard
+      // hint (Part A) stops showing for this property without a full reload.
+    ).then((_) => _loadWalkthroughSeenIds());
   }
 
   void _openExpandedView(Map<String, dynamic> property) {
@@ -447,7 +477,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _openGuestLink(Map<String, dynamic> property) {
     showDialog(
       context: context,
-      builder: (_) => GenerateGuestLinkDialog(property: property),
+      builder: (_) => GenerateGuestLinkDialog(property: property, isDev: _isDev),
     );
   }
 
@@ -929,6 +959,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     onAddProperty: _openAddProperty,
                     onArchivedChats: () => _openArchivedChats(item),
                     onCalendar: () => _openCalendar(item),
+                    showStep0Hint: _showStep0Hint(item),
                   );
             return _StaggeredEntry(
               delayMs: (index * 40).clamp(0, 240),
@@ -1002,6 +1033,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onAddProperty: _openAddProperty,
                   onArchivedChats: () => _openArchivedChats(item),
                   onCalendar: () => _openCalendar(item),
+                  showStep0Hint: _showStep0Hint(item),
                 );
           return _StaggeredEntry(
             delayMs: (index * 50).clamp(0, 400),

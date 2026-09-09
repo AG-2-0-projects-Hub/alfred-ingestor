@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import random
@@ -145,6 +146,12 @@ _MUSCACHE_URL_RE = re.compile(r'https://a0\.muscache\.com/[^\s\)"\']+')
 _MAX_CANDIDATE_PHOTOS = 100  # defensive ceiling on raw candidates, before any filtering
 _MAX_CURATED_PHOTOS = 20
 _MAX_PER_ROOM = 3
+_MAX_CONCURRENT_DOWNLOADS = 10  # bounded, not unbounded fan-out — avoids looking like a burst to the CDN
+# Confirmed by live probing against real a0.muscache.com photo URLs (2026-09-09):
+# im_w=320/480/720/960/1200/1440 all return 200; im_w=640/750/800/1080/1280 all 404 —
+# only certain preset widths are pre-generated, arbitrary values aren't. 480 is plenty
+# for Phase 1's coarse room/property classification; Phase 2 stays full resolution.
+_PHASE1_IMG_WIDTH = 480
 
 
 def _extract_candidate_photos(raw_markdown: str) -> list[dict]:
@@ -167,6 +174,29 @@ def _download_image(url: str) -> tuple[bytes, str] | None:
     except Exception as e:
         print(f"Photo triage: download failed for {url}: {e}")
         return None
+
+
+def _with_preset_width(url: str, width: int) -> str:
+    """Override (or add) muscache's im_w query param. Only ever called for
+    Phase 1 — Phase 2 downloads the candidate's original URL unmodified."""
+    if "im_w=" in url:
+        return re.sub(r"im_w=\d+", f"im_w={width}", url)
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}im_w={width}"
+
+
+async def _download_image_async(
+    client: httpx.AsyncClient, semaphore: asyncio.Semaphore, url: str
+) -> tuple[bytes, str] | None:
+    async with semaphore:
+        try:
+            resp = await client.get(url, timeout=15, follow_redirects=True)
+            resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+            return resp.content, content_type
+        except Exception as e:
+            print(f"Photo triage: download failed for {url}: {e}")
+            return None
 
 
 def _parse_json_array(text: str) -> list:
@@ -205,20 +235,36 @@ Respond with ONLY a JSON array, one object per photo, in this exact shape:
 """
 
 
-def _run_photo_triage_phase1(client, candidates: list[dict], property_context: str) -> list[dict]:
+async def _run_photo_triage_phase1(client, candidates: list[dict], property_context: str) -> list[dict]:
     """One batched Gemini call over every candidate photo — a lighter,
-    rougher pass than Phase 2 (shorter prompt, no per-photo description)."""
+    rougher pass than Phase 2 (shorter prompt, no per-photo description).
+
+    Downloads run in parallel (bounded concurrency — see _MAX_CONCURRENT_DOWNLOADS)
+    at a downscaled preset width (_PHASE1_IMG_WIDTH): a listing can have up to
+    _MAX_CANDIDATE_PHOTOS=100 photos, and serial full-res downloads risked
+    outrunning /scrape's own timeout on large listings, for a task (coarse
+    room/property classification) that doesn't need full resolution anyway."""
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+    async with httpx.AsyncClient() as http_client:
+        downloads = await asyncio.gather(*[
+            _download_image_async(
+                http_client, semaphore, _with_preset_width(c["url"], _PHASE1_IMG_WIDTH)
+            )
+            for c in candidates
+        ])
+
     parts = [genai.types.Part(text=_PHASE1_INTRO.format(property_context=property_context))]
     by_index: dict[int, dict] = {}
-    for i, c in enumerate(candidates, start=1):
-        downloaded = _download_image(c["url"])
+    index = 0
+    for c, downloaded in zip(candidates, downloads):
         if downloaded is None:
             continue
+        index += 1
         data, mime = downloaded
         caption_note = f' — caption: "{c["caption"]}"' if c["caption"] else ""
-        parts.append(genai.types.Part(text=f"\nPhoto #{i}{caption_note}:"))
+        parts.append(genai.types.Part(text=f"\nPhoto #{index}{caption_note}:"))
         parts.append(genai.types.Part.from_bytes(data=data, mime_type=mime))
-        by_index[i] = c
+        by_index[index] = c
 
     if not by_index:
         return []
@@ -377,14 +423,14 @@ def _run_photo_triage_phase2(
     return curated, rejected
 
 
-def _triage_photos(client, raw_markdown: str, property_context: str) -> tuple[list[dict], list[dict]]:
+async def _triage_photos(client, raw_markdown: str, property_context: str) -> tuple[list[dict], list[dict]]:
     """Full two-phase triage. Never raises — a triage failure must never block
     the scrape itself, so any error here just yields no curation at all."""
     try:
         candidates = _extract_candidate_photos(raw_markdown)
         if not candidates:
             return [], []
-        phase1 = _run_photo_triage_phase1(client, candidates, property_context)
+        phase1 = await _run_photo_triage_phase1(client, candidates, property_context)
         selected, rejected1 = _select_phase2_candidates(phase1)
         if selected:
             curated, rejected2 = _run_photo_triage_phase2(client, selected, property_context)
@@ -444,7 +490,7 @@ async def scrape_airbnb(req: ScrapeRequest):
         raise HTTPException(status_code=500, detail=f"Gemini API processing failed: {str(e)}")
 
     # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
-    curated_photos, rejected_photos = _triage_photos(client, extracted_markdown, structured_output)
+    curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
 
     # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged
     upsert_to_ingestor_supabase(url, structured_output, curated_photos, rejected_photos)

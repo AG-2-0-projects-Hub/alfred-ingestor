@@ -6,16 +6,20 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
+import 'glass_panel.dart';
 import '../theme/app_theme.dart';
+import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
   final Map<String, dynamic> property;
   final VoidCallback? onCreated;
+  final bool isDev;
 
   const GenerateGuestLinkDialog({
     super.key,
     required this.property,
     this.onCreated,
+    this.isDev = false,
   });
 
   @override
@@ -27,6 +31,27 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   final _nameController = TextEditingController();
   bool _loading = false;
   Map<String, dynamic>? _result; // {booking_id, guest_chat_url, host_chat_url}
+
+  // Part C of the User-mode post-training walkthrough — first-ever guest link,
+  // across any property (global flag, independent of Parts A/B). Steps 1-2
+  // live here; steps 3-9 continue inside ChatLiveDialog once Open Host Chat
+  // is tapped. Marked seen from there, not here — see ChatLiveDialog.dispose.
+  bool _isWalkthrough = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.isDev) {
+      WalkthroughPrefs.isGuestLinkWalkthroughSeen().then((seen) {
+        if (mounted && !seen) {
+          setState(() {
+            _isWalkthrough = true;
+            _nameController.text = 'Test walkthrough';
+          });
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -90,12 +115,14 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
     final propertyName = widget.property['name'] as String? ?? '';
+    final isWalkthrough = _isWalkthrough;
     Navigator.of(context).pop();
     ChatLiveDialog.show(
       context,
       bookingId: bookingId,
       propertyId: propertyId,
       propertyName: propertyName,
+      startWalkthrough: isWalkthrough,
     );
   }
 
@@ -139,10 +166,14 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
                 onPressed: _openHostChat,
                 child: const Text('Open Host Chat'),
               ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Done'),
-              ),
+              // Suppressed on the first-ever showing — Open Host Chat is the
+              // only path forward, so the host can't skip the explanation.
+              // Backdrop-dismiss still covers "not right now."
+              if (!_isWalkthrough)
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Done'),
+                ),
             ],
     );
   }
@@ -150,16 +181,30 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   Widget _buildStep1(bool isMobile) {
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
-      child: TextField(
-        controller: _nameController,
-        decoration: const InputDecoration(
-          labelText: 'Guest name (optional)',
-          hintText: 'e.g. Maria Garcia',
-          border: OutlineInputBorder(),
-        ),
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _generate(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Guest name (optional)',
+              hintText: 'e.g. Maria Garcia',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _generate(),
+          ),
+          if (_isWalkthrough) ...[
+            const SizedBox(height: 14),
+            const _WalkthroughTip(
+              eyebrow: 'GUEST LINK · 1 of 9',
+              body: "I've filled in a test name — hit Generate Link and I'll "
+                  "create real links you can use to message me yourself, as a guest.",
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -169,6 +214,26 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final hostUrl = _result!['host_chat_url'] as String;
     final telegramUrl = _result!['telegram_link'] as String?;
     final whatsappUrl = _result!['whatsapp_link'] as String?;
+    final guestRows = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _urlRow('Guest link (web)', guestUrl),
+        // WhatsApp before Telegram: it is the primary channel for the
+        // Mexico/LATAM beta, and the first link a host sees is the one they
+        // send. The link carries a PREFILLED message holding the booking id —
+        // that text is how the guest gets connected, so it must not be edited
+        // away (see routers/whatsapp.py).
+        if (whatsappUrl != null && whatsappUrl.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _urlRow('Guest link (WhatsApp)', whatsappUrl),
+        ],
+        if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _urlRow('Guest link (Telegram)', telegramUrl),
+        ],
+      ],
+    );
 
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
@@ -176,22 +241,34 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _urlRow('Guest link (web)', guestUrl),
-          // WhatsApp before Telegram: it is the primary channel for the
-          // Mexico/LATAM beta, and the first link a host sees is the one they
-          // send. The link carries a PREFILLED message holding the booking id —
-          // that text is how the guest gets connected, so it must not be edited
-          // away (see routers/whatsapp.py).
-          if (whatsappUrl != null && whatsappUrl.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _urlRow('Guest link (WhatsApp)', whatsappUrl),
-          ],
-          if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _urlRow('Guest link (Telegram)', telegramUrl),
-          ],
+          _isWalkthrough
+              ? Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: context.palette.primary, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.palette.primary.withValues(alpha: 0.25),
+                        blurRadius: 16,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: guestRows,
+                )
+              : guestRows,
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
+          if (_isWalkthrough) ...[
+            const SizedBox(height: 14),
+            const _WalkthroughTip(
+              eyebrow: 'GUEST LINK · 2 of 9',
+              body: 'Send whichever matches how your guest reaches out — web, '
+                  'WhatsApp, or Telegram, they all reach me the same way. '
+                  'One more thing to show you first →',
+            ),
+          ],
         ],
       ),
     );
@@ -229,6 +306,52 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
           ],
         ),
       ],
+    );
+  }
+}
+
+// Shared tip bubble for Part C's steps 1-2 — same visual language as Part A's
+// Step 0 tip and Part B's docked panel (🤖 badge + eyebrow + body).
+class _WalkthroughTip extends StatelessWidget {
+  final String eyebrow;
+  final String body;
+  const _WalkthroughTip({required this.eyebrow, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return GlassPanel(
+      radius: 14,
+      blurSigma: AppTheme.glassBlurSigmaHeavy,
+      tint: palette.glassTintStrong,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('🤖', style: TextStyle(fontSize: 13)),
+              const SizedBox(width: 5),
+              Text(
+                eyebrow,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                  color: palette.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            style: GoogleFonts.inter(
+                fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 }

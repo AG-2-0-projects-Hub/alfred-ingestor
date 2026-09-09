@@ -19,8 +19,13 @@ import '../widgets/conflict_questionnaire.dart';
 
 class EditPropertyScreen extends StatefulWidget {
   final Map<String, dynamic> property;
+  final bool isDev;
 
-  const EditPropertyScreen({super.key, required this.property});
+  const EditPropertyScreen({
+    super.key,
+    required this.property,
+    this.isDev = false,
+  });
 
   @override
   State<EditPropertyScreen> createState() => _EditPropertyScreenState();
@@ -274,7 +279,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     // (user uploads files, clicks RE-INGEST, or resolves conflicts here)
     final status = _propertyStatus ?? '';
     if (status == 'Scraped') {
-      // Scroll to dropzone — no-op; user can see it
+      // With the manual RE-INGEST button hidden (User mode), this is the only
+      // way to kick off ingestion once files are queued — a no-op before that.
+      if (_filesToIngest.any((f) => f['status'] == 'queued')) _startIngest();
     } else if (status == 'Ingested') {
       _runMerge();
     } else if (status == 'Ingest_Error') {
@@ -336,12 +343,28 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Guided next-step banner
+                // Guided next-step banner. _isIngesting/_isMerging null out
+                // _propertyStatus for the duration of the call (see _startIngest/
+                // _runMerge), so nextStepFor() alone would go blank mid-flight —
+                // show an explicit processing state instead.
                 Builder(builder: (ctx) {
-                  final step = nextStepFor(
-                    _propertyStatus ?? '',
-                    hasMasterJson: _masterJson != null,
-                  );
+                  final step = _isIngesting || _isMerging
+                      ? SetupStep(
+                          headline: _isIngesting
+                              ? 'Processing files…'
+                              : 'Building the master profile…',
+                          subtext: _isIngesting
+                              ? 'Alfred is reading your files. This usually takes 30–60 seconds.'
+                              : 'Merging your data into one profile. This can take a moment.',
+                          actionLabel: '',
+                          icon: Icons.hourglass_top_rounded,
+                          accent: (c) => Theme.of(c).colorScheme.secondary,
+                          isProcessing: true,
+                        )
+                      : nextStepFor(
+                          _propertyStatus ?? '',
+                          hasMasterJson: _masterJson != null,
+                        );
                   if (step == null) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 20),
@@ -531,32 +554,35 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   FileStatusList(statuses: _filesToIngest),
                 ],
 
-                // Re-ingest button
-                const SizedBox(height: 28),
-                FilledButton(
-                  onPressed: canIngest ? _startIngest : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    textStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.4),
+                // Re-ingest button — Dev only; User mode drives this from the
+                // guided banner above instead (see _handleNextStepAction).
+                if (widget.isDev) ...[
+                  const SizedBox(height: 28),
+                  FilledButton(
+                    onPressed: canIngest ? _startIngest : null,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      textStyle: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.4),
+                    ),
+                    child: _isIngesting
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.5, color: Colors.white)),
+                              SizedBox(width: 12),
+                              Text('Ingesting...'),
+                            ],
+                          )
+                        : const Text('RE-INGEST'),
                   ),
-                  child: _isIngesting
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.5, color: Colors.white)),
-                            SizedBox(width: 12),
-                            Text('Ingesting...'),
-                          ],
-                        )
-                      : const Text('RE-INGEST'),
-                ),
+                ],
 
                 // Post-ingest results
                 if (_fileStatuses.isNotEmpty) ...[
@@ -569,7 +595,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   const SizedBox(height: 8),
                   FileStatusList(statuses: _fileStatuses),
                 ],
-                if (_ingestedMarkdown != null && _ingestedMarkdown!.isNotEmpty) ...[
+                if (widget.isDev &&
+                    _ingestedMarkdown != null &&
+                    _ingestedMarkdown!.isNotEmpty) ...[
                   const SizedBox(height: 40),
                   const Divider(),
                   const SizedBox(height: 20),
@@ -591,7 +619,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   const SizedBox(height: 40),
                   const Divider(),
                   const SizedBox(height: 20),
-                  if (_propertyStatus == 'Ingested' &&
+                  // Dev only — User mode's banner already chains straight into
+                  // merge from _handleNextStepAction's 'Ingested' case.
+                  if (widget.isDev &&
+                      _propertyStatus == 'Ingested' &&
                       (_ingestedMarkdown?.isNotEmpty ?? false)) ...[
                     FilledButton(
                       onPressed: _isMerging ? null : _runMerge,
@@ -638,7 +669,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       onResolved: _onResolved,
                     ),
                   ],
-                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                  if (widget.isDev && _postMergeStatuses.contains(_propertyStatus)) ...[
                     const SizedBox(height: 24),
                     if (_masterJson != null) ...[
                       Row(

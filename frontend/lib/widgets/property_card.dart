@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'conversation_pill.dart';
+import 'glass_panel.dart';
 
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
@@ -17,6 +18,9 @@ class PropertyCard extends StatelessWidget {
   final bool hasEscalation;
   final bool hasEmergency;
   final List<Map<String, dynamic>> conversationPreviews;
+  // Part A of the User-mode post-training walkthrough — Step 0's nudge on
+  // the +Guest/Settings buttons. Always false for Dev accounts.
+  final bool showStep0Hint;
 
   const PropertyCard({
     super.key,
@@ -32,6 +36,7 @@ class PropertyCard extends StatelessWidget {
     this.hasEscalation = false,
     this.hasEmergency = false,
     this.conversationPreviews = const [],
+    this.showStep0Hint = false,
   });
 
   const PropertyCard.add({
@@ -47,7 +52,8 @@ class PropertyCard extends StatelessWidget {
         activeChatCount = 0,
         hasEscalation = false,
         hasEmergency = false,
-        conversationPreviews = const [];
+        conversationPreviews = const [],
+        showStep0Hint = false;
 
   static void _noop() {}
   static void _noopChat(String _) {}
@@ -69,6 +75,7 @@ class PropertyCard extends StatelessWidget {
       onGuestLink: onGuestLink,
       onArchivedChats: onArchivedChats,
       onCalendar: onCalendar,
+      showStep0Hint: showStep0Hint,
     );
   }
 }
@@ -163,6 +170,7 @@ class _PropertyCard extends StatefulWidget {
   final VoidCallback onGuestLink;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  final bool showStep0Hint;
 
   const _PropertyCard({
     required this.property,
@@ -176,6 +184,7 @@ class _PropertyCard extends StatefulWidget {
     required this.onGuestLink,
     required this.onArchivedChats,
     required this.onCalendar,
+    this.showStep0Hint = false,
   });
 
   @override
@@ -185,6 +194,52 @@ class _PropertyCard extends StatefulWidget {
 class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
   bool _pressed = false;
+  final LayerLink _step0Link = LayerLink();
+  OverlayEntry? _step0Overlay;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncStep0Overlay();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PropertyCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncStep0Overlay();
+  }
+
+  void _syncStep0Overlay() {
+    if (widget.showStep0Hint && _step0Overlay == null) {
+      final overlay = OverlayEntry(
+        builder: (_) => Positioned(
+          width: 280,
+          child: CompositedTransformFollower(
+            link: _step0Link,
+            showWhenUnlinked: false,
+            offset: const Offset(0, 12),
+            child: const _Step0Tip(),
+          ),
+        ),
+      );
+      _step0Overlay = overlay;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _step0Overlay == overlay) {
+          Overlay.of(context, rootOverlay: true).insert(overlay);
+        }
+      });
+    } else if (!widget.showStep0Hint && _step0Overlay != null) {
+      _step0Overlay!.remove();
+      _step0Overlay = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _step0Overlay?.remove();
+    _step0Overlay = null;
+    super.dispose();
+  }
 
   List<BoxShadow> _statusGlow(AppPalette p) {
     if (widget.hasEmergency) {
@@ -426,12 +481,16 @@ class _PropertyCardState extends State<_PropertyCard> {
     }
 
     if (isReady) {
-      return _ReadyActions(
+      final actions = _ReadyActions(
         onGuestLink: widget.onGuestLink,
         onOpenSettings: widget.onOpenSettings,
         onArchivedChats: widget.onArchivedChats,
         onCalendar: widget.onCalendar,
+        highlightHint: widget.showStep0Hint,
       );
+      return widget.showStep0Hint
+          ? CompositedTransformTarget(link: _step0Link, child: actions)
+          : actions;
     }
 
     return Align(
@@ -451,12 +510,14 @@ class _ReadyActions extends StatelessWidget {
   final VoidCallback onOpenSettings;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  final bool highlightHint;
 
   const _ReadyActions({
     required this.onGuestLink,
     required this.onOpenSettings,
     required this.onArchivedChats,
     required this.onCalendar,
+    this.highlightHint = false,
   });
 
   @override
@@ -468,12 +529,14 @@ class _ReadyActions extends StatelessWidget {
           label: '+ Guest',
           onTap: onGuestLink,
           accent: true,
+          highlighted: highlightHint,
         ),
         const SizedBox(width: 6),
         _CardAction(
           icon: Icons.settings_rounded,
           label: 'Settings',
           onTap: onOpenSettings,
+          highlighted: highlightHint,
         ),
         const Spacer(),
         _TinyIconBtn(
@@ -497,12 +560,14 @@ class _CardAction extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool accent;
+  final bool highlighted;
 
   const _CardAction({
     required this.icon,
     required this.label,
     required this.onTap,
     this.accent = false,
+    this.highlighted = false,
   });
 
   @override
@@ -517,6 +582,18 @@ class _CardAction extends StatelessWidget {
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
+          border: highlighted
+              ? Border.all(color: palette.primary, width: 1.5)
+              : null,
+          boxShadow: highlighted
+              ? [
+                  BoxShadow(
+                    color: palette.primary.withValues(alpha: 0.30),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -529,6 +606,71 @@ class _CardAction extends StatelessWidget {
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Step 0 tip — Part A of the User-mode post-training walkthrough ────────
+// Anchored below the +Guest/Settings row via CompositedTransformFollower (see
+// _PropertyCardState) since GridView cells are fixed-height and can't just
+// grow to fit an inline tip. No arrow — it points at two buttons, not one.
+class _Step0Tip extends StatelessWidget {
+  const _Step0Tip();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Material(
+      color: Colors.transparent,
+      child: GlassPanel(
+        radius: 14,
+        blurSigma: AppTheme.glassBlurSigmaHeavy,
+        tint: palette.glassTintStrong,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('🤖', style: TextStyle(fontSize: 13)),
+                const SizedBox(width: 5),
+                Text(
+                  'STEP 0',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                    color: palette.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text.rich(
+              TextSpan(
+                style: GoogleFonts.inter(
+                    fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+                children: [
+                  const TextSpan(text: "You've got two shortcuts here — "),
+                  TextSpan(
+                    text: '+Guest',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, color: palette.textPrimary),
+                  ),
+                  const TextSpan(text: ' to connect your guest, or '),
+                  TextSpan(
+                    text: 'Settings',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, color: palette.textPrimary),
+                  ),
+                  const TextSpan(text: ' to check in on training. Click either to keep going.'),
+                ],
               ),
             ),
           ],

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'voice_recorder.dart';
 import 'file_status_list.dart';
+import 'glass_panel.dart';
 import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
@@ -15,16 +16,19 @@ import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
+import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
   final VoidCallback onRefresh;
+  final bool isDev;
 
   const PropertyDetailDrawer({
     super.key,
     required this.property,
     required this.onRefresh,
+    this.isDev = false,
   });
 
   @override
@@ -76,17 +80,220 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // showing stale status / banner state.
   StreamSubscription<List<Map<String, dynamic>>>? _propStream;
 
+  // Part B of the User-mode post-training walkthrough — a 5-step docked panel
+  // matching Add Property's walkthrough pattern. null = not showing.
+  int? _wtStep;
+  static const _wtStepCount = 5;
+  static const _wtReadyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
+  final _wtDrawerKey = GlobalKey();
+  final _wtManageKey = GlobalKey();
+  final _wtAddKnowledgeKey = GlobalKey();
+  final _wtLearningKey = GlobalKey();
+  final _wtChatKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _property = Map<String, dynamic>.from(widget.property);
     final hasConflict = _property['Conflict_status'] == 'pending';
+    // Dev: Overview, Files, Knowledge(, Resolve). User: Overview, Knowledge(,
+    // Resolve) — the Files tab folds into Overview's file summary card instead.
     _tabController = TabController(
-      length: hasConflict ? 4 : 3,
+      length: (widget.isDev ? 3 : 2) + (hasConflict ? 1 : 0),
       vsync: this,
     );
     _loadHeroUrl();
     _subscribeProperty();
+    _maybeStartWalkthrough();
+  }
+
+  Future<void> _maybeStartWalkthrough() async {
+    if (widget.isDev) return;
+    final status = _property['status'] as String? ?? '';
+    if (!_wtReadyStatuses.contains(status)) return;
+    final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
+    if (!seen && mounted) setState(() => _wtStep = 0);
+  }
+
+  // (tab index, anchor key, title, body) for each of the 5 steps.
+  (int, GlobalKey, String, String) _wtStepInfo(int step) {
+    final name = _property['name'] as String? ?? 'this property';
+    switch (step) {
+      case 0:
+        return (
+          0,
+          _wtDrawerKey,
+          "I've learned $name — here's what's next",
+          "This is where you'll come back anytime: add more detail, see what I "
+              "picked up on my own, or ask me something to check my work.",
+        );
+      case 1:
+        return (
+          0,
+          _wtManageKey,
+          'Add or swap files anytime',
+          "Tap Manage to upload more — a new house manual, an updated WiFi "
+              "photo, anything. I'll fold it in without starting over.",
+        );
+      case 2:
+        return (
+          1,
+          _wtAddKnowledgeKey,
+          'Tell me something directly',
+          "Type it, or record a voice note — parking rules, a fix for the "
+              "shower, whatever's easiest. I'll add it to what I already know.",
+        );
+      case 3:
+        return (
+          1,
+          _wtLearningKey,
+          'I flag what I learn on my own',
+          "Every real guest conversation teaches me something — I'll surface "
+              "it here for your OK before it sticks.",
+        );
+      default:
+        return (
+          1,
+          _wtChatKey,
+          'Double-check me anytime',
+          "Ask me something here, the same way a guest would. It's the "
+              "fastest way to see exactly what I'd tell them — before they ever ask.",
+        );
+    }
+  }
+
+  void _wtGoToStep(int step) {
+    setState(() => _wtStep = step);
+    final (tabIndex, key, _, _) = _wtStepInfo(step);
+    _tabController.animateTo(tabIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: 0.1);
+      }
+    });
+  }
+
+  void _wtNext() {
+    if (_wtStep == null) return;
+    if (_wtStep! >= _wtStepCount - 1) {
+      _wtFinish();
+    } else {
+      _wtGoToStep(_wtStep! + 1);
+    }
+  }
+
+  void _wtBack() {
+    if (_wtStep == null || _wtStep == 0) return;
+    _wtGoToStep(_wtStep! - 1);
+  }
+
+  void _wtFinish() {
+    setState(() => _wtStep = null);
+    WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
+  }
+
+  // Mirrors add_property_screen.dart's _walkthroughHighlight — same glow
+  // treatment, applied to whichever real UI element each step points at.
+  Widget _wtHighlight({required int step, required GlobalKey key, required Widget child}) {
+    final active = _wtStep == step;
+    return AnimatedContainer(
+      key: key,
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: active ? context.palette.primary : Colors.transparent,
+          width: 2,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: context.palette.primary.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildWalkthroughPanel() {
+    final step = _wtStep!;
+    final (_, _, title, body) = _wtStepInfo(step);
+    final isLast = step == _wtStepCount - 1;
+    final palette = context.palette;
+    return GlassPanel(
+      radius: 20,
+      blurSigma: AppTheme.glassBlurSigmaHeavy,
+      tint: palette.glassTintStrong,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('🤖', style: GoogleFonts.inter(fontSize: 13)),
+              const SizedBox(width: 5),
+              Text(
+                '${step + 1} of $_wtStepCount',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                  color: palette.primary,
+                ),
+              ),
+              const Spacer(),
+              Tooltip(
+                message: 'Close walkthrough',
+                child: InkWell(
+                  onTap: _wtFinish,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.close_rounded, size: 16, color: palette.textMuted),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: palette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (step > 0)
+                TextButton(onPressed: _wtBack, child: const Text('Back')),
+              const Spacer(),
+              FilledButton(
+                onPressed: _wtNext,
+                child: Text(isLast ? 'Done' : 'Next'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -668,7 +875,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final screenW = MediaQuery.of(context).size.width;
     final drawerW = screenW < 600 ? screenW : 440.0;
 
-    return Material(
+    final drawer = Material(
       elevation: 0,
       color: context.palette.surface,
       child: DecoratedBox(
@@ -686,7 +893,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 controller: _tabController,
                 tabs: [
                   const Tab(text: 'Overview'),
-                  const Tab(text: 'Files'),
+                  if (widget.isDev) const Tab(text: 'Files'),
                   const Tab(text: 'Knowledge'),
                   if (hasConflict)
                     Tab(
@@ -707,7 +914,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   controller: _tabController,
                   children: [
                     _buildOverviewTab(),
-                    _buildFilesTab(),
+                    if (widget.isDev) _buildFilesTab(),
                     _buildKnowledgeTab(),
                     if (hasConflict) _buildResolveTab(),
                   ],
@@ -718,6 +925,23 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           ),
         ),
       ),
+    );
+
+    if (_wtStep == null) return drawer;
+    final highlightedDrawer = _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer);
+    // Desktop-only docking, matching Add Property's walkthrough panel gate —
+    // narrow viewports have no room for a panel beside the drawer.
+    if (screenW < 1000) return highlightedDrawer;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8, right: 20),
+          child: SizedBox(width: 300, child: _buildWalkthroughPanel()),
+        ),
+        highlightedDrawer,
+      ],
     );
   }
 
@@ -812,7 +1036,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 final refresh = widget.onRefresh;
                 nav.pop();
                 nav.push(MaterialPageRoute(
-                  builder: (_) => EditPropertyScreen(property: _property),
+                  builder: (_) => EditPropertyScreen(
+                    property: _property,
+                    isDev: widget.isDev,
+                  ),
                 )).then((_) => refresh());
               },
             ),
@@ -838,6 +1065,79 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _infoRow('Added', _formatDate(createdAt)),
           const SizedBox(height: 8),
           _buildWelcomeLanguageSetting(),
+          if (!widget.isDev) ...[
+            const SizedBox(height: 16),
+            _buildFilesSummaryCard(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // User-mode stand-in for the Files tab (Dev keeps that tab as-is). Files
+  // rarely change once a property is trained, so this stays a single summary
+  // row rather than the always-visible list Dev sees — "Manage" opens the
+  // same Edit Property screen the Files tab's own button already used.
+  Widget _buildFilesSummaryCard() {
+    final fingerprints =
+        _property['file_fingerprints'] as Map<String, dynamic>? ?? {};
+    final count = fingerprints.length;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.palette.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: context.palette.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.folder_outlined,
+                size: 17, color: context.palette.primary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              count == 0
+                  ? 'No files yet'
+                  : '$count ${count == 1 ? 'file' : 'files'} on record',
+              style: GoogleFonts.inter(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: context.palette.textPrimary,
+              ),
+            ),
+          ),
+          _wtHighlight(
+            step: 1,
+            key: _wtManageKey,
+            child: OutlinedButton(
+              onPressed: () {
+                final nav = Navigator.of(context);
+                final refresh = widget.onRefresh;
+                nav.pop();
+                nav.push(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(
+                    property: _property,
+                    isDev: widget.isDev,
+                  ),
+                )).then((_) => refresh());
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                foregroundColor: context.palette.primary,
+                side: BorderSide(color: context.palette.primaryContainer, width: 1.5),
+                textStyle: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              child: const Text('Manage'),
+            ),
+          ),
         ],
       ),
     );
@@ -999,43 +1299,49 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Master JSON viewer
-          Text('Master JSON',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          if (prettyJson != null)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 300),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
-                  borderRadius: BorderRadius.circular(8)),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  prettyJson,
-                  style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      height: 1.5,
-                      color: Color(0xFFD4D4D4)),
+          if (widget.isDev) ...[
+            // Master JSON viewer
+            Text('Master JSON',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            if (prettyJson != null)
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(8)),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    prettyJson,
+                    style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        height: 1.5,
+                        color: Color(0xFFD4D4D4)),
+                  ),
                 ),
-              ),
-            )
-          else
-            Text('No master JSON yet.',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              )
+            else
+              Text('No master JSON yet.',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
 
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 16),
-          Text('Add New Knowledge',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+          ],
+          _wtHighlight(
+            step: 2,
+            key: _wtAddKnowledgeKey,
+            child: Text('Add New Knowledge',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+          ),
           const SizedBox(height: 12),
 
           // Text input
@@ -1121,32 +1427,36 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.bolt_rounded, size: 15, color: context.palette.accent),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Automated Learning',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: _showKnowledgeVault,
-                      icon: const Icon(Icons.inventory_2_outlined, size: 15),
-                      label: Text(_vaultLearned.isEmpty
-                          ? 'Vault'
-                          : 'Vault (${_vaultLearned.length})'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: context.palette.textSecondary,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        textStyle: GoogleFonts.inter(
-                            fontSize: 12, fontWeight: FontWeight.w600),
+                _wtHighlight(
+                  step: 3,
+                  key: _wtLearningKey,
+                  child: Row(
+                    children: [
+                      Icon(Icons.bolt_rounded, size: 15, color: context.palette.accent),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Automated Learning',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
-                    ),
-                  ],
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _showKnowledgeVault,
+                        icon: const Icon(Icons.inventory_2_outlined, size: 15),
+                        label: Text(_vaultLearned.isEmpty
+                            ? 'Vault'
+                            : 'Vault (${_vaultLearned.length})'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: context.palette.textSecondary,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          textStyle: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1346,17 +1656,21 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           const SizedBox(height: 16),
 
           // Knowledge base chat
-          Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded,
-                  size: 15, color: context.palette.accent),
-              const SizedBox(width: 6),
-              Text('Ask the Knowledge Base',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-            ],
+          _wtHighlight(
+            step: 4,
+            key: _wtChatKey,
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded,
+                    size: 15, color: context.palette.accent),
+                const SizedBox(width: 6),
+                Text('Ask the Knowledge Base',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ],
+            ),
           ),
           const SizedBox(height: 4),
           Text(

@@ -19,7 +19,12 @@ import '../widgets/add_property_walkthrough_panel.dart';
 
 class AddPropertyScreen extends StatefulWidget {
   final bool showWalkthrough;
-  const AddPropertyScreen({super.key, this.showWalkthrough = false});
+  final bool isDev;
+  const AddPropertyScreen({
+    super.key,
+    this.showWalkthrough = false,
+    this.isDev = false,
+  });
 
   @override
   State<AddPropertyScreen> createState() => _AddPropertyScreenState();
@@ -236,7 +241,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         });
         if (isSuccess) {
           succeeded = true;
-          await _showIngestedDialog(name ?? _nicknameController.text.trim());
+          if (widget.isDev) {
+            await _showIngestedDialog(name ?? _nicknameController.text.trim());
+          } else {
+            // Train Now (User mode): no manual "run Merge next" step — chain
+            // straight into it, same eligibility the Dev-mode Merge button uses.
+            await _runMerge();
+          }
         }
       }
 
@@ -841,7 +852,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canIngest = _urlController.text.trim().isNotEmpty && !_isIngesting;
+    // !_isMerging guards Train Now's auto-chained merge (User mode) — without
+    // it the button re-enables the moment ingest finishes, while merge is
+    // still silently running in the background.
+    final canIngest =
+        _urlController.text.trim().isNotEmpty && !_isIngesting && !_isMerging;
+    final trainingInProgress = _isIngesting || (!widget.isDev && _isMerging);
     final effectiveId = _resolvedPropertyId ?? _propertyId;
     final conflictReport = _masterJson?['conflict_report'] as List<dynamic>?;
 
@@ -969,20 +985,20 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                           fontWeight: FontWeight.w500,
                           letterSpacing: 1.2),
                     ),
-                    child: _isIngesting
-                        ? const Row(
+                    child: trainingInProgress
+                        ? Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              SizedBox(
+                              const SizedBox(
                                   width: 18,
                                   height: 18,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2.5, color: Colors.white)),
-                              SizedBox(width: 12),
-                              Text('Ingesting...'),
+                              const SizedBox(width: 12),
+                              Text(_isIngesting ? 'Ingesting...' : 'Training...'),
                             ],
                           )
-                        : const Text('INGEST NOW'),
+                        : Text(widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'),
                   ),
                 ),
                 if (_fileStatuses.isNotEmpty) ...[
@@ -1021,33 +1037,38 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                             color: context.palette.textPrimary)),
                     const SizedBox(height: 4),
                   ],
-                  Text('Extracted Knowledge',
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: context.palette.textSecondary,
-                          fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: context.palette.surfaceAlt,
-                      border: Border.all(color: context.palette.border),
-                      borderRadius: BorderRadius.circular(8),
+                  if (widget.isDev) ...[
+                    Text('Extracted Knowledge',
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: context.palette.textSecondary,
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: context.palette.surfaceAlt,
+                        border: Border.all(color: context.palette.border),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: MarkdownBody(
+                        data: _ingestedMarkdown!,
+                        selectable: true,
+                        styleSheet: _markdownStyleSheet(context),
+                      ),
                     ),
-                    child: MarkdownBody(
-                      data: _ingestedMarkdown!,
-                      selectable: true,
-                      styleSheet: _markdownStyleSheet(context),
-                    ),
-                  ),
+                  ],
                 ],
                 if (_propertyStatus != null) ...[
                   const SizedBox(height: 40),
                   const Divider(),
                   const SizedBox(height: 20),
                   _buildStatusBadge(_propertyStatus!),
-                  // Only offer merge when files were actually ingested (not just scraped)
-                  if (_propertyStatus == 'Ingested' &&
+                  // Only offer merge when files were actually ingested (not just scraped).
+                  // User mode never reaches this state — Train Now already chained the
+                  // merge automatically — so this button is Dev-only.
+                  if (widget.isDev &&
+                      _propertyStatus == 'Ingested' &&
                       (_ingestedMarkdown?.isNotEmpty ?? false)) ...[
                     const SizedBox(height: 16),
                     FilledButton(
@@ -1100,8 +1121,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                     ),
                   ],
                   if (_postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    _buildMasterJsonViewer(),
+                    if (widget.isDev) ...[
+                      const SizedBox(height: 24),
+                      _buildMasterJsonViewer(),
+                    ],
                     const SizedBox(height: 24),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).pop(),
