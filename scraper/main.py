@@ -91,14 +91,17 @@ class ScrapeRequest(BaseModel):
     url: str
 
 
-def upsert_to_ingestor_supabase(
-    url: str,
-    structured_output: str,
-    curated_photos: list[dict] | None = None,
-    rejected_photos: list[dict] | None = None,
-):
-    """Write scraped_markdown (+ photo triage results, if any) to Ingestor
-    Supabase via UPSERT on airbnb_url. (REQ-27)"""
+def upsert_to_ingestor_supabase(url: str, structured_output: str):
+    """Write scraped_markdown to Ingestor Supabase via UPSERT on airbnb_url.
+    (REQ-27). Best-effort only — properties.airbnb_url has no unique
+    constraint, so this upsert 404s at the DB level (42P10) whenever a row
+    doesn't already exist for this exact URL; ingest.py's own property_id-keyed
+    write (save_scraped_markdown) is the actually-reliable path. Curated/
+    rejected photos are deliberately NOT written here for the same reason —
+    see ingest.py's save_photo_triage call, which uses property_id instead of
+    this URL-keyed upsert (2026-09-09: found via live E2E testing that this
+    call silently failed 100% of the time, so those columns were never
+    actually persisted through the real ingest flow)."""
     try:
         client = get_supabase_client()
         from datetime import datetime, timezone
@@ -108,10 +111,6 @@ def upsert_to_ingestor_supabase(
             "status": "Scraped",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if curated_photos is not None:
-            payload["curated_photos"] = curated_photos
-        if rejected_photos is not None:
-            payload["rejected_photos"] = rejected_photos
         client.table("properties").upsert(payload, on_conflict="airbnb_url").execute()
     except Exception as e:
         print(f"Ingestor Supabase upsert failed (non-critical): {e}")
@@ -492,8 +491,10 @@ async def scrape_airbnb(req: ScrapeRequest):
     # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
     curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
 
-    # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged
-    upsert_to_ingestor_supabase(url, structured_output, curated_photos, rejected_photos)
+    # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged.
+    # curated_photos/rejected_photos are NOT written here — see the function's
+    # own docstring; the backend persists those via property_id instead.
+    upsert_to_ingestor_supabase(url, structured_output)
 
     # 4. Return to caller
     return {

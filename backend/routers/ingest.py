@@ -139,7 +139,10 @@ async def ingest(req: IngestRequest, request: Request):
                             f"{scraper_url}/scrape", json={"url": airbnb_url}
                         )
                         resp.raise_for_status()
-                        scraped_markdown = resp.json().get("data", "")
+                        scrape_data = resp.json()
+                        scraped_markdown = scrape_data.get("data", "")
+                        curated_photos = scrape_data.get("curated_photos") or []
+                        rejected_photos = scrape_data.get("rejected_photos") or []
                 except Exception as exc:
                     yield _event("(scrape)", "error", f"Scraping failed: {exc}")
                     await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
@@ -154,6 +157,18 @@ async def ingest(req: IngestRequest, request: Request):
                         )
                     except Exception as exc:
                         print(f"save_scraped_markdown failed (non-fatal): {exc}")
+
+                # Persist photo-triage results, keyed by property_id (the
+                # scraper's own URL-keyed write for these two columns was
+                # removed 2026-09-09 — see upsert_to_ingestor_supabase).
+                if curated_photos or rejected_photos:
+                    try:
+                        await asyncio.to_thread(
+                            supabase_client.save_photo_triage,
+                            property_id, curated_photos, rejected_photos,
+                        )
+                    except Exception as exc:
+                        print(f"save_photo_triage failed (non-fatal): {exc}")
 
                 # Upload hero image (non-fatal on failure) (REQ-18)
                 thumbnail_url = _parse_thumbnail_url(scraped_markdown)
