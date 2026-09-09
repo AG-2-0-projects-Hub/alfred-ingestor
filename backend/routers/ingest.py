@@ -3,8 +3,13 @@ POST /api/ingest — triggers sequential file processing over SSE.
 
 REQ-19: idempotent via canonical property lookup on airbnb_url
 REQ-20: 409 lock when status == Ingesting
-REQ-21: atomic status — only sets Ingested when ALL files succeed
-REQ-22: file fingerprints stored in JSONB column
+REQ-21: status → Ingested once ANY content is usable (a scrape, or at least one
+         successful file); a run with nothing usable at all sets Ingest_Error.
+         Per-file failures within an otherwise-successful run don't block this —
+         they stay visible per-file and get retried on the next Train Now.
+REQ-22: file fingerprints stored in JSONB column, persisted after each file
+         succeeds (not batched to the end) so an interrupted run never loses
+         already-completed files' progress
 REQ-26: scraper called before any file processing
 REQ-28: scraper failure surfaces error and aborts
 
@@ -244,6 +249,15 @@ async def ingest(req: IngestRequest, request: Request):
                             supabase_client.append_ingested_markdown, property_id, markdown
                         )
                         fingerprints[name] = size  # record fingerprint only on success (REQ-22)
+                        # Persisted immediately, not batched to the end of the loop — a run
+                        # that gets cut off (deploy, an infra-level request timeout, a stalled
+                        # neighbor file) must not lose already-completed files' progress too.
+                        # Confirmed live 2026-09-09: a run killed mid-loop left file_fingerprints
+                        # empty even though most files had already succeeded, so every retry
+                        # reprocessed everything from scratch instead of just what was missing.
+                        await asyncio.to_thread(
+                            supabase_client.update_file_fingerprints, property_id, fingerprints
+                        )
                         yield _event(name, "file_updated" if is_update else "done")
 
                     except Exception as exc:
@@ -251,13 +265,17 @@ async def ingest(req: IngestRequest, request: Request):
                         error_count += 1
                         current_task = None
 
-                # Persist all fingerprint updates (REQ-22)
-                await asyncio.to_thread(
-                    supabase_client.update_file_fingerprints, property_id, fingerprints
-                )
-
-                # Atomic status transition — Ingested only if zero errors (REQ-21)
-                final_status = "Ingested" if error_count == 0 else "Ingest_Error"
+                # Per-file failures no longer block training: a property with any
+                # usable content (a successful file, or scraped listing data) can
+                # move on to merge — the failed file(s) stay visible via their
+                # "error" events above and simply get picked up next time Train
+                # Now runs, since the fingerprint-skip logic above only reprocesses
+                # what's still missing. Only a run with literally nothing usable
+                # (every file failed and there's no scrape data) still blocks as
+                # Ingest_Error, since /merge has nothing to work with either way.
+                any_file_succeeded = error_count < len(files)
+                has_usable_content = bool(scraped_markdown) or any_file_succeeded
+                final_status = "Ingested" if has_usable_content else "Ingest_Error"
                 await asyncio.to_thread(supabase_client.update_status, property_id, final_status)
 
             except Exception as fatal:

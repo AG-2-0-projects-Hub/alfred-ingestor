@@ -72,6 +72,8 @@ class AddPropertyWalkthroughPanel extends StatelessWidget {
         children: [
           Row(
             children: [
+              Text('🤖', style: GoogleFonts.inter(fontSize: 13)),
+              const SizedBox(width: 5),
               Text(
                 '${index + 1} of ${_order.length}',
                 style: GoogleFonts.inter(

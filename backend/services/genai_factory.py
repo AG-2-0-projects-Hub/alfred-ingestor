@@ -39,13 +39,24 @@ def is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
-async def generate_with_retry(client: genai.Client, *, label: str = "gemini", **kwargs):
-    """`client.aio.models.generate_content(**kwargs)`, retrying only on 429.
+async def generate_with_retry(
+    client: genai.Client, *, label: str = "gemini", call_timeout: float | None = None, **kwargs
+):
+    """`client.aio.models.generate_content(**kwargs)`, retrying on 429 and,
+    when `call_timeout` is given, on a stalled call too.
 
-    Anything that is not a rate limit propagates immediately — we never want to
-    paper over a real error by retrying it.
+    Anything that is not a rate limit or a `call_timeout` stall propagates
+    immediately — we never want to paper over a real error by retrying it.
 
-    Emits one WARNING per rate-limited attempt (naming the caller via `label` and
+    `call_timeout` defaults to None (no per-call ceiling — unchanged legacy
+    behavior) so existing callers (chat, merge, knowledge query) are unaffected.
+    It exists because a single Gemini call has no timeout of its own: a plain
+    stall (no exception, no 429, just no response) used to hang until whatever
+    *outer* caller's own watchdog gave up, with zero retry ever attempted —
+    confirmed live 2026-09-09 on two host-uploaded photos. Pass it from a
+    caller that has its own outer deadline to retry into, not just wait it out.
+
+    Emits one WARNING per retried attempt (naming the caller via `label` and
     the back-off it is about to wait) plus an INFO whenever a call only lands
     after retrying. Without this the retry loop was silent, so a request that
     trips the 45s chat ceiling gave no way to tell genuine grounded-search
@@ -59,30 +70,40 @@ async def generate_with_retry(client: genai.Client, *, label: str = "gemini", **
     """
     started = time.monotonic()
     for attempt in range(_RETRY_ATTEMPTS):
+        call = client.aio.models.generate_content(**kwargs)
+        stalled = False
         try:
-            response = await client.aio.models.generate_content(**kwargs)
+            response = await (asyncio.wait_for(call, timeout=call_timeout) if call_timeout else call)
             if attempt:
                 log.info(
                     "%s: succeeded on attempt %d/%d after %.1fs total",
                     label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started,
                 )
             return response
+        except asyncio.TimeoutError as exc:
+            stalled = True
+            reason = f"no response within {call_timeout:.0f}s"
+            last_exc = exc
         except Exception as exc:
             if not is_rate_limited(exc):
                 raise
-            if attempt == _RETRY_ATTEMPTS - 1:
-                log.warning(
-                    "%s: rate-limited on final attempt %d/%d, giving up after %.1fs: %s",
-                    label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started,
-                    str(exc)[:200],
-                )
-                raise
-            backoff = 0.5 * (2 ** attempt) * random.uniform(0.85, 1.15)  # ~0.5s, 1s, 2s
+            reason = f"rate-limited (429): {str(exc)[:200]}"
+            last_exc = exc
+
+        if attempt == _RETRY_ATTEMPTS - 1:
             log.warning(
-                "%s: rate-limited (429) on attempt %d/%d after %.1fs; backing off %.1fs",
-                label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, backoff,
+                "%s: giving up on final attempt %d/%d after %.1fs — %s",
+                label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, reason,
             )
-            await asyncio.sleep(backoff)
+            if stalled:
+                raise TimeoutError(f"No response after {_RETRY_ATTEMPTS} attempts — try again")
+            raise last_exc
+        backoff = 0.5 * (2 ** attempt) * random.uniform(0.85, 1.15)  # ~0.5s, 1s, 2s
+        log.warning(
+            "%s: retrying (attempt %d/%d) after %.1fs — %s; backing off %.1fs",
+            label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, reason, backoff,
+        )
+        await asyncio.sleep(backoff)
 
 
 def make_client() -> genai.Client:

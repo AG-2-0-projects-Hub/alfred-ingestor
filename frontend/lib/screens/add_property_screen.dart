@@ -16,6 +16,7 @@ import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
 import '../widgets/add_property_walkthrough_panel.dart';
+import '../widgets/training_wait_dialog.dart';
 
 class AddPropertyScreen extends StatefulWidget {
   final bool showWalkthrough;
@@ -42,8 +43,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   String? _resolvedPropertyId;
   bool _isIngesting = false;
   bool _isMerging = false;
+  // Single list, tracked from upload through ingestion completion — status
+  // updates in place (queued → processing → done/error) rather than a second
+  // "Files Ingested" list appearing below a frozen first one.
   final List<Map<String, String>> _filesToIngest = [];
-  final List<Map<String, String>> _fileStatuses = [];
   String? _ingestedMarkdown;
   String? _officialPropertyName;
   String? _heroImageUrl;
@@ -164,7 +167,6 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     setState(() {
       _isIngesting = true;
       _resolvedPropertyId = null;
-      _fileStatuses.clear();
       _ingestedMarkdown = null;
       _officialPropertyName = null;
       _heroImageUrl = null;
@@ -172,11 +174,28 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _masterJson = null;
     });
 
+    // Train Now (User mode) can take a couple of minutes across scrape +
+    // ingest + merge — show the wait dialog for that whole span so it doesn't
+    // read as a frozen screen. Dev mode keeps its existing separate
+    // Ingest/Merge buttons and completion dialog instead.
+    final showWaitDialog = !widget.isDev;
+    if (showWaitDialog && mounted) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black.withValues(alpha: 0.65),
+        builder: (_) => const TrainingWaitDialog(),
+      );
+    }
+
     final String backendUrl;
     try {
       backendUrl = ApiClient.backendUrl;
     } on ConfigurationException catch (e) {
       _showError(e.userMessage);
+      if (showWaitDialog && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       setState(() => _isIngesting = false);
       return;
     }
@@ -257,7 +276,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // generic message if the stream closed without emitting any error.
       if (!succeeded) {
         final errorEvents =
-            _fileStatuses.where((s) => s['status'] == 'error').toList();
+            _filesToIngest.where((s) => s['status'] == 'error').toList();
         if (errorEvents.isNotEmpty) {
           final last = errorEvents.last;
           final where = last['file'] ?? '';
@@ -283,6 +302,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         _showError('Ingest failed: $e');
       }
     } finally {
+      if (showWaitDialog && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       setState(() => _isIngesting = false);
     }
   }
@@ -300,22 +322,22 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     }
 
     setState(() {
-      final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
+      final idx = _filesToIngest.indexWhere((s) => s['file'] == file);
       if (idx >= 0) {
-        _fileStatuses[idx] = {'file': file, 'status': status, 'message': message};
+        _filesToIngest[idx] = {'file': file, 'status': status, 'message': message};
       } else {
-        _fileStatuses.add({'file': file, 'status': status, 'message': message});
+        _filesToIngest.add({'file': file, 'status': status, 'message': message});
       }
     });
   }
 
   void _markPendingFilesAsTimeout() {
     setState(() {
-      for (var i = 0; i < _fileStatuses.length; i++) {
-        final s = _fileStatuses[i]['status'];
+      for (var i = 0; i < _filesToIngest.length; i++) {
+        final s = _filesToIngest[i]['status'];
         if (s == 'queued' || s == 'processing') {
-          _fileStatuses[i] = {
-            'file': _fileStatuses[i]['file']!,
+          _filesToIngest[i] = {
+            'file': _filesToIngest[i]['file']!,
             'status': 'timeout',
             'message': 'No response — try again',
           };
@@ -680,9 +702,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: context.palette.primaryContainer,
+        color: context.palette.successContainer,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.palette.primary.withValues(alpha: 0.2), width: 1),
+        border: Border.all(color: context.palette.success.withValues(alpha: 0.4), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -690,13 +712,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           Row(
             children: [
               Icon(Icons.lightbulb_outline_rounded,
-                  size: 16, color: context.palette.primary),
+                  size: 16, color: context.palette.success),
               const SizedBox(width: 8),
               Text('What trains Alfred best',
                   style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: context.palette.textPrimary)),
+                      color: context.palette.success)),
             ],
           ),
           const SizedBox(height: 8),
@@ -965,7 +987,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 if (_filesToIngest.isNotEmpty) ...[
                   const SizedBox(height: 20),
-                  Text('Files to Ingest',
+                  Text('Files',
                       style: Theme.of(context)
                           .textTheme
                           .titleSmall
@@ -1001,16 +1023,6 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                         : Text(widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'),
                   ),
                 ),
-                if (_fileStatuses.isNotEmpty) ...[
-                  const SizedBox(height: 28),
-                  Text('Files Ingested',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  FileStatusList(statuses: _fileStatuses),
-                ],
                 if (_ingestedMarkdown != null &&
                     _ingestedMarkdown!.isNotEmpty) ...[
                   const SizedBox(height: 40),

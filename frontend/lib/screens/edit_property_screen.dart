@@ -16,6 +16,7 @@ import '../widgets/setup_status_banner.dart';
 import '../widgets/voice_recorder.dart';
 import '../widgets/file_status_list.dart';
 import '../widgets/conflict_questionnaire.dart';
+import '../widgets/training_wait_dialog.dart';
 
 class EditPropertyScreen extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -39,8 +40,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   bool _isIngesting = false;
   bool _isMerging = false;
   bool _isDeletingFile = false;
+  // Single list, tracked from upload through ingestion completion — status
+  // updates in place (queued → processing → done/error) rather than a second
+  // "Files Ingested" list appearing below a frozen first one.
   final List<Map<String, String>> _filesToIngest = [];
-  final List<Map<String, String>> _fileStatuses = [];
   String? _ingestedMarkdown;
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
@@ -119,8 +122,18 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   }
 
   void _onFileAdded(String filename) {
-    setState(() => _filesToIngest
-        .add({'file': filename, 'status': 'processing', 'message': ''}));
+    setState(() {
+      final idx = _filesToIngest.indexWhere((e) => e['file'] == filename);
+      final entry = {'file': filename, 'status': 'processing', 'message': ''};
+      // Update in place if this filename is already in the list (e.g. from a
+      // completed previous batch, now no longer cleared away) rather than
+      // adding a second row for the same file.
+      if (idx >= 0) {
+        _filesToIngest[idx] = entry;
+      } else {
+        _filesToIngest.add(entry);
+      }
+    });
   }
 
   void _onFileResult(String filename, bool success) {
@@ -136,16 +149,35 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     });
   }
 
+  // Shown for the duration of a User-mode Retry (ingest) or Merge run — each
+  // is its own guided-banner click/wait here (unlike Add Property's single
+  // continuous Train Now), so each gets its own popup around its own span.
+  // Dev mode keeps its plain button spinner, no popup.
+  void _showTrainingWaitDialog() {
+    if (widget.isDev || !mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (_) => const TrainingWaitDialog(),
+    );
+  }
+
+  void _hideTrainingWaitDialog() {
+    if (widget.isDev || !mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+  }
+
   Future<void> _startIngest() async {
     if (_isIngesting) return;
 
     setState(() {
       _isIngesting = true;
-      _fileStatuses.clear();
       _ingestedMarkdown = null;
       _propertyStatus = null;
       _masterJson = null;
     });
+    _showTrainingWaitDialog();
 
     final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
@@ -195,13 +227,18 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
             _propertyStatus = result['status'] as String?;
             _masterJson = result['master_json'] as Map<String, dynamic>?;
             _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
-            _filesToIngest.clear();
+            // _filesToIngest is intentionally left as-is here (not cleared) —
+            // its entries now show each file's final done/error/timeout status
+            // from this run, which the host needs to see, especially on a
+            // partial failure. _existingFiles above remains the authoritative
+            // "what's actually stored" list regardless.
           });
         }
       }
     } catch (e) {
       _showError('Ingest failed: $e');
     } finally {
+      _hideTrainingWaitDialog();
       if (mounted) setState(() => _isIngesting = false);
     }
   }
@@ -213,23 +250,23 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     if (status == 'heartbeat' || status == 'stream_closed') return;
     if (file == '(system)') return;
     setState(() {
-      final idx = _fileStatuses.indexWhere((s) => s['file'] == file);
+      final idx = _filesToIngest.indexWhere((s) => s['file'] == file);
       final entry = {'file': file, 'status': status, 'message': message};
       if (idx >= 0) {
-        _fileStatuses[idx] = entry;
+        _filesToIngest[idx] = entry;
       } else {
-        _fileStatuses.add(entry);
+        _filesToIngest.add(entry);
       }
     });
   }
 
   void _markPendingFilesAsTimeout() {
     setState(() {
-      for (var i = 0; i < _fileStatuses.length; i++) {
-        final s = _fileStatuses[i]['status'];
+      for (var i = 0; i < _filesToIngest.length; i++) {
+        final s = _filesToIngest[i]['status'];
         if (s == 'queued' || s == 'processing') {
-          _fileStatuses[i] = {
-            'file': _fileStatuses[i]['file']!,
+          _filesToIngest[i] = {
+            'file': _filesToIngest[i]['file']!,
             'status': 'timeout',
             'message': 'No response — try again',
           };
@@ -240,6 +277,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
 
   Future<void> _runMerge() async {
     setState(() => _isMerging = true);
+    _showTrainingWaitDialog();
     try {
       final data = await ApiClient.postJson(
         '/api/merge/$_propertyId',
@@ -257,6 +295,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     } catch (e) {
       _showError('Merge failed: $e');
     } finally {
+      _hideTrainingWaitDialog();
       if (mounted) setState(() => _isMerging = false);
     }
   }
@@ -584,17 +623,6 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                   ),
                 ],
 
-                // Post-ingest results
-                if (_fileStatuses.isNotEmpty) ...[
-                  const SizedBox(height: 28),
-                  Text('Files Ingested',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  FileStatusList(statuses: _fileStatuses),
-                ],
                 if (widget.isDev &&
                     _ingestedMarkdown != null &&
                     _ingestedMarkdown!.isNotEmpty) ...[

@@ -238,6 +238,15 @@ def _inline_part(data: bytes, mime_type: str) -> types.Part:
     return types.Part.from_bytes(data=data, mime_type=mime_type)
 
 
+# Per-attempt ceiling for ingest-side calls only (document/image/audio/sheet
+# extraction) — these have an outer 90s-per-file watchdog in ingest.py to
+# retry into, unlike chat/merge/knowledge-query, which stay on the legacy
+# no-timeout behavior (call_timeout=None) so this doesn't change their
+# latency profile. 4 attempts x 20s + backoff (~3.5s) ≈ 83.5s, fits under
+# that outer 90s ceiling with margin.
+_INGEST_CALL_TIMEOUT_S = 20
+
+
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
     response = await genai_factory.generate_with_retry(
@@ -247,6 +256,7 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
+        call_timeout=_INGEST_CALL_TIMEOUT_S,
     )
     return response.text
 

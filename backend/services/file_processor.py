@@ -12,9 +12,18 @@ File type → processing path:
 
 import io
 from docx import Document
+from PIL import Image
 import pandas as pd
 
 from services import gemini_client
+
+# Full phone-camera resolution (often 3000-4000px+ on the long edge) adds real
+# inline-payload size and Gemini processing latency with no analysis benefit
+# past this — this is what was stalling specific host-uploaded photos past the
+# per-file timeout (confirmed live 2026-09-09: two PNGs, no exception, no
+# response). Mirrors the same fix already applied to scraper-side photos.
+_MAX_IMAGE_DIMENSION = 1600
+_JPEG_QUALITY = 85
 
 # MIME type map for Gemini File API uploads
 _MIME_MAP = {
@@ -74,8 +83,33 @@ async def _process_document(filename: str, data: bytes, ext: str) -> str:
     return await gemini_client.process_with_prompt_a(data, mime)
 
 
+def _downscale_image(data: bytes, mime_type: str) -> tuple[bytes, str]:
+    """Resize oversized images before sending to Gemini. Fails soft: any decode
+    error (including formats Pillow can't open, e.g. HEIC without a plugin)
+    returns the original bytes/mime unchanged rather than blocking ingestion."""
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if max(img.size) <= _MAX_IMAGE_DIMENSION:
+            return data, mime_type
+        if img.mode in ("RGBA", "LA", "P"):
+            rgba = img.convert("RGBA")
+            flattened = Image.new("RGB", img.size, (255, 255, 255))
+            flattened.paste(rgba, mask=rgba.split()[-1])
+            img = flattened
+        else:
+            img = img.convert("RGB")
+        img.thumbnail((_MAX_IMAGE_DIMENSION, _MAX_IMAGE_DIMENSION), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=_JPEG_QUALITY)
+        return out.getvalue(), "image/jpeg"
+    except Exception:
+        return data, mime_type
+
+
 async def _process_image(filename: str, data: bytes, ext: str) -> str:
     mime = _MIME_MAP.get(ext, "image/jpeg")
+    data, mime = _downscale_image(data, mime)
     return await gemini_client.process_with_prompt_b(data, mime)
 
 
