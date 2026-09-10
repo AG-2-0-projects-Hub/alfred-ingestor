@@ -13,7 +13,7 @@ from google.genai import types
 
 from services import genai_factory
 
-MODEL = "gemini-2.5-pro"
+MODEL = "gemini-3.8-flash"
 
 # ─── Prompt A — PDF / DOCX (verbatim from blueprint Route 0) ─────────────────
 SYSTEM_INSTRUCTION_A = "You are a Data Extractor. Your job is to read documents and extract key facts for a rental property."

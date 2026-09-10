@@ -4,7 +4,7 @@ from google.genai import types
 
 from services import genai_factory
 
-MODEL = "gemini-2.5-pro"
+MODEL = "gemini-3.8-flash"
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 # Verbatim from "Supabase Alfred Airbnb - E - The Bot.blueprint.json"
@@ -594,7 +594,7 @@ async def first_pass(
     media: list[tuple[bytes, str]] | None = None,
 ) -> dict:
     """`media` = optional list of (raw_bytes, mime_type) the guest sent (image or
-    audio). Gemini 2.5 Pro is natively multimodal, so the bytes are attached as
+    audio). Gemini is natively multimodal, so the bytes are attached as
     extra parts and the model analyzes them alongside the (synthesized) text
     prompt. The same anti-hallucination + escalation rules apply to whatever the
     media shows."""
@@ -679,7 +679,7 @@ def _sanitize_second_pass(text: str) -> str:
 
 # ─── Summarizer (knowledge base curator) ──────────────────────────────────────
 # Verbatim from "Supabase Alfred Airbnb - E - The Bot.blueprint.json" curator prompt.
-SUMMARIZER_MODEL = "gemini-2.5-flash"
+SUMMARIZER_MODEL = "gemini-3.8-flash"
 
 SUMMARIZER_PROMPT = """\
 You are a knowledge base curator for a vacation rental AI assistant. Your task is to extract structured learning data from escalated guest-host conversations that will help the AI answer similar questions in the future.
@@ -742,7 +742,7 @@ __TRANSCRIPT__
 
 
 async def summarize_escalation(messages: list[dict]) -> dict:
-    """Call Gemini 2.5 Flash to produce a structured Q&A summary of an escalated
+    """Call Gemini to produce a structured Q&A summary of an escalated
     conversation thread. Returns {problem_summary, solution_summary, category, language}."""
     if not messages:
         return {

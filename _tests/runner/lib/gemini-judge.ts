@@ -10,7 +10,7 @@ export type Verdict = {
 };
 
 // Sends a screenshot + expected description to Gemini and returns PASS/FAIL.
-// Uses gemini-2.5-flash for speed and cost; upgrade to pro if accuracy drops.
+// Uses gemini-3.8-flash for speed and cost; upgrade tier if accuracy drops.
 export async function judgeScreenshot(
   screenshotPng: Buffer,
   expectedDescription: string,
@@ -32,7 +32,7 @@ export async function judgeScreenshot(
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.8-flash',
         contents: [
           {
             role: 'user',
