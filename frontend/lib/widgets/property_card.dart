@@ -217,6 +217,8 @@ class _PropertyCardState extends State<_PropertyCard> {
           child: CompositedTransformFollower(
             link: _step0Link,
             showWhenUnlinked: false,
+            targetAnchor: Alignment.bottomLeft,
+            followerAnchor: Alignment.topLeft,
             offset: const Offset(0, 12),
             child: const _Step0Tip(),
           ),
