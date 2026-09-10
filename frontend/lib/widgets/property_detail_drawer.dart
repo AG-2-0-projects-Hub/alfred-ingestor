@@ -196,6 +196,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
   }
 
+  // Manual replay trigger for the Overview tab's "Show walkthrough again"
+  // switch. Its displayed value is _wtStep != null, so finishing/closing the
+  // walkthrough (which already nulls _wtStep via _wtFinish) flips it off on
+  // its own — no separate reset bookkeeping needed.
+  Future<void> _toggleReplayWalkthrough(bool value) async {
+    if (!value) {
+      _wtFinish();
+      return;
+    }
+    await WalkthroughPrefs.resetPostTrainingWalkthrough(_property['id'] as String);
+    if (!mounted) return;
+    _wtGoToStep(0);
+  }
+
   // Mirrors add_property_screen.dart's _walkthroughHighlight — same glow
   // treatment, applied to whichever real UI element each step points at.
   Widget _wtHighlight({required int step, required GlobalKey key, required Widget child}) {
@@ -1065,6 +1079,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _infoRow('Added', _formatDate(createdAt)),
           const SizedBox(height: 8),
           _buildWelcomeLanguageSetting(),
+          if (!widget.isDev && _wtReadyStatuses.contains(status))
+            _buildReplayWalkthroughSetting(),
           if (!widget.isDev) ...[
             const SizedBox(height: 16),
             _buildFilesSummaryCard(),
@@ -1184,6 +1200,44 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   activeThumbColor: palette.primary,
                   onChanged: _toggleWelcomeAlsoEnglish,
                 ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplayWalkthroughSetting() {
+    final palette = context.palette;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Tooltip(
+              message: 'Replays the setup tips shown right after this '
+                  "property finished training.",
+              waitDuration: const Duration(milliseconds: 300),
+              child: Text(
+                '+ Show walkthrough again',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: palette.textPrimary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(
+            value: _wtStep != null,
+            activeThumbColor: palette.primary,
+            onChanged: _toggleReplayWalkthrough,
+          ),
         ],
       ),
     );

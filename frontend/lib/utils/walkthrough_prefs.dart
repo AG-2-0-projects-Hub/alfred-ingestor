@@ -43,4 +43,16 @@ class WalkthroughPrefs {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_guestLinkKey, true);
   }
+
+  /// Clears every "seen" flag (A/B for this property, plus the global C
+  /// flag) so the whole walkthrough replays from Step 0 next time it's
+  /// triggered. The guest-link flag is intentionally global, not per
+  /// property — replaying it here means it can also reappear for other
+  /// properties' guest-link dialogs, which is an acceptable side effect for
+  /// a one-off manual "show me the walkthrough again" action.
+  static Future<void> resetPostTrainingWalkthrough(String propertyId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_postTrainingPrefix$propertyId');
+    await prefs.remove(_guestLinkKey);
+  }
 }
