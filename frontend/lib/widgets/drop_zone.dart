@@ -18,7 +18,7 @@ class DropZoneWidget extends StatefulWidget {
   final String propertyId;
 
   /// Called immediately when a supported file is selected (before upload completes).
-  /// Used by IngestScreen to add the file to the "Files to Ingest" list (REQ-13, REQ-15).
+  /// Used by the parent screen (Add/Edit Property) to add the file to the unified file list.
   final void Function(String filename) onFileAdded;
 
   /// Called after the upload attempt completes with success/failure.
@@ -71,7 +71,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
       return;
     }
 
-    widget.onFileAdded(safeFilename); // notify IngestScreen immediately (REQ-15)
+    widget.onFileAdded(safeFilename); // notify the parent screen immediately
 
     try {
       final mime = lookupMimeType(safeFilename) ?? 'application/octet-stream';

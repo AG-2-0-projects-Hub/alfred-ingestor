@@ -34,10 +34,11 @@ import services.gemini_client as gemini_client
 
 router = APIRouter()
 
-# A single file's Gemini call has no timeout of its own (genai_factory only
-# retries on 429) — without a ceiling here, one stalled file blocks the whole
-# sequential loop indefinitely, and the request can outlive the client's own
-# stream-read timeout with the row parked at "Ingesting" forever.
+# Per-file Gemini calls already retry a stall (genai_factory's call_timeout,
+# ~83.5s worst case across 4 attempts) — this outer ceiling is the backstop in
+# case that inner retry loop itself takes longer than expected, so one file
+# can never block the whole sequential loop indefinitely and outlive the
+# client's own stream-read timeout with the row parked at "Ingesting" forever.
 _PER_FILE_TIMEOUT_S = 90
 
 

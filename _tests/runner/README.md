@@ -41,5 +41,5 @@ Required env vars live in `../fixtures/.env.test` (gitignored). Copy from `.env.
 ## Known limits
 
 - Layer 2 selector strategy assumes Flutter web HTML renderer; if CanvasKit is used, scenarios that interact with form fields will need vision-driven clicking (Gemini returns coords, Playwright clicks pixels)
-- Warmup waits up to 90s per service for Render free-tier cold start
+- Warmup wait was originally sized for Render free-tier cold start; services now run on Cloud Run (`min-instances=1` on prod, `min=0` on staging), so a staging cold start is Cloud Run's own (much shorter) container-start latency, not Render's
 - Reports are HTML in `../reports/` — gitignored, local only

@@ -61,7 +61,7 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
     final filename = _sanitizeFilename(
         'voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a');
 
-    // Notify IngestScreen immediately so the file appears in "Files to Ingest" (REQ-13)
+    // Notify the parent screen immediately so the file appears in the unified file list
     widget.onFileAdded(filename);
 
     setState(() => _isUploading = true);

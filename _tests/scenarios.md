@@ -245,13 +245,13 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **status:** skipped
 - **layer4_needed:** Same calibration as B6 — fix `DASHBOARD.addPropertyY` in playwright-helpers.ts and re-run.
 
-### B8. Voice note appears in "Files to Ingest" immediately
+### B8. Voice note appears in the file list immediately
 - **id:** ingest-voice-01
-- **touches:** `frontend/lib/widgets/voice_recorder.dart`, `frontend/lib/screens/ingest_screen.dart`
+- **touches:** `frontend/lib/widgets/voice_recorder.dart`, `frontend/lib/screens/add_property_screen.dart`
 - **layer:** 2
 - **setup:** logged-in host on add-property screen
 - **action:** record a 5-second voice note, stop recording
-- **host_expected:** voice note appears in the "Files to Ingest" list before "Ingest Now" is clicked
+- **host_expected:** voice note appears in the unified file list, status updating in place, before "Train Now"/"Ingest Now" is clicked
 - **status:** pending
 
 ### B0. Scraper /scrape returns 200 + structured markdown for known URL
@@ -1209,6 +1209,7 @@ sections above, then delete the row.
 | 2026-09-09 | staging (this session, not yet pushed) | Post-training walkthrough — Part B (drawer panel) | First drawer-open for a trained User-mode property docks a 5-step panel (whole-drawer → Manage files → Add New Knowledge → Automated Learning → Ask the Knowledge Base), auto-switching tabs and scrolling to each anchor; closing or finishing it marks the per-property flag so it doesn't re-fire; never shows for Dev | Group with Dev/User split row above |
 | 2026-09-09 | staging (this session, not yet pushed) | Post-training walkthrough — Part C (guest link + host chat) | First-ever "Generate Link" (any property) pre-fills "Test walkthrough" and forces Open Host Chat (Done hidden, backdrop-dismiss still works); the docked Host Chat panel walks through links/mode/pill, a scripted escalation appears (never written to the real conversation) and flips real mode to Intervene; real Send is required before Mark Issue as Resolved unlocks; reaching the live chat window at all marks the global flag seen | Group with Dev/User split row above |
 | 2026-09-09 | staging (this session, not yet pushed) | Photo-triage persistence bug (found + fixed via live E2E testing) | `curated_photos`/`rejected_photos` never actually reached the DB through the real `/api/ingest` flow — the scraper's own write used `upsert(on_conflict="airbnb_url")` against a column with no unique constraint (silent `42P10` on every call, confirmed in live Cloud Run logs), and the backend's existing `save_photo_triage()` was never called. Fix: scraper stops attempting that write for these two columns; `ingest.py` now reads them off the scrape response and calls `save_photo_triage(property_id, ...)`. Assert: ingesting a real Airbnb URL with photos produces a non-empty `curated_photos` on the property row (not just in the scrape response) | New — this bug predates this session, from the 2026-09-08 photo-triage feature |
+| 2026-09-10 | staging @ 44cbfc1, rev alfred-backend-staging-00010 | Ingest/chat — deprecated Gemini model (100% ingest failure, root cause) | `gemini_client.py` (every per-file ingest Vision/PDF/audio call) was left on deprecated `gemini-2.5-pro` when the 2026-09-08 migration moved everything else to `gemini-3.8-flash` — confirmed via Cloud Run logs that every ingest call since 2026-09-09 stalled through all 4 retries with zero successes (this is what was actually blocking the founder from training any property, not a gap in the prior session's resilience fixes). Same deprecated-model gap also found and fixed in `gemini_messenger.py` (guest chat `MODEL` + escalation `SUMMARIZER_MODEL`). Assert: uploading a normal image/PDF/audio file to a property completes ingest (fingerprint persisted, no `Ingest_Error`) on the first real attempt, not just after retries — and a guest chat message still gets a normal reply | New — root cause was missed in the 2026-09-08 migration, only surfaced live 2026-09-10 |
 
 > **PROMOTED 2026-08-27 — the 10 `wa-channel` rows were grouped and promoted.** Link/welcome → **O1**; unlinked-fallback + unknown-code + burst-vs-"check-out" regex → **O2** (combined, same flow); photos + voice + declined media → **O3**; escalation + host-reply routing → **O4**; 24h service window → **O5**; deleted listing → **C9** (extended with a WhatsApp leg); webhook security + staging infra → **N4** (new, combined — both are infra-state assertions); Meta redelivery idempotency → **O6**. New section **O. WhatsApp guest channel** added (6 scenarios, layer 4 — mirrors J's Telegram structure). All new rows are `status: pending`: the 49 offline tests in `_tests/whatsapp_channel.py` cover the logic, and a general e2e round trip was founder-confirmed working in a prior session, but no row had an individual live-test result recorded, so none were marked `passing` on that basis alone.
 
