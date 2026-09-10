@@ -14,7 +14,11 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
-- [ ] 🔴 TOP PRIORITY — founder still can't get a single property fully trained on staging as of 2026-09-10 session end, despite that session's own fixes (ingest resilience, universal fields) all individually verified live. Contradicts the session's own tests — next session must get concrete specifics (which property, what's on screen, when) and investigate live, not assume the prior fixes cover it.
+- [ ] 🔴 TOP PRIORITY — founder needs to actually retry training (Santa Prisca, Dos Rios, a fresh Bungalow) to confirm the real fix (deprecated `gemini_client.py` model, fixed 2026-09-10, `staging` @ `44cbfc1`) works end-to-end — the fix is deployed and individually verified, but not yet confirmed by a real founder retry
+- [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file (not just prefixed vars in `.env.test`) and a Vertex-AI-transport variant of the 4 Gemini smoke checks (prod uses ADC, not an API key)
+- [ ] Schedule the doc-staleness sweep (`HEALTH_CHECK_PROTOCOL.md` row 17) as a periodic agent pass — no mechanism exists yet, currently manual-only
+- [ ] Rotate the Firecrawl API key that got displayed in a session transcript 2026-09-10 (founder-flagged)
+- [ ] Investigate the parallel-session files found 2026-09-10 (`backend/services/welcome.py`, `frontend/lib/widgets/property_card.dart`) — confirm whose work it is and whether it's ready to commit
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)
 - [ ] Host-recorded property walkthrough video
