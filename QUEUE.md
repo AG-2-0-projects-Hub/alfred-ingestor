@@ -14,6 +14,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] 🔴 TOP PRIORITY — founder still can't get a single property fully trained on staging as of 2026-09-10 session end, despite that session's own fixes (ingest resilience, universal fields) all individually verified live. Contradicts the session's own tests — next session must get concrete specifics (which property, what's on screen, when) and investigate live, not assume the prior fixes cover it.
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)
 - [ ] Host-recorded property walkthrough video
