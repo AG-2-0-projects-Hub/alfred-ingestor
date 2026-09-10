@@ -15,7 +15,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 ## Open
 
 - [ ] 🔴 TOP PRIORITY — founder needs to actually retry training (Santa Prisca, Dos Rios, a fresh Bungalow) to confirm the real fix (deprecated `gemini_client.py` model, fixed 2026-09-10, `staging` @ `44cbfc1`) works end-to-end — the fix is deployed and individually verified, but not yet confirmed by a real founder retry
-- [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file (not just prefixed vars in `.env.test`) and a Vertex-AI-transport variant of the 4 Gemini smoke checks (prod uses ADC, not an API key)
+- [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file for `PROD_BACKEND_URL`/`PROD_SCRAPER_URL` etc. (not just prefixed vars in `.env.test`); the 4 Gemini smoke checks no longer need a separate prod variant — they moved to Vertex/ADC on 2026-09-10 and that transport is already shared by staging + prod
 - [ ] Schedule the doc-staleness sweep (`HEALTH_CHECK_PROTOCOL.md` row 17) as a periodic agent pass — no mechanism exists yet, currently manual-only
 - [ ] Rotate the Firecrawl API key that got displayed in a session transcript 2026-09-10 (founder-flagged)
 - [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property)

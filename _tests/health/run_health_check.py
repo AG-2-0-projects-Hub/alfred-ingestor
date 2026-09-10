@@ -12,11 +12,20 @@ runner uses). Exits 0 if every non-skipped check passes, 1 otherwise.
 NOTE (2026-09-10): --env prod is accepted but NOT yet properly wired — prod
 checks currently fall back to empty PROD_* lookups in this same file and
 will mostly SKIP. This needs a real separate-file design (see the session
-handoff for exact next steps) before prod checks are meaningful. Also:
-prod's Gemini transport differs from staging's, not just its credentials —
-prod uses Vertex AI (GCP service-account ADC), staging uses the Developer
-API (GEMINI_API_KEY) — the 4 check_gemini_* functions below are written for
-the Developer API path only.
+handoff for exact next steps) before prod checks are meaningful.
+
+NOTE (2026-09-10, revised): the 4 check_gemini_* functions run over Vertex
+AI (GCP service-account ADC on this machine), not the Developer API. Staging
+has never had its own GEMINI_API_KEY since Batch 6 (2026-07-16) moved it
+onto Vertex — confirmed live via `gcloud run services describe
+alfred-backend-staging` (GOOGLE_GENAI_USE_VERTEXAI=true, no key env var).
+The Developer-API key this used to hit (GEMINI_API_TEST_KEY, free tier) and
+prod's own fallback GEMINI_API_KEY (AI Studio prepay, separate billing) were
+both tried and both dead — free tier throttled under repeated runs, prod's
+key came back "prepayment credits are depleted". Vertex has no such cap and
+matches what staging/prod actually run, so these checks now require local
+ADC (`gcloud auth application-default login`) instead of any key in
+.env.test; they SKIP cleanly if ADC isn't set up.
 """
 from __future__ import annotations
 
@@ -181,18 +190,31 @@ def check_cloud_run_min_instances(env: str) -> CheckResult:
 # Each imports the ACTUAL backend module and calls the ACTUAL function the
 # live app uses, so this exercises real prompts/retry logic, not a reimplemented
 # stand-in. This is what would have caught the 2026-09-10 incident directly.
+# Runs over Vertex AI (ADC) — see the module docstring for why the Developer
+# API path (a key in .env.test) was dropped.
 
-def _gemini_env():
+def _vertex_env():
     import os
-    os.environ.setdefault("GEMINI_API_KEY", ENV.get("GEMINI_API_TEST_KEY", ""))
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", GCP_PROJECT)
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+
+def _vertex_adc_available() -> bool:
+    try:
+        import google.auth
+        google.auth.default()
+        return True
+    except Exception:
+        return False
 
 
 @_timed
 def check_gemini_ingest_text() -> CheckResult:
     """Row 2/3 — the exact call path that was 100% broken on 2026-09-10."""
-    if not ENV.get("GEMINI_API_TEST_KEY"):
-        return CheckResult("gemini_ingest_text", "SKIP", "GEMINI_API_TEST_KEY not set")
-    _gemini_env()
+    if not _vertex_adc_available():
+        return CheckResult("gemini_ingest_text", "SKIP", "no local ADC (run: gcloud auth application-default login)")
+    _vertex_env()
     import asyncio
     from services import gemini_client
     text = asyncio.run(gemini_client.process_with_prompt_a_text(
@@ -205,9 +227,9 @@ def check_gemini_ingest_text() -> CheckResult:
 
 @_timed
 def check_gemini_merge() -> CheckResult:
-    if not ENV.get("GEMINI_API_TEST_KEY"):
-        return CheckResult("gemini_merge", "SKIP", "GEMINI_API_TEST_KEY not set")
-    _gemini_env()
+    if not _vertex_adc_available():
+        return CheckResult("gemini_merge", "SKIP", "no local ADC (run: gcloud auth application-default login)")
+    _vertex_env()
     import asyncio
     from services import gemini_merge_resolve
     result = asyncio.run(gemini_merge_resolve.run_merger(
@@ -222,9 +244,9 @@ def check_gemini_merge() -> CheckResult:
 
 @_timed
 def check_gemini_chat() -> CheckResult:
-    if not ENV.get("GEMINI_API_TEST_KEY"):
-        return CheckResult("gemini_chat", "SKIP", "GEMINI_API_TEST_KEY not set")
-    _gemini_env()
+    if not _vertex_adc_available():
+        return CheckResult("gemini_chat", "SKIP", "no local ADC (run: gcloud auth application-default login)")
+    _vertex_env()
     import asyncio
     from services import gemini_messenger
     result = asyncio.run(gemini_messenger.first_pass(
@@ -240,9 +262,9 @@ def check_gemini_chat() -> CheckResult:
 
 @_timed
 def check_gemini_summarizer() -> CheckResult:
-    if not ENV.get("GEMINI_API_TEST_KEY"):
-        return CheckResult("gemini_summarizer", "SKIP", "GEMINI_API_TEST_KEY not set")
-    _gemini_env()
+    if not _vertex_adc_available():
+        return CheckResult("gemini_summarizer", "SKIP", "no local ADC (run: gcloud auth application-default login)")
+    _vertex_env()
     import asyncio
     from services import gemini_messenger
     result = asyncio.run(gemini_messenger.summarize_escalation([

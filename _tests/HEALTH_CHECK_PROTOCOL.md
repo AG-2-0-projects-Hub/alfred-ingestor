@@ -89,7 +89,14 @@ root cause, fix, commit — so a recurrence has a known answer instead of a re-i
 scratch. Keep entries short (4-6 lines): what broke, why, what fixed it, where. That file is the
 project's institutional memory for "we've hit this before."
 
-## 6. Future: cron
+## 6. Run log
+
+Notable runs (something failed, got fixed, or a check itself changed) are logged to
+`_tests/health/RUN_LOG.md` — a growing history, kept separate from this doc on purpose so this
+matrix stays stable and short. Scan that file's index first; only open a dated entry if it looks
+relevant. Not every routine green run needs an entry.
+
+## 7. Future: cron
 
 Once dedicated live agents exist (per the founder's own framing — not yet), this becomes a
 scheduled job: run layers 0-1 frequently (cheap, no API cost), layer 2 (Gemini smoke) a few times
