@@ -56,21 +56,35 @@ class _GlassPanelState extends State<GlassPanel> {
         gradient: AppTheme.glassInnerHighlight,
         borderRadius: BorderRadius.circular(widget.radius),
         border: Border.all(color: borderColor, width: 1),
-        boxShadow: widget.shadow ??
-            (_hovered && widget.hoverable
-                ? palette.cardShadowHover
-                : palette.cardShadow),
       ),
       child: widget.child,
     );
 
-    final clipped = ClipRRect(
+    final blurred = ClipRRect(
       borderRadius: BorderRadius.circular(widget.radius),
       child: BackdropFilter(
         filter: ImageFilter.blur(
             sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
         child: panel,
       ),
+    );
+
+    // The drop shadow has to live OUTSIDE the ClipRRect above: a BoxShadow
+    // painted by a clipped descendant gets cut off at the clip's own bounds
+    // instead of spreading outward, which was silently killing every panel's
+    // shadow — the one thing meant to visually separate these "glass" cards
+    // from whatever sits behind them (a dialog, a dashboard, another card).
+    final clipped = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: AppTheme.standardEasing,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(widget.radius),
+        boxShadow: widget.shadow ??
+            (_hovered && widget.hoverable
+                ? palette.cardShadowHover
+                : palette.cardShadow),
+      ),
+      child: blurred,
     );
 
     if (!widget.hoverable && widget.onTap == null) return clipped;

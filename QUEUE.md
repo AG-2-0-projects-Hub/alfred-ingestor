@@ -18,7 +18,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file (not just prefixed vars in `.env.test`) and a Vertex-AI-transport variant of the 4 Gemini smoke checks (prod uses ADC, not an API key)
 - [ ] Schedule the doc-staleness sweep (`HEALTH_CHECK_PROTOCOL.md` row 17) as a periodic agent pass — no mechanism exists yet, currently manual-only
 - [ ] Rotate the Firecrawl API key that got displayed in a session transcript 2026-09-10 (founder-flagged)
-- [ ] Investigate the parallel-session files found 2026-09-10 (`backend/services/welcome.py`, `frontend/lib/widgets/property_card.dart`) — confirm whose work it is and whether it's ready to commit
+- [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property)
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)
 - [ ] Host-recorded property walkthrough video
@@ -35,3 +35,4 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [x] ~~Time photo-triage latency on a real 100+-photo listing~~ — attempted 2026-09-09; two real large listings only yielded 7 and 32 candidate photos (Firecrawl's markdown scrape doesn't reach Airbnb's full lazy-loaded gallery) — the "100+" scenario may not be reachable with the current scraping method at all, so treat this as closed unless a different scraping approach comes up
 - [x] ~~AI assistant for host support~~ — decided 2026-09-09: no-go, do FAQ instead — see next item
 - [x] ~~Restructure `guide.html` into 3 sections + add FAQ~~ — shipped 2026-09-09: tabbed into Add Property / Property Enhancement / Guest Experience / FAQ, Playwright-verified (tab switching, keyboard nav, lightbox)
+- [x] ~~Investigate the parallel-session files found 2026-09-10 (`welcome.py`, `property_card.dart`)~~ — resolved 2026-09-10: this session's own work (guest-link 500 crash + Step 0 overlap fixes), committed `a7a103a`, deployed to staging

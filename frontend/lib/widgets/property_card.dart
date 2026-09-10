@@ -632,7 +632,7 @@ class _Step0Tip extends StatelessWidget {
       child: GlassPanel(
         radius: 14,
         blurSigma: AppTheme.glassBlurSigmaHeavy,
-        tint: palette.glassTintStrong,
+        tint: palette.glassTintHeavy,
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           mainAxisSize: MainAxisSize.min,

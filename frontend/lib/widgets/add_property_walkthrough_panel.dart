@@ -64,7 +64,7 @@ class AddPropertyWalkthroughPanel extends StatelessWidget {
     return GlassPanel(
       radius: 20,
       blurSigma: AppTheme.glassBlurSigmaHeavy,
-      tint: palette.glassTintStrong,
+      tint: palette.glassTintHeavy,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,

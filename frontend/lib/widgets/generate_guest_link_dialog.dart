@@ -126,55 +126,135 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     );
   }
 
+  List<Widget> get _actions => _result == null
+      ? [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: _loading ? null : _generate,
+            child: _loading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white))
+                : const Text('Generate Link'),
+          ),
+        ]
+      : [
+          TextButton(
+            onPressed: _openHostChat,
+            child: const Text('Open Host Chat'),
+          ),
+          // Suppressed on the first-ever showing — Open Host Chat is the
+          // only path forward, so the host can't skip the explanation.
+          // Backdrop-dismiss still covers "not right now."
+          if (!_isWalkthrough)
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+        ];
+
+  String get _titleText => _result != null
+      ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
+      : 'New Guest Link';
+
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    return AlertDialog(
-      insetPadding: isMobile
-          ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
-          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-      contentPadding: EdgeInsets.fromLTRB(
-          isMobile ? 14 : 24, 20, isMobile ? 14 : 24, 0),
-      actionsPadding: EdgeInsets.fromLTRB(
-          isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
-      actionsOverflowDirection: VerticalDirection.up,
-      actionsOverflowButtonSpacing: isMobile ? 8 : null,
-      title: Text(_result != null
-          ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
-          : 'New Guest Link'),
-      content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
-      actions: _result == null
-          ? [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: _loading ? null : _generate,
-                child: _loading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: Colors.white))
-                    : const Text('Generate Link'),
-              ),
-            ]
-          : [
-              TextButton(
-                onPressed: _openHostChat,
-                child: const Text('Open Host Chat'),
-              ),
-              // Suppressed on the first-ever showing — Open Host Chat is the
-              // only path forward, so the host can't skip the explanation.
-              // Backdrop-dismiss still covers "not right now."
-              if (!_isWalkthrough)
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Done'),
+
+    if (!_isWalkthrough || screenW < 1000) {
+      return AlertDialog(
+        insetPadding: isMobile
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        contentPadding: EdgeInsets.fromLTRB(
+            isMobile ? 14 : 24, 20, isMobile ? 14 : 24, 0),
+        actionsPadding: EdgeInsets.fromLTRB(
+            isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
+        actionsOverflowDirection: VerticalDirection.up,
+        actionsOverflowButtonSpacing: isMobile ? 8 : null,
+        title: Text(_titleText),
+        content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+        actions: _actions,
+      );
+    }
+
+    // Desktop-only docked walkthrough tip — a separate window beside the
+    // dialog, not embedded in its own fields/actions. Mirrors the exact
+    // pattern already used by property_detail_drawer.dart's Part B panel and
+    // ChatLiveDialog's Part C continuation. Built by hand instead of nesting
+    // AlertDialog in a Row: AlertDialog's own internal Align expands to fill
+    // whatever bounded height it's handed, which silently blows the whole
+    // Row's cross-axis size up to the viewport height and detaches the
+    // docked panel from the dialog's actual visible position.
+    final palette = context.palette;
+    final dialogCard = Material(
+      color: palette.surface,
+      elevation: 8,
+      shadowColor: const Color(0x40000000),
+      borderRadius: BorderRadius.circular(24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 560),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _titleText,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w300,
+                  color: palette.textPrimary,
                 ),
+              ),
+              const SizedBox(height: 20),
+              _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: _actions,
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            dialogCard,
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 20),
+              child: SizedBox(
+                width: 300,
+                child: _WalkthroughTip(
+                  eyebrow: _result == null
+                      ? 'GUEST LINK · 1 of 9'
+                      : 'GUEST LINK · 2 of 9',
+                  body: _result == null
+                      ? "I've filled in a test name — hit Generate Link and I'll "
+                          "create real links you can use to message me yourself, as a guest."
+                      : 'Send whichever matches how your guest reaches out — web, '
+                          'WhatsApp, or Telegram, they all reach me the same way. '
+                          'One more thing to show you first →',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -196,14 +276,6 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _generate(),
           ),
-          if (_isWalkthrough) ...[
-            const SizedBox(height: 14),
-            const _WalkthroughTip(
-              eyebrow: 'GUEST LINK · 1 of 9',
-              body: "I've filled in a test name — hit Generate Link and I'll "
-                  "create real links you can use to message me yourself, as a guest.",
-            ),
-          ],
         ],
       ),
     );
@@ -260,15 +332,6 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
               : guestRows,
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
-          if (_isWalkthrough) ...[
-            const SizedBox(height: 14),
-            const _WalkthroughTip(
-              eyebrow: 'GUEST LINK · 2 of 9',
-              body: 'Send whichever matches how your guest reaches out — web, '
-                  'WhatsApp, or Telegram, they all reach me the same way. '
-                  'One more thing to show you first →',
-            ),
-          ],
         ],
       ),
     );
@@ -323,7 +386,7 @@ class _WalkthroughTip extends StatelessWidget {
     return GlassPanel(
       radius: 14,
       blurSigma: AppTheme.glassBlurSigmaHeavy,
-      tint: palette.glassTintStrong,
+      tint: palette.glassTintHeavy,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       child: Column(
         mainAxisSize: MainAxisSize.min,
