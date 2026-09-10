@@ -1,8 +1,12 @@
+import asyncio
 import json
+import logging
 from google import genai
 from google.genai import types
 
 from services import genai_factory
+
+log = logging.getLogger(__name__)
 
 MODEL = "gemini-3.8-flash"
 
@@ -614,15 +618,197 @@ Host Resolutions:
 """
 
 
+# ── Universal fields (schema-enforced, alongside the freeform merge) ──────────
+#
+# master_json is deliberately freeform (see MERGER_SYSTEM_PROMPT's "let data shape
+# structure, not templates") so property-specific quirks always have somewhere to
+# go. Real cost of that, confirmed live against ~10 real trained properties: 30+
+# different top-level key names for the same concepts (check_in_out vs check_in +
+# check_out vs check_in/check_out separately; safety_and_security vs
+# safety_and_emergency vs safety_emergency; etc) — nothing can reliably check
+# "does this property have X" against a name that isn't guaranteed stable.
+#
+# Fix: a second, small, schema-enforced Gemini call for only the handful of fields
+# every short-term rental genuinely has, run alongside (not instead of) the
+# existing freeform call, then deep-merged into its result. See
+# UNIVERSAL_FIELDS_SCHEMA below for exactly what's covered.
+#
+# No `required` at the schema level, deliberately: a property with no Airbnb URL
+# (uploaded-files-only) may genuinely have zero source data for some of these
+# fields, and Gemini's `required` forces a value even when there's nothing to
+# extract — confirmed live that this risks a plausible-sounding hallucination
+# rather than an honest gap. The prompt instructs "omit if not found" instead;
+# `_UNIVERSAL_FIELDS_TEST` in this module's own smoke test verifies that's
+# actually respected, not just requested.
+UNIVERSAL_FIELDS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "property_identity": {
+            "type": "OBJECT",
+            "properties": {
+                "property_name": {"type": "STRING"},
+            },
+        },
+        "location": {
+            "type": "OBJECT",
+            "properties": {
+                "address": {"type": "STRING"},
+                "coordinates": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "lat": {"type": "NUMBER"},
+                        "lng": {"type": "NUMBER"},
+                    },
+                },
+            },
+        },
+        "capacity": {
+            "type": "OBJECT",
+            "properties": {
+                "max_guests": {"type": "INTEGER"},
+                "bedrooms": {"type": "INTEGER"},
+                "beds": {"type": "INTEGER"},
+                "bathrooms": {"type": "NUMBER"},
+            },
+        },
+        "check_in_out": {
+            "type": "OBJECT",
+            "properties": {
+                "check_in_time": {"type": "STRING"},
+                "check_out_time": {"type": "STRING"},
+                "method": {"type": "STRING"},
+                "access_code": {"type": "STRING"},
+            },
+        },
+        "house_rules": {
+            "type": "OBJECT",
+            "properties": {
+                "quiet_hours": {"type": "STRING"},
+                "pets_allowed": {"type": "BOOLEAN"},
+                "smoking_allowed": {"type": "BOOLEAN"},
+                "parties_allowed": {"type": "BOOLEAN"},
+            },
+        },
+        "amenities": {
+            "type": "OBJECT",
+            "properties": {
+                "wifi": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "network_name": {"type": "STRING"},
+                        "password": {"type": "STRING"},
+                    },
+                },
+            },
+        },
+        "pricing": {
+            "type": "OBJECT",
+            "properties": {
+                "extra_fees": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "cleaning_fee": {"type": "STRING"},
+                        "security_deposit": {"type": "STRING"},
+                        "pet_fee": {"type": "STRING"},
+                        "extra_guest_fee": {"type": "STRING"},
+                    },
+                },
+                "cancellation_policy": {"type": "STRING"},
+            },
+        },
+        "host_profile": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {"type": "STRING"},
+                "contact_method": {"type": "STRING"},
+            },
+        },
+        "emergency_contact": {"type": "STRING"},
+    },
+}
+
+UNIVERSAL_FIELDS_SYSTEM_PROMPT = """\
+You extract a small, fixed set of facts about a short-term rental property from \
+the source data below, into the exact JSON shape given by the response schema.
+
+Rules:
+- Only extract what is actually stated in the sources — never guess or infer a \
+plausible-sounding value.
+- If a field genuinely has no source support, OMIT it entirely (do not include \
+it with an empty, "N/A", "Not specified", or made-up value).
+- Property identity: if no real listing title exists in either source, use the \
+host-provided nickname instead of leaving it out — but do not invent a name if \
+neither exists.
+- Booleans (pets_allowed, smoking_allowed, parties_allowed) reflect what the \
+house rules actually state; omit any that aren't addressed at all.
+- Output valid JSON only, no markdown fences, no commentary.
+"""
+
+UNIVERSAL_FIELDS_USER_TEMPLATE = """\
+=== SCRAPED DATA ===
+{scraped_markdown}
+
+=== INGESTED DATA ===
+{ingested_markdown}
+
+=== HOST-PROVIDED NICKNAME (fallback only) ===
+{nickname}\
+"""
+
+
+def _deep_merge_universal(freeform: dict, universal: dict) -> dict:
+    """Merge the schema-enforced universal-fields result into the freeform merge
+    result. Additive, not destructive: every existing freeform key/sub-key is kept.
+    Where both sides define the same leaf value, the universal (schema-guaranteed)
+    side wins — logged, since both calls read the same source data and a
+    disagreement between them means Gemini was inconsistent across the two calls,
+    not that the sources themselves conflicted (that's the existing
+    _conflicts_summary mechanism's job, left untouched)."""
+    result = dict(freeform)
+    for key, uval in universal.items():
+        fval = result.get(key)
+        if isinstance(uval, dict) and isinstance(fval, dict):
+            result[key] = _deep_merge_universal(fval, uval)
+        elif key in result and fval != uval:
+            log.info(
+                "universal-fields override at %r: freeform=%r -> universal=%r",
+                key, fval, uval,
+            )
+            result[key] = uval
+        else:
+            result[key] = uval
+    return result
+
+
+async def _extract_universal_fields(
+    scraped_markdown: str, ingested_markdown: str, nickname: str
+) -> dict:
+    client = _get_client()
+    user_prompt = _fill(
+        UNIVERSAL_FIELDS_USER_TEMPLATE,
+        scraped_markdown=scraped_markdown or "(no data)",
+        ingested_markdown=ingested_markdown or "(no data)",
+        nickname=nickname or "(none provided)",
+    )
+    response = await genai_factory.generate_with_retry(
+        client,
+        label="universal_fields",
+        model=MODEL,
+        contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+        config=types.GenerateContentConfig(
+            system_instruction=UNIVERSAL_FIELDS_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=UNIVERSAL_FIELDS_SCHEMA,
+        ),
+    )
+    return json.loads(response.text)
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-async def run_merger(
-    scraped_markdown: str,
-    ingested_markdown: str,
-    nickname: str = "",
-    curated_photos: list[dict] | None = None,
+async def _run_freeform_merge(
+    scraped_markdown: str, ingested_markdown: str, nickname: str, curated_photos: list[dict] | None
 ) -> dict:
-    """Call Gemini Merger. Returns the full parsed master_json dict."""
     client = _get_client()
     user_prompt = _fill(
         MERGER_USER_TEMPLATE,
@@ -633,6 +819,7 @@ async def run_merger(
     )
     response = await genai_factory.generate_with_retry(
         client,
+        label="merger_freeform",
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(system_instruction=MERGER_SYSTEM_PROMPT),
@@ -644,6 +831,38 @@ async def run_merger(
             f"Gemini Merger returned invalid JSON: {exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
         ) from exc
+
+
+async def run_merger(
+    scraped_markdown: str,
+    ingested_markdown: str,
+    nickname: str = "",
+    curated_photos: list[dict] | None = None,
+) -> dict:
+    """Call Gemini Merger. Returns the full parsed master_json dict.
+
+    Runs two independent Gemini calls concurrently against the same source data:
+    the existing exhaustive freeform merge, and a small schema-enforced extraction
+    of the universal fields every property should have consistently named (see
+    UNIVERSAL_FIELDS_SCHEMA above). Their results are deep-merged — freeform stays
+    the base, universal fields fill in/override just that small guaranteed subset.
+
+    The universal-fields call is additive and fails soft: a merge that worked fine
+    before this existed must keep working even if this specific call errors (bad
+    JSON, a transient failure genuine retries didn't clear, etc) — it should never
+    be the thing that breaks a property's whole training.
+    """
+    freeform_result, universal_result = await asyncio.gather(
+        _run_freeform_merge(scraped_markdown, ingested_markdown, nickname, curated_photos),
+        _extract_universal_fields(scraped_markdown, ingested_markdown, nickname),
+        return_exceptions=True,
+    )
+    if isinstance(freeform_result, BaseException):
+        raise freeform_result
+    if isinstance(universal_result, BaseException):
+        log.warning("universal-fields extraction failed (non-fatal): %s", universal_result)
+        return freeform_result
+    return _deep_merge_universal(freeform_result, universal_result)
 
 
 async def run_resolver(master_json: dict, resolutions: list) -> dict:
