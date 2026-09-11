@@ -313,11 +313,18 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         SnackBar(content: Text(msg), backgroundColor: context.palette.danger));
   }
 
+  static const _trainedStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
+
   void _handleNextStepAction(SetupStep step) {
     // Dispatch per-status action: for most steps, the screen itself is the action
     // (user uploads files, clicks RE-INGEST, or resolves conflicts here)
     final status = _propertyStatus ?? '';
-    if (status == 'Scraped') {
+    if (_trainedStatuses.contains(status) &&
+        _filesToIngest.any((f) => f['status'] == 'queued')) {
+      // Same re-ingest call as the Ingest_Error retry below — a newly added
+      // file on an already-trained property needs the identical trigger.
+      _startIngest();
+    } else if (status == 'Scraped') {
       // With the manual RE-INGEST button hidden (User mode), this is the only
       // way to kick off ingestion once files are queued — a no-op before that.
       if (_filesToIngest.any((f) => f['status'] == 'queued')) _startIngest();
@@ -403,6 +410,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       : nextStepFor(
                           _propertyStatus ?? '',
                           hasMasterJson: _masterJson != null,
+                          hasQueuedFiles: _filesToIngest
+                              .any((f) => f['status'] == 'queued'),
                         );
                   if (step == null) return const SizedBox.shrink();
                   return Padding(

@@ -1306,7 +1306,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               final refresh = widget.onRefresh;
               nav.pop();
               nav.push(MaterialPageRoute(
-                builder: (_) => EditPropertyScreen(property: _property),
+                builder: (_) => EditPropertyScreen(
+                  property: _property,
+                  isDev: widget.isDev,
+                ),
               )).then((_) => refresh());
             },
             icon: Icon(Icons.edit_outlined, size: 16),

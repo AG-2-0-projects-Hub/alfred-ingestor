@@ -18,11 +18,29 @@ class SetupStep {
   });
 }
 
+// Statuses where training already finished — matches the walkthrough's own
+// _wtReadyStatuses in property_detail_drawer.dart.
+const _trainedStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
+
 SetupStep? nextStepFor(
   String status, {
   bool hasIngestedFiles = false,
   bool hasMasterJson = false,
+  bool hasQueuedFiles = false,
 }) {
+  // A file dropped into an already-trained property's "Add New Files" only
+  // uploads to storage — nothing else in this switch below covers a
+  // post-training status, so without this branch the file sat at "Queued"
+  // forever with no way to trigger the retrain that would pick it up.
+  if (hasQueuedFiles && _trainedStatuses.contains(status)) {
+    return SetupStep(
+      headline: 'New files added',
+      subtext: "Update Alfred so it learns what you just uploaded.",
+      actionLabel: 'Update Training',
+      icon: Icons.sync_rounded,
+      accent: (ctx) => Theme.of(ctx).colorScheme.primary,
+    );
+  }
   switch (status) {
     case 'Scraped':
       return SetupStep(
