@@ -108,7 +108,7 @@ class AddPropertyWalkthroughPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (body != null)
-            Text(
+            SelectableText(
               body,
               style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
             )

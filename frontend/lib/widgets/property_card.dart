@@ -654,7 +654,7 @@ class _Step0Tip extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text.rich(
+            SelectableText.rich(
               TextSpan(
                 style: GoogleFonts.inter(
                     fontSize: 12.5, height: 1.5, color: palette.textSecondary),

@@ -6,9 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
-import 'glass_panel.dart';
 import '../theme/app_theme.dart';
-import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -31,27 +29,6 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   final _nameController = TextEditingController();
   bool _loading = false;
   Map<String, dynamic>? _result; // {booking_id, guest_chat_url, host_chat_url}
-
-  // Part C of the User-mode post-training walkthrough — first-ever guest link,
-  // across any property (global flag, independent of Parts A/B). Steps 1-2
-  // live here; steps 3-9 continue inside ChatLiveDialog once Open Host Chat
-  // is tapped. Marked seen from there, not here — see ChatLiveDialog.dispose.
-  bool _isWalkthrough = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (!widget.isDev) {
-      WalkthroughPrefs.isGuestLinkWalkthroughSeen().then((seen) {
-        if (mounted && !seen) {
-          setState(() {
-            _isWalkthrough = true;
-            _nameController.text = 'Test walkthrough';
-          });
-        }
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -115,14 +92,12 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
     final propertyName = widget.property['name'] as String? ?? '';
-    final isWalkthrough = _isWalkthrough;
     Navigator.of(context).pop();
     ChatLiveDialog.show(
       context,
       bookingId: bookingId,
       propertyId: propertyId,
       propertyName: propertyName,
-      startWalkthrough: isWalkthrough,
     );
   }
 
@@ -148,14 +123,10 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
             onPressed: _openHostChat,
             child: const Text('Open Host Chat'),
           ),
-          // Suppressed on the first-ever showing — Open Host Chat is the
-          // only path forward, so the host can't skip the explanation.
-          // Backdrop-dismiss still covers "not right now."
-          if (!_isWalkthrough)
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Done'),
-            ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
         ];
 
   String get _titleText => _result != null
@@ -167,94 +138,19 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
 
-    if (!_isWalkthrough || screenW < 1000) {
-      return AlertDialog(
-        insetPadding: isMobile
-            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
-            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        contentPadding: EdgeInsets.fromLTRB(
-            isMobile ? 14 : 24, 20, isMobile ? 14 : 24, 0),
-        actionsPadding: EdgeInsets.fromLTRB(
-            isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
-        actionsOverflowDirection: VerticalDirection.up,
-        actionsOverflowButtonSpacing: isMobile ? 8 : null,
-        title: Text(_titleText),
-        content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
-        actions: _actions,
-      );
-    }
-
-    // Desktop-only docked walkthrough tip — a separate window beside the
-    // dialog, not embedded in its own fields/actions. Mirrors the exact
-    // pattern already used by property_detail_drawer.dart's Part B panel and
-    // ChatLiveDialog's Part C continuation. Built by hand instead of nesting
-    // AlertDialog in a Row: AlertDialog's own internal Align expands to fill
-    // whatever bounded height it's handed, which silently blows the whole
-    // Row's cross-axis size up to the viewport height and detaches the
-    // docked panel from the dialog's actual visible position.
-    final palette = context.palette;
-    final dialogCard = Material(
-      color: palette.surface,
-      elevation: 8,
-      shadowColor: const Color(0x40000000),
-      borderRadius: BorderRadius.circular(24),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 280, maxWidth: 560),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _titleText,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w300,
-                  color: palette.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: _actions,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            dialogCard,
-            Padding(
-              padding: const EdgeInsets.only(top: 8, left: 20),
-              child: SizedBox(
-                width: 300,
-                child: _WalkthroughTip(
-                  eyebrow: _result == null
-                      ? 'GUEST LINK · 1 of 9'
-                      : 'GUEST LINK · 2 of 9',
-                  body: _result == null
-                      ? "I've filled in a test name — hit Generate Link and I'll "
-                          "create real links you can use to message me yourself, as a guest."
-                      : 'Send whichever matches how your guest reaches out — web, '
-                          'WhatsApp, or Telegram, they all reach me the same way. '
-                          'One more thing to show you first →',
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AlertDialog(
+      insetPadding: isMobile
+          ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      contentPadding: EdgeInsets.fromLTRB(
+          isMobile ? 14 : 24, 20, isMobile ? 14 : 24, 0),
+      actionsPadding: EdgeInsets.fromLTRB(
+          isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
+      actionsOverflowDirection: VerticalDirection.up,
+      actionsOverflowButtonSpacing: isMobile ? 8 : null,
+      title: Text(_titleText),
+      content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+      actions: _actions,
     );
   }
 
@@ -313,23 +209,16 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _isWalkthrough
-              ? Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: context.palette.primary, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: context.palette.primary.withValues(alpha: 0.25),
-                        blurRadius: 16,
-                        spreadRadius: 1,
-                      ),
-                    ],
-                  ),
-                  child: guestRows,
-                )
-              : guestRows,
+          // Glow highlight around the generated links kept dormant — see
+          // walkthrough.md. Was driven by _isWalkthrough, now removed.
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.transparent, width: 2),
+            ),
+            child: guestRows,
+          ),
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
         ],
@@ -373,48 +262,5 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   }
 }
 
-// Shared tip bubble for Part C's steps 1-2 — same visual language as Part A's
-// Step 0 tip and Part B's docked panel (🤖 badge + eyebrow + body).
-class _WalkthroughTip extends StatelessWidget {
-  final String eyebrow;
-  final String body;
-  const _WalkthroughTip({required this.eyebrow, required this.body});
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.palette;
-    return GlassPanel(
-      radius: 14,
-      blurSigma: AppTheme.glassBlurSigmaHeavy,
-      tint: palette.glassTintHeavy,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('🤖', style: TextStyle(fontSize: 13)),
-              const SizedBox(width: 5),
-              Text(
-                eyebrow,
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.4,
-                  color: palette.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            body,
-            style: GoogleFonts.inter(
-                fontSize: 12.5, height: 1.5, color: palette.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// The walkthrough tip bubble that used to render here (Part C, steps 1-2)
+// was removed — see walkthrough.md for its copy, kept for a future rebuild.

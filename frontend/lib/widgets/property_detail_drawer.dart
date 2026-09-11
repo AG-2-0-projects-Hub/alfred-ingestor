@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'voice_recorder.dart';
 import 'file_status_list.dart';
-import 'glass_panel.dart';
 import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
 import '../screens/host_panel_screen.dart';
@@ -16,7 +15,6 @@ import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
-import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
@@ -80,10 +78,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // showing stale status / banner state.
   StreamSubscription<List<Map<String, dynamic>>>? _propStream;
 
-  // Part B of the User-mode post-training walkthrough — a 5-step docked panel
-  // matching Add Property's walkthrough pattern. null = not showing.
+  // Part B of the User-mode post-training walkthrough used to live here (a
+  // 5-step docked panel). The panel itself was removed — full copy and step
+  // targets are in walkthrough.md for a future rebuild. _wtStep and the glow
+  // highlight below are kept dormant (never set to non-null anymore) so the
+  // highlight wiring is ready to reconnect later.
   int? _wtStep;
-  static const _wtStepCount = 5;
   static const _wtReadyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
   final _wtDrawerKey = GlobalKey();
   final _wtManageKey = GlobalKey();
@@ -104,111 +104,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
     _loadHeroUrl();
     _subscribeProperty();
-    _maybeStartWalkthrough();
   }
 
-  Future<void> _maybeStartWalkthrough() async {
-    if (widget.isDev) return;
-    final status = _property['status'] as String? ?? '';
-    if (!_wtReadyStatuses.contains(status)) return;
-    final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
-    if (!seen && mounted) setState(() => _wtStep = 0);
-  }
-
-  // (tab index, anchor key, title, body) for each of the 5 steps.
-  (int, GlobalKey, String, String) _wtStepInfo(int step) {
-    final name = _property['name'] as String? ?? 'this property';
-    switch (step) {
-      case 0:
-        return (
-          0,
-          _wtDrawerKey,
-          "I've learned $name — here's what's next",
-          "This is where you'll come back anytime: add more detail, see what I "
-              "picked up on my own, or ask me something to check my work.",
-        );
-      case 1:
-        return (
-          0,
-          _wtManageKey,
-          'Add or swap files anytime',
-          "Tap Manage to upload more — a new house manual, an updated WiFi "
-              "photo, anything. I'll fold it in without starting over.",
-        );
-      case 2:
-        return (
-          1,
-          _wtAddKnowledgeKey,
-          'Tell me something directly',
-          "Type it, or record a voice note — parking rules, a fix for the "
-              "shower, whatever's easiest. I'll add it to what I already know.",
-        );
-      case 3:
-        return (
-          1,
-          _wtLearningKey,
-          'I flag what I learn on my own',
-          "Every real guest conversation teaches me something — I'll surface "
-              "it here for your OK before it sticks.",
-        );
-      default:
-        return (
-          1,
-          _wtChatKey,
-          'Double-check me anytime',
-          "Ask me something here, the same way a guest would. It's the "
-              "fastest way to see exactly what I'd tell them — before they ever ask.",
-        );
-    }
-  }
-
-  void _wtGoToStep(int step) {
-    setState(() => _wtStep = step);
-    final (tabIndex, key, _, _) = _wtStepInfo(step);
-    _tabController.animateTo(tabIndex);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = key.currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(ctx,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            alignment: 0.1);
-      }
-    });
-  }
-
-  void _wtNext() {
-    if (_wtStep == null) return;
-    if (_wtStep! >= _wtStepCount - 1) {
-      _wtFinish();
-    } else {
-      _wtGoToStep(_wtStep! + 1);
-    }
-  }
-
-  void _wtBack() {
-    if (_wtStep == null || _wtStep == 0) return;
-    _wtGoToStep(_wtStep! - 1);
-  }
-
-  void _wtFinish() {
-    setState(() => _wtStep = null);
-    WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
-  }
-
-  // Manual replay trigger for the Overview tab's "Show walkthrough again"
-  // switch. Its displayed value is _wtStep != null, so finishing/closing the
-  // walkthrough (which already nulls _wtStep via _wtFinish) flips it off on
-  // its own — no separate reset bookkeeping needed.
-  Future<void> _toggleReplayWalkthrough(bool value) async {
-    if (!value) {
-      _wtFinish();
-      return;
-    }
-    await WalkthroughPrefs.resetPostTrainingWalkthrough(_property['id'] as String);
-    if (!mounted) return;
-    _wtGoToStep(0);
-  }
+  // "Show walkthrough again" switch on the Overview tab is kept in place but
+  // intentionally does nothing now that the walkthrough panel is gone.
+  Future<void> _toggleReplayWalkthrough(bool value) async {}
 
   // Mirrors add_property_screen.dart's _walkthroughHighlight — same glow
   // treatment, applied to whichever real UI element each step points at.
@@ -238,77 +138,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
   }
 
-  Widget _buildWalkthroughPanel() {
-    final step = _wtStep!;
-    final (_, _, title, body) = _wtStepInfo(step);
-    final isLast = step == _wtStepCount - 1;
-    final palette = context.palette;
-    return GlassPanel(
-      radius: 20,
-      blurSigma: AppTheme.glassBlurSigmaHeavy,
-      tint: palette.glassTintHeavy,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text('🤖', style: GoogleFonts.inter(fontSize: 13)),
-              const SizedBox(width: 5),
-              Text(
-                '${step + 1} of $_wtStepCount',
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.4,
-                  color: palette.primary,
-                ),
-              ),
-              const Spacer(),
-              Tooltip(
-                message: 'Close walkthrough',
-                child: InkWell(
-                  onTap: _wtFinish,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: Icon(Icons.close_rounded, size: 16, color: palette.textMuted),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: palette.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            body,
-            style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              if (step > 0)
-                TextButton(onPressed: _wtBack, child: const Text('Back')),
-              const Spacer(),
-              FilledButton(
-                onPressed: _wtNext,
-                child: Text(isLast ? 'Done' : 'Next'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // The walkthrough tip panel that used to render here was removed — see
+  // walkthrough.md for its full copy/structure, kept for a future rebuild.
 
   @override
   void dispose() {
@@ -942,21 +773,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
 
     if (_wtStep == null) return drawer;
-    final highlightedDrawer = _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer);
-    // Desktop-only docking, matching Add Property's walkthrough panel gate —
-    // narrow viewports have no room for a panel beside the drawer.
-    if (screenW < 1000) return highlightedDrawer;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8, right: 20),
-          child: SizedBox(width: 300, child: _buildWalkthroughPanel()),
-        ),
-        highlightedDrawer,
-      ],
-    );
+    // The walkthrough tip panel that used to dock here was removed — see
+    // walkthrough.md — but the glow highlight below is kept live and ready
+    // for whatever replaces it. _wtStep never gets set to non-null anymore
+    // (see _wtHighlight below), so this branch is currently dormant.
+    return _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer);
   }
 
   Widget _buildHeader() {
