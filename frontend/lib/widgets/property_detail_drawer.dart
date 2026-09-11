@@ -15,7 +15,9 @@ import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
+import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
+import 'walkthrough_tip_panel.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -78,18 +80,29 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // showing stale status / banner state.
   StreamSubscription<List<Map<String, dynamic>>>? _propStream;
 
-  // Part B of the User-mode post-training walkthrough used to live here (a
-  // 5-step docked panel). The panel itself was removed — full copy and step
-  // targets are in walkthrough.md for a future rebuild. _wtStep and the glow
-  // highlight below are kept dormant (never set to non-null anymore) so the
-  // highlight wiring is ready to reconnect later.
+  // Part B of the User-mode post-training walkthrough — rebuilt 2026-09-11
+  // using a real Overlay entry (see _wtOverlay below) instead of nesting the
+  // tip panel inside this drawer's showGeneralDialog route, which is the one
+  // structural difference from the two panels (dashboard Step 0, Add
+  // Property) that never hit the still-unexplained text rendering bug the
+  // old inline-docked version had. Step 1 (of 5) was verified live via
+  // Playwright before the rest were added — see walkthrough.md for the copy.
   int? _wtStep;
+  static const _wtStepCount = 5;
   static const _wtReadyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
   final _wtDrawerKey = GlobalKey();
   final _wtManageKey = GlobalKey();
   final _wtAddKnowledgeKey = GlobalKey();
   final _wtLearningKey = GlobalKey();
   final _wtChatKey = GlobalKey();
+  final _wtDockLink = LayerLink();
+  OverlayEntry? _wtOverlay;
+  // Drives the overlay entry's content directly, instead of relying on
+  // OverlayEntry.markNeedsBuild() — confirmed unreliable here: the highlight
+  // below (plain setState) updated correctly on Next/Back, but the overlay's
+  // own text stayed stale even after markNeedsBuild() calls and a 3s wait.
+  // A ValueListenableBuilder inside the entry is the documented-safe pattern.
+  final _wtStepNotifier = ValueNotifier<int?>(null);
 
   @override
   void initState() {
@@ -104,11 +117,171 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
     _loadHeroUrl();
     _subscribeProperty();
+    _maybeStartWalkthrough();
   }
 
-  // "Show walkthrough again" switch on the Overview tab is kept in place but
-  // intentionally does nothing now that the walkthrough panel is gone.
-  Future<void> _toggleReplayWalkthrough(bool value) async {}
+  Future<void> _maybeStartWalkthrough() async {
+    if (widget.isDev) return;
+    final status = _property['status'] as String? ?? '';
+    if (!_wtReadyStatuses.contains(status)) return;
+    final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
+    if (!seen && mounted) _setWtStep(0);
+  }
+
+  // Single point of mutation for _wtStep — keeps the highlight (plain
+  // setState, drives the normal widget tree) and the docked panel's own
+  // ValueNotifier (drives the Overlay entry, see _wtStepNotifier) in sync.
+  void _setWtStep(int? step) {
+    setState(() => _wtStep = step);
+    _wtStepNotifier.value = step;
+  }
+
+  // (tab index, anchor key, title, body) for each of the 5 steps — tab index
+  // is User mode's own numbering (Overview=0, Knowledge=1; there's no Files
+  // tab to account for here since that only exists in Dev mode).
+  (int, GlobalKey, String, String) _wtStepInfo(int step) {
+    final name = _property['name'] as String? ?? 'this property';
+    switch (step) {
+      case 0:
+        return (
+          0,
+          _wtDrawerKey,
+          "I've learned $name — here's what's next",
+          "This is where you'll come back anytime: add more detail, see what I "
+              "picked up on my own, or ask me something to check my work.",
+        );
+      case 1:
+        return (
+          0,
+          _wtManageKey,
+          'Add or swap files anytime',
+          "Tap Manage to upload more — a new house manual, an updated WiFi "
+              "photo, anything. I'll fold it in without starting over.",
+        );
+      case 2:
+        return (
+          1,
+          _wtAddKnowledgeKey,
+          'Tell me something directly',
+          "Type it, or record a voice note — parking rules, a fix for the "
+              "shower, whatever's easiest. I'll add it to what I already know.",
+        );
+      case 3:
+        return (
+          1,
+          _wtLearningKey,
+          'I flag what I learn on my own',
+          "Every real guest conversation teaches me something — I'll surface "
+              "it here for your OK before it sticks.",
+        );
+      default:
+        return (
+          1,
+          _wtChatKey,
+          'Double-check me anytime',
+          "Ask me something here, the same way a guest would. It's the "
+              "fastest way to see exactly what I'd tell them — before they ever ask.",
+        );
+    }
+  }
+
+  void _wtGoToStep(int step) {
+    _setWtStep(step);
+    final (tabIndex, key, _, _) = _wtStepInfo(step);
+    _tabController.animateTo(tabIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+      }
+    });
+  }
+
+  void _wtNext() {
+    if (_wtStep == null) return;
+    if (_wtStep! >= _wtStepCount - 1) {
+      _wtFinish();
+    } else {
+      _wtGoToStep(_wtStep! + 1);
+    }
+  }
+
+  void _wtBack() {
+    if (_wtStep == null || _wtStep == 0) return;
+    _wtGoToStep(_wtStep! - 1);
+  }
+
+  void _wtFinish() {
+    _setWtStep(null);
+    WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
+  }
+
+  // Manual replay trigger for the Overview tab's "Show walkthrough again"
+  // switch. Its displayed value is _wtStep != null, so finishing/closing the
+  // walkthrough (which already nulls _wtStep via _wtFinish) flips it off on
+  // its own — no separate reset bookkeeping needed.
+  Future<void> _toggleReplayWalkthrough(bool value) async {
+    if (!value) {
+      _wtFinish();
+      return;
+    }
+    await WalkthroughPrefs.resetPostTrainingWalkthrough(_property['id'] as String);
+    if (!mounted) return;
+    _wtGoToStep(0);
+  }
+
+  // Inserts the docked tip panel as a real Overlay entry
+  // (Overlay.of(context, rootOverlay: true)) rather than nesting it inside
+  // this drawer's own showGeneralDialog route — see the class-level comment
+  // on _wtStep for why. Inserted once and left in place (its own
+  // ValueListenableBuilder decides what to render, including hiding itself
+  // entirely) rather than inserted/removed per step change — simpler, and
+  // sidesteps needing OverlayEntry.markNeedsBuild() at all. Desktop-only
+  // (matches the removed version's gate); narrow viewports just get the
+  // highlight with no panel, a known gap carried over from before, not fixed
+  // by this rebuild.
+  void _ensureWtOverlayInserted() {
+    if (_wtOverlay != null) return;
+    final entry = OverlayEntry(builder: (overlayContext) {
+      return ValueListenableBuilder<int?>(
+        valueListenable: _wtStepNotifier,
+        builder: (_, step, __) {
+          final screenW = MediaQuery.of(overlayContext).size.width;
+          if (step == null || screenW < 1000) return const SizedBox.shrink();
+          final (_, _, title, body) = _wtStepInfo(step);
+          return Positioned(
+            width: 300,
+            child: CompositedTransformFollower(
+              link: _wtDockLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topLeft,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(-20, 56),
+              child: WalkthroughTipPanel(
+                stepIndex: step,
+                stepCount: _wtStepCount,
+                title: title,
+                body: body,
+                onBack: step > 0 ? _wtBack : null,
+                onNext: _wtNext,
+                onClose: _wtFinish,
+                isLast: step == _wtStepCount - 1,
+              ),
+            ),
+          );
+        },
+      );
+    });
+    _wtOverlay = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Overlay.of(context, rootOverlay: true).insert(entry);
+    });
+  }
 
   // Mirrors add_property_screen.dart's _walkthroughHighlight — same glow
   // treatment, applied to whichever real UI element each step points at.
@@ -143,6 +316,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   @override
   void dispose() {
+    _wtOverlay?.remove();
+    _wtOverlay = null;
+    _wtStepNotifier.dispose();
     _tabController.dispose();
     _knowledgeController.dispose();
     _kbChatController.dispose();
@@ -772,12 +948,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       ),
     );
 
+    _ensureWtOverlayInserted();
     if (_wtStep == null) return drawer;
-    // The walkthrough tip panel that used to dock here was removed — see
-    // walkthrough.md — but the glow highlight below is kept live and ready
-    // for whatever replaces it. _wtStep never gets set to non-null anymore
-    // (see _wtHighlight below), so this branch is currently dormant.
-    return _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer);
+    return CompositedTransformTarget(
+      link: _wtDockLink,
+      child: _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer),
+    );
   }
 
   Widget _buildHeader() {

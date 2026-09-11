@@ -1,9 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Dismiss-state for Part A of the post-training walkthrough (the dashboard's
-/// Step 0 hint) — the only part still live. Parts B/C's own read/write
-/// methods (drawer + guest-link/host-chat step panels) were removed along
-/// with those panels; see walkthrough.md for what they used to do.
+/// Dismiss-state for the post-training walkthrough. Part A (dashboard's Step
+/// 0 hint) reads the same "seen" flag Part B (Settings drawer) writes, via
+/// [seenPostTrainingPropertyIds] — see walkthrough.md for the full map.
 class WalkthroughPrefs {
   WalkthroughPrefs._();
 
@@ -18,5 +17,20 @@ class WalkthroughPrefs {
         .where((k) => k.startsWith(_postTrainingPrefix))
         .map((k) => k.substring(_postTrainingPrefix.length))
         .toSet();
+  }
+
+  static Future<bool> isPostTrainingSeen(String propertyId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('$_postTrainingPrefix$propertyId') ?? false;
+  }
+
+  static Future<void> markPostTrainingSeen(String propertyId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('$_postTrainingPrefix$propertyId', true);
+  }
+
+  static Future<void> resetPostTrainingWalkthrough(String propertyId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_postTrainingPrefix$propertyId');
   }
 }
