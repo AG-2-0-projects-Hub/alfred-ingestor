@@ -1,6 +1,40 @@
 # Session Context
+
+*`## Pending`/`## Unresolved Decisions` below are the small, current state — read in full every
+session. Below that is the session log: prepend-only (newest `**Last Session:**` block on top,
+the previous one renamed `**Prior Session:**` and pushed down) — read further into it only for
+depth on a specific past decision. See this project's `CLAUDE.md` "Session End / Wrap-up" for
+the refresh rule that keeps `## Pending` from re-bloating.*
+
 **Created:** 2026-04-14
-**Last Session:** 2026-09-10→11 continuation (**Shipped the walkthrough replay toggle + root-caused and fixed the stuck-at-"Queued" retrain bug + deepened (but did not resolve) the yellow-underline investigation** — `staging` @ `6835304` (toggle, committed+pushed); retrain-trigger + isDev fixes implemented and verified as far as locally possible, **NOT YET COMMITTED** as of session end, awaiting approval.
+
+## Pending
+**Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
+session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
+- 🔴 Commit approval needed: retrain-trigger + `isDev` banner fixes (2026-09-10→11 session,
+  documented in the `**Last Session:**` entry two below) — still uncommitted as of this entry.
+- 🔴 Yellow-underline rendering bug on walkthrough tip text — next step is confirming or ruling
+  out a Windows-level writing-assistant app (e.g. Grammarly desktop) via Task Manager before any
+  more code-side hypotheses.
+- 🟡 graphify's code-graph refresh hit a stale-chunk-files guard (2579 vs 2611 nodes) — left
+  unforced; investigate before the next `--force`.
+- 🔴 Standing, carried across multiple sessions: has the founder retried training since `44cbfc1`
+  end-to-end (Santa Prisca / Dos Rios / a fresh Bungalow)? Still unconfirmed.
+
+## Unresolved Decisions
+None currently open.
+
+**Last Session:** 2026-09-11 (**Fixed the CONTEXT.md/CLAUDE.md wrap-up drift — no code touched, no deploy** — the wrap-up protocol's own instructions had described a `## Accomplished` heading that never existed in this file (traced to the 2026-08-19 reflip-workflow retrofit, never reconciled against this project's actual prepend-style log) and a `## Pending`/`## Unresolved Decisions` block that was never built at all.
+> **✅ Root-caused via direct file audit, not assumption.** Confirmed by heading-grepping the full 933-line log: the real pattern since project creation (2026-04-14) has always been prepend `**Last Session:**`/`**Prior Session:**` blocks; carry-forward between sessions happened only as prose ("Still open:", "🔴 UNRESOLVED") re-stated inside each new entry, with no dedicated summary. Cross-checked reflip (has real `## Accomplished`/`## Pending`/`## Unresolved Decisions`, correctly used, but its own `## Pending` has bloated into a strikethrough-history stack since session 17 rather than staying small) and root (created 2026-09-03, after the retrofit, correctly structured — no fix needed there).
+> **✅ Built a real `## Pending`/`## Unresolved Decisions` block** at the top of this file, seeded from the actual current open items (cross-checked against `_Context/session-digest.md`, which was more current than this log's own top entry — see below). Deliberately does NOT duplicate `QUEUE.md`'s feature/bug backlog; scoped to session-continuity state only.
+> **✅ Rewrote `CLAUDE.md`'s Stack/Data Schema** (previously `[Define after BLAST Blueprint phase]` placeholders, months stale) with the real architecture snapshot, plus an explicit maintenance rule: update in place only when a real architectural/schema change ships, never append-and-accumulate.
+> **✅ Rewrote `CLAUDE.md`'s Session Start / Session End sections** as a literal, ordered checklist instead of soft "refresh"-style prose: `## Pending` now has a hard ≤15-line ceiling enforced by pruning (delete resolved lines outright, never strikethrough-and-keep — reflip's actual failure mode); `session-digest.md` cap bumped 3→5 (founder runs 2-3 parallel sessions that can land close together, and 3 was proven this session to have already dropped one — see below).
+> **✅ Built `_scripts/wrap_up.sh`** — a deterministic structural check (heading presence, `## Pending` line count, digest entry count, CLAUDE.md placeholder text) run as the last wrap-up step, so compliance is a script PASS/FAIL, not self-assessment. Content quality (what to write) still can't be scripted — that stays a judgment call.
+> **🔴 Caught live, mid-session:** this file's own top entry was stale relative to `_Context/session-digest.md` — a 2026-09-10→11 session (walkthrough replay toggle, retrain-trigger fix, underline investigation) had written its digest entry but never got a `**Last Session:**` block here, until a parallel session wrote it in place while this session was still in conversation. Did not backfill it myself (not this session's work to reconstruct) — confirms the exact gap this session exists to close, caught in the act rather than theorized.
+> **🟡 graphify's stale-chunk-files guard recurred** (2582 vs 2611 nodes this run, was 2579 last time) — left unforced again, same standing item.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-10→11 continuation (**Shipped the walkthrough replay toggle + root-caused and fixed the stuck-at-"Queued" retrain bug + deepened (but did not resolve) the yellow-underline investigation** — `staging` @ `6835304` (toggle, committed+pushed); retrain-trigger + isDev fixes implemented and verified as far as locally possible, **NOT YET COMMITTED** as of session end, awaiting approval.
 > **✅ Walkthrough replay toggle shipped.** New "+ Show walkthrough again" switch in the Overview tab (`walkthrough_prefs.dart`, `property_detail_drawer.dart`), placed under English welcome per founder request. Reuses the existing per-property + global guest-link "seen" flags instead of new state — turning it on clears them and jumps to step 1; its value is just `_wtStep != null`, so finishing/closing the walkthrough turns it off by itself. Verified live via Playwright (both directions, plus the dashboard's Step-0 hint correctly reappearing on drawer close).
 > **✅ Stuck-at-"Queued" retrain bug root-caused and fixed, not yet committed.** Dropping a file into an already-trained property's "Add New Files" only uploaded it — the guided banner (`setup_status.dart`) never covered post-training statuses and the manual retry button is Dev-only, so nothing in User mode ever called ingest. Added a "New files added / Update Training" banner wired to the same existing `_startIngest()` call already used for pre-training retries. Also fixed: the drawer's Files-tab edit button never passed `isDev`, silently downgrading Dev hosts into User mode. Verified live that the banner appears correctly and the button calls the real staging backend URL; full completion couldn't be confirmed locally (CORS blocks the ad-hoc localhost test origin — not a fix issue).
 > **🔴 STILL UNRESOLVED — yellow underline, but new hard evidence.** A recursive DOM+shadow-root+aria search proved the walkthrough tip text is 100% canvas-rendered pixels (zero real text nodes anywhere, exactly one `<canvas>` element) — ruling out real CSS `text-decoration` and any browser extension (both need real DOM text to attach to). Live testing disproved a `Text` vs `Text.rich` hypothesis. New founder-provided evidence: the underline starts clean and spreads to totally unrelated widgets (chat bubbles, sidebar captions) the longer the walkthrough continues, in both Chrome and Brave — the signature of a system-wide tool, not app code. Leading, unconfirmed theory: a Windows-level writing assistant (e.g. Grammarly's desktop app, which hooks in via OS accessibility APIs, not per-browser extensions) — this session's own Playwright repro runs inside WSL2/Linux and can't be reached by anything Windows-side, so it isn't evidence either way. **Founder feedback: this session chained too many speculative hypotheses instead of stopping at the hard evidence and handing off — next session should verify the Grammarly-desktop theory directly before any more code-side digging.**
