@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
+import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
@@ -283,30 +284,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     });
   }
 
-  // Mirrors add_property_screen.dart's _walkthroughHighlight — same glow
-  // treatment, applied to whichever real UI element each step points at.
   Widget _wtHighlight({required int step, required GlobalKey key, required Widget child}) {
-    final active = _wtStep == step;
-    return AnimatedContainer(
+    return WalkthroughHighlight(
       key: key,
-      duration: const Duration(milliseconds: 250),
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: active ? context.palette.primary : Colors.transparent,
-          width: 2,
-        ),
-        boxShadow: active
-            ? [
-                BoxShadow(
-                  color: context.palette.primary.withValues(alpha: 0.25),
-                  blurRadius: 16,
-                  spreadRadius: 1,
-                ),
-              ]
-            : null,
-      ),
+      active: _wtStep == step,
       child: child,
     );
   }
