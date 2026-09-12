@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
+import 'walkthrough_tip_panel.dart';
 import '../theme/app_theme.dart';
+import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -30,8 +32,93 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   bool _loading = false;
   Map<String, dynamic>? _result; // {booking_id, guest_chat_url, host_chat_url}
 
+  // Part C steps 1-2 of the post-training walkthrough (steps 3-9 continue in
+  // ChatLiveDialog once "Open Host Chat" is used — see walkthrough.md).
+  // Fires once ever, across all properties, on the first-ever guest link
+  // generated. Docked via a real Overlay entry for the same reason as Part B
+  // (property_detail_drawer.dart's _wtOverlay) — never nest the tip panel
+  // inside this dialog's own showDialog route.
+  bool _wtActive = false;
+  final _wtDockLink = LayerLink();
+  OverlayEntry? _wtOverlay;
+  final _wtStepNotifier = ValueNotifier<int?>(null);
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeStartWalkthrough();
+  }
+
+  Future<void> _maybeStartWalkthrough() async {
+    if (widget.isDev) return;
+    final seen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
+    if (seen || !mounted) return;
+    setState(() {
+      _wtActive = true;
+      _nameController.text = 'Test walkthrough';
+    });
+    _wtStepNotifier.value = 0;
+  }
+
+  void _wtClose() {
+    setState(() => _wtActive = false);
+    _wtStepNotifier.value = null;
+  }
+
+  void _wtNext() {
+    if (_result == null) {
+      _generate();
+    } else {
+      _openHostChat();
+    }
+  }
+
+  void _ensureWtOverlayInserted() {
+    if (_wtOverlay != null) return;
+    final entry = OverlayEntry(builder: (overlayContext) {
+      return ValueListenableBuilder<int?>(
+        valueListenable: _wtStepNotifier,
+        builder: (_, step, __) {
+          final screenW = MediaQuery.of(overlayContext).size.width;
+          if (step == null || screenW < 1000) return const SizedBox.shrink();
+          return Positioned(
+            width: 300,
+            child: CompositedTransformFollower(
+              link: _wtDockLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topRight,
+              followerAnchor: Alignment.topLeft,
+              offset: const Offset(20, 0),
+              child: WalkthroughTipPanel(
+                stepIndex: step,
+                stepCount: 9,
+                body: step == 0
+                    ? "I've filled in a test name — hit Generate Link and "
+                        "I'll create real links you can use to message me "
+                        "myself, as a guest."
+                    : "Send whichever matches how your guest reaches out — "
+                        "web, WhatsApp, or Telegram, they all reach me the "
+                        "same way. One more thing to show you first →",
+                onNext: _wtNext,
+                onClose: _wtClose,
+                isLast: false,
+              ),
+            ),
+          );
+        },
+      );
+    });
+    _wtOverlay = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Overlay.of(context, rootOverlay: true).insert(entry);
+    });
+  }
+
   @override
   void dispose() {
+    _wtOverlay?.remove();
+    _wtOverlay = null;
+    _wtStepNotifier.dispose();
     _nameController.dispose();
     super.dispose();
   }
@@ -58,6 +145,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (mounted) setState(() => _result = data);
+        if (_wtActive) _wtStepNotifier.value = 1;
         widget.onCreated?.call();
       } else {
         if (mounted) {
@@ -92,12 +180,14 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
     final propertyName = widget.property['name'] as String? ?? '';
+    final continueWalkthrough = _wtActive;
     Navigator.of(context).pop();
     ChatLiveDialog.show(
       context,
       bookingId: bookingId,
       propertyId: propertyId,
       propertyName: propertyName,
+      continueWalkthrough: continueWalkthrough,
     );
   }
 
@@ -138,7 +228,18 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
 
-    return AlertDialog(
+    // The LayerLink target must wrap a tightly-sized widget, not the whole
+    // AlertDialog — Dialog's own build() internally expands to fill the
+    // entire route (to center its card), so a target wrapping the whole
+    // AlertDialog reports the FULL SCREEN as its box, anchoring the docked
+    // panel off past the viewport edge. Wrapping just `content` (a real,
+    // dialog-sized widget) gives a sane box to anchor beside instead.
+    final content = CompositedTransformTarget(
+      link: _wtDockLink,
+      child: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+    );
+
+    final dialog = AlertDialog(
       insetPadding: isMobile
           ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
           : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -149,9 +250,12 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       actionsOverflowDirection: VerticalDirection.up,
       actionsOverflowButtonSpacing: isMobile ? 8 : null,
       title: Text(_titleText),
-      content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+      content: content,
       actions: _actions,
     );
+
+    _ensureWtOverlayInserted();
+    return dialog;
   }
 
   Widget _buildStep1(bool isMobile) {
@@ -209,16 +313,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Glow highlight around the generated links kept dormant — see
-          // walkthrough.md. Was driven by _isWalkthrough, now removed.
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.transparent, width: 2),
-            ),
-            child: guestRows,
-          ),
+          guestRows,
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
         ],
@@ -261,6 +356,3 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     );
   }
 }
-
-// The walkthrough tip bubble that used to render here (Part C, steps 1-2)
-// was removed — see walkthrough.md for its copy, kept for a future rebuild.

@@ -33,4 +33,25 @@ class WalkthroughPrefs {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_postTrainingPrefix$propertyId');
   }
+
+  // Part C (Guest Link dialog + Host Chat, 9 combined steps) — a single
+  // global flag, not per-property, since it only ever needs to run once for
+  // a host regardless of how many properties they manage. Only ever written
+  // from chat_live_dialog.dart, where the sequence actually ends.
+  static const _guestLinkWalkthroughKey = 'guest_link_walkthrough_seen';
+
+  static Future<bool> isGuestLinkWalkthroughSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_guestLinkWalkthroughKey) ?? false;
+  }
+
+  static Future<void> markGuestLinkWalkthroughSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_guestLinkWalkthroughKey, true);
+  }
+
+  static Future<void> resetGuestLinkWalkthrough() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_guestLinkWalkthroughKey);
+  }
 }
