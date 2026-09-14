@@ -755,29 +755,39 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   }
 
   Future<void> _discardLearned(int index) async {
+    // Previously had no confirmation at all — one accidental tap permanently
+    // threw away a real, auto-detected suggestion with no undo (unlike
+    // Accept, which gets a grace-period Undo). Now routed through the same
+    // confirm dialog the Vault's own delete already uses, for consistency.
+    final confirmed = await _confirmDelete(
+      'Discard this suggestion?',
+      "Alfred picked this up from a real guest conversation. Discarding it "
+          "can't be undone — Alfred won't suggest it again.",
+      confirmLabel: 'Discard',
+    );
+    if (!confirmed) return;
     final updated = List<Map<String, dynamic>>.from(_learnedKnowledge)
       ..removeAt(index);
     await _writeLearned(updated);
   }
 
-  Future<bool> _confirmDelete(String question) async {
+  Future<bool> _confirmDelete(String title, String body,
+      {String confirmLabel = 'Delete'}) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete this entry?'),
-        content: Text(
-          'This permanently removes it from $question learned knowledge. '
-          'Alfred will no longer use it to answer guests.',
-        ),
+        title: Text(title),
+        content: Text(body),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            style:
+                FilledButton.styleFrom(backgroundColor: context.palette.danger),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: Text(confirmLabel),
           ),
         ],
       ),
@@ -885,7 +895,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                             size: 18, color: Colors.red.shade600),
                                         onPressed: () async {
                                           if (await _confirmDelete(
-                                              'this property’s')) {
+                                            'Delete this entry?',
+                                            "This permanently removes it from "
+                                                "this property's learned "
+                                                "knowledge. Alfred will no "
+                                                "longer use it to answer guests.",
+                                          )) {
                                             _beginVaultDelete(key,
                                                 onChange: safeRefresh);
                                           }

@@ -50,7 +50,10 @@ class _ConflictQuestionnaireWidgetState
     super.dispose();
   }
 
-  bool get _hasCompleteAnswer => _selectedValues.entries.any((e) {
+  // Was .any — enabled submit once a single conflict was answered, silently
+  // submitting the rest unresolved while the parent screen's success dialog
+  // implied full resolution either way. Requires every conflict answered now.
+  bool get _hasCompleteAnswer => _selectedValues.entries.every((e) {
         final selected = e.value;
         if (selected == null) return false;
         if (selected != 'other') return true;

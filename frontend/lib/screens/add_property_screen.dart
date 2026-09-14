@@ -769,7 +769,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           : 'Conflicts Pending Review',
       'Trained' => 'Trained',
       'Fully_Trained' => 'Fully Trained',
-      _ => status,
+      // Any other backend status (e.g. Ingest_Error, a real expected status
+      // per setup_status.dart) previously showed the raw enum verbatim —
+      // humanize instead of falling through unmapped.
+      _ => status.replaceAll('_', ' '),
     };
     // Soft-fill using semantic container tokens (ui-ux-pro-max §6 color-semantic).
     final (bg, fg) = switch (status) {
@@ -777,6 +780,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       'Merged' || 'Trained' => (context.palette.successContainer, context.palette.success),
       'Conflict_Pending' => (context.palette.warningContainer, context.palette.warning),
       'Fully_Trained' => (context.palette.primaryContainer, context.palette.onPrimaryContainer),
+      _ when status.contains('Error') =>
+        (context.palette.dangerContainer, context.palette.danger),
       _ => (context.palette.surfaceAlt, context.palette.textSecondary),
     };
     return Row(
@@ -892,9 +897,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   Widget build(BuildContext context) {
     // !_isMerging guards Train Now's auto-chained merge (User mode) — without
     // it the button re-enables the moment ingest finishes, while merge is
-    // still silently running in the background.
-    final canIngest =
-        _urlController.text.trim().isNotEmpty && !_isIngesting && !_isMerging;
+    // still silently running in the background. The airbnb. check is a
+    // lightweight format guard — previously any non-empty text (a typo, a
+    // random link) triggered the full multi-minute Train Now flow before
+    // failing with a generic scrape error.
+    final urlText = _urlController.text.trim();
+    final canIngest = urlText.isNotEmpty &&
+        urlText.toLowerCase().contains('airbnb.') &&
+        !_isIngesting &&
+        !_isMerging;
     final trainingInProgress = _isIngesting || (!widget.isDev && _isMerging);
     final effectiveId = _resolvedPropertyId ?? _propertyId;
     final conflictReport = _masterJson?['conflict_report'] as List<dynamic>?;
@@ -918,7 +929,38 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       color: context.palette.primary)),
               leading: BackButton(
                 color: context.palette.primary,
-                onPressed: () => Navigator.of(context).pop(),
+                // Previously abandoned an in-progress ingest/merge with zero
+                // confirmation, likely leaving the property half-created.
+                onPressed: () async {
+                  if (!trainingInProgress) {
+                    Navigator.of(context).pop();
+                    return;
+                  }
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: context.palette.surface,
+                      title: const Text('Leave while training?'),
+                      content: const Text(
+                          "Alfred is still learning this property. Leaving now "
+                          "won't stop it, but you'll need to check back to see "
+                          "how it went."),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Stay'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('Leave'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true && mounted) {
+                    Navigator.of(context).pop();
+                  }
+                },
               ),
             ),
           ),
