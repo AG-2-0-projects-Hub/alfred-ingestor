@@ -1062,6 +1062,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           IconButton(
             icon: Icon(Icons.close_rounded,
                 color: Colors.white, size: 20),
+            tooltip: 'Close',
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],

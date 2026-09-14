@@ -205,6 +205,7 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.close_rounded),
+                        tooltip: 'Close',
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                     ],

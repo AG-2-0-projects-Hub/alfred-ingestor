@@ -97,15 +97,30 @@ class _GlassPanelState extends State<GlassPanel> {
 
     if (!widget.hoverable && widget.onTap == null) return clipped;
 
+    // Was a bare GestureDetector — mouse/touch-only, invisible to a keyboard
+    // user (no focus, no Enter/Space activation) and to a screen reader (no
+    // button semantics). This is a shared component, so wrapping it here
+    // fixes every GlassPanel(onTap: ...) consumer app-wide at once. InkWell
+    // gives real button semantics, keyboard focus + activation, and a splash
+    // that shows correctly through the translucent glass surface.
+    final tappable = widget.onTap == null
+        ? clipped
+        : Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(widget.radius),
+              child: clipped,
+            ),
+          );
+
     return MouseRegion(
       cursor: widget.onTap != null
           ? SystemMouseCursors.click
           : MouseCursor.defer,
       onEnter: widget.hoverable ? (_) => setState(() => _hovered = true) : null,
       onExit: widget.hoverable ? (_) => setState(() => _hovered = false) : null,
-      child: widget.onTap == null
-          ? clipped
-          : GestureDetector(onTap: widget.onTap, child: clipped),
+      child: tappable,
     );
   }
 }

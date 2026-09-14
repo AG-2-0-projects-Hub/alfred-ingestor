@@ -1963,6 +1963,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 22,
               ),
+              tooltip: _playing ? 'Pause' : 'Play',
               color: context.palette.primary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 44, minHeight: 44),

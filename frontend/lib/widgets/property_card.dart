@@ -100,57 +100,64 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: _hovered ? palette.primaryContainer : palette.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _hovered ? palette.primary : palette.primaryHover,
-              width: _hovered ? 1.5 : 1,
-              style: BorderStyle.solid,
+      // Was a bare GestureDetector, unreachable by keyboard. InkWell gives
+      // real button semantics plus focus/Enter/Space activation for free —
+      // no custom press animation here to preserve, unlike the main card.
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            decoration: BoxDecoration(
+              color: _hovered ? palette.primaryContainer : palette.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _hovered ? palette.primary : palette.primaryHover,
+                width: _hovered ? 1.5 : 1,
+                style: BorderStyle.solid,
+              ),
+              boxShadow: _hovered ? palette.cardShadowHover : [],
             ),
-            boxShadow: _hovered ? palette.cardShadowHover : [],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: _hovered
-                      ? palette.primary.withValues(alpha: 0.12)
-                      : palette.primaryContainer,
-                  shape: BoxShape.circle,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: _hovered
+                        ? palette.primary.withValues(alpha: 0.12)
+                        : palette.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.add_rounded,
+                    size: 32,
+                    color: palette.primary,
+                  ),
                 ),
-                child: Icon(
-                  Icons.add_rounded,
-                  size: 32,
-                  color: palette.primary,
+                const SizedBox(height: 16),
+                Text(
+                  'Add Property',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w400,
+                    color: palette.primary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Add Property',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: palette.primary,
+                const SizedBox(height: 6),
+                Text(
+                  'Connect your Airbnb listing',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: palette.textMuted,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Connect your Airbnb listing',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: palette.textMuted,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -280,147 +287,178 @@ class _PropertyCardState extends State<_PropertyCard> {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onOpenExpanded,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 200),
-          curve: AppTheme.standardEasing,
-          scale: _pressed ? AppTheme.pressScale : (_hovered ? 1.012 : 1.0),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            decoration: BoxDecoration(
-              color: _hovered ? palette.glassTintStrong : palette.glassTint,
-              gradient: AppTheme.glassInnerHighlight,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _hovered
-                    ? palette.primaryHover.withValues(alpha: 0.5)
-                    : palette.glassBorderStrong,
-                width: 1,
+        // This card is the dashboard's primary way into a property — was a
+        // bare GestureDetector, so a keyboard-only user (Tab through the
+        // page) could never reach or open it at all. FocusableActionDetector
+        // adds real focus + Enter/Space activation (the app's default
+        // Shortcuts already route those keys to ActivateIntent for whichever
+        // widget has focus) without touching the custom tap-down/up press
+        // animation below; Semantics gives it a real button role for screen
+        // readers.
+        Semantics(
+          button: true,
+          label: 'Open ${widget.property['name'] as String? ?? 'property'}',
+          child: FocusableActionDetector(
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (intent) {
+                  widget.onOpenExpanded();
+                  return null;
+                },
               ),
-              boxShadow: [
-                ..._statusGlow(palette),
-                ...(_hovered ? palette.cardShadowHover : palette.cardShadow),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  height: 160,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _HeroImage(
-                          propertyId: propertyId,
-                          status: status,
-                          fallbackUrl: thumbnailUrl),
-                      Positioned(
-                        left: 0, right: 0, bottom: 0,
-                        height: 56,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.28),
-                                Colors.transparent,
+            },
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit: (_) => setState(() => _hovered = false),
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: widget.onOpenExpanded,
+                onTapDown: (_) => setState(() => _pressed = true),
+                onTapUp: (_) => setState(() => _pressed = false),
+                onTapCancel: () => setState(() => _pressed = false),
+                child: AnimatedScale(
+                  duration: const Duration(milliseconds: 200),
+                  curve: AppTheme.standardEasing,
+                  scale:
+                      _pressed ? AppTheme.pressScale : (_hovered ? 1.012 : 1.0),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      color: _hovered
+                          ? palette.glassTintStrong
+                          : palette.glassTint,
+                      gradient: AppTheme.glassInnerHighlight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _hovered
+                            ? palette.primaryHover.withValues(alpha: 0.5)
+                            : palette.glassBorderStrong,
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        ..._statusGlow(palette),
+                        ...(_hovered
+                            ? palette.cardShadowHover
+                            : palette.cardShadow),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 160,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _HeroImage(
+                                  propertyId: propertyId,
+                                  status: status,
+                                  fallbackUrl: thumbnailUrl),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                height: 56,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.bottomCenter,
+                                      end: Alignment.topCenter,
+                                      colors: [
+                                        Colors.black.withValues(alpha: 0.28),
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: _StatusBadge(status: status),
+                              ),
+                              if (widget.activeChatCount > 0)
+                                Positioned(
+                                  bottom: 8,
+                                  left: 12,
+                                  child:
+                                      _ChatBadge(count: widget.activeChatCount),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w400,
+                                    color: palette.textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                if (widget.hasEmergency) ...[
+                                  const SizedBox(height: 6),
+                                  _AlertPill(
+                                    label: 'Emergency',
+                                    icon: Icons.warning_amber_rounded,
+                                    bg: palette.dangerContainer,
+                                    fg: palette.danger,
+                                  ),
+                                ] else if (widget.hasEscalation) ...[
+                                  const SizedBox(height: 6),
+                                  _AlertPill(
+                                    label: 'Needs Attention',
+                                    icon: Icons.notifications_active_rounded,
+                                    bg: palette.warningContainer,
+                                    fg: palette.warning,
+                                  ),
+                                ],
+                                if (widget.conversationPreviews.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: _PillPreviewList(
+                                      previews: widget.conversationPreviews,
+                                      onOpenChat: widget.onOpenChat,
+                                      onOpenAll: widget.onOpenExpanded,
+                                    ),
+                                  ),
+                                  // _PillPreviewList deliberately fills every pixel of
+                                  // its Expanded box (it greedily fits as many pills
+                                  // as the space allows), so its last line — often
+                                  // "+N more active" — otherwise lands flush against
+                                  // the action row below with no breathing room.
+                                  const SizedBox(height: 8),
+                                ] else
+                                  const Spacer(),
+                                _buildActions(context, status, palette),
                               ],
                             ),
                           ),
                         ),
-                      ),
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: _StatusBadge(status: status),
-                      ),
-                      if (widget.activeChatCount > 0)
-                        Positioned(
-                          bottom: 8,
-                          left: 12,
-                          child: _ChatBadge(count: widget.activeChatCount),
-                        ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w400,
-                            color: palette.textPrimary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        if (widget.hasEmergency) ...[
-                          const SizedBox(height: 6),
-                          _AlertPill(
-                            label: 'Emergency',
-                            icon: Icons.warning_amber_rounded,
-                            bg: palette.dangerContainer,
-                            fg: palette.danger,
-                          ),
-                        ] else if (widget.hasEscalation) ...[
-                          const SizedBox(height: 6),
-                          _AlertPill(
-                            label: 'Needs Attention',
-                            icon: Icons.notifications_active_rounded,
-                            bg: palette.warningContainer,
-                            fg: palette.warning,
-                          ),
-                        ],
-                        if (widget.conversationPreviews.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _PillPreviewList(
-                              previews: widget.conversationPreviews,
-                              onOpenChat: widget.onOpenChat,
-                              onOpenAll: widget.onOpenExpanded,
-                            ),
-                          ),
-                          // _PillPreviewList deliberately fills every pixel of
-                          // its Expanded box (it greedily fits as many pills
-                          // as the space allows), so its last line — often
-                          // "+N more active" — otherwise lands flush against
-                          // the action row below with no breathing room.
-                          const SizedBox(height: 8),
-                        ] else
-                          const Spacer(),
-                        _buildActions(context, status, palette),
                       ],
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
         ),
         _buildStep0Tip(),
       ],
     );
   }
 
-  Widget _buildActions(BuildContext context, String status, AppPalette palette) {
+  Widget _buildActions(
+      BuildContext context, String status, AppPalette palette) {
     final isProcessing = status == 'Ingesting' || status == 'Training';
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
@@ -442,24 +480,33 @@ class _PropertyCardState extends State<_PropertyCard> {
         const SizedBox(width: 8),
         Text(
           'Processing…',
-          style: GoogleFonts.inter(
-              fontSize: 12, color: palette.textSecondary),
+          style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
         ),
       ]);
     }
 
+    // Re-ingest/Resolve conflicts were GestureDetector-wrapped Text — no
+    // hover/focus affordance or button semantics, easy to miss exactly when
+    // a host needs a recovery action most. InkWell gives both, plus real
+    // keyboard access, for a couple of lines each.
     if (isError) {
       return Row(children: [
         Icon(Icons.error_outline_rounded, size: 15, color: palette.danger),
         const SizedBox(width: 6),
-        GestureDetector(
-          onTap: widget.onOpenSettings,
-          child: Text(
-            'Re-ingest',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: palette.danger,
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                'Re-ingest',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: palette.danger,
+                ),
+              ),
             ),
           ),
         ),
@@ -470,14 +517,20 @@ class _PropertyCardState extends State<_PropertyCard> {
       return Row(children: [
         Icon(Icons.warning_amber_rounded, size: 15, color: palette.warning),
         const SizedBox(width: 6),
-        GestureDetector(
-          onTap: widget.onOpenSettings,
-          child: Text(
-            'Resolve conflicts',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: palette.warning,
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                'Resolve conflicts',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: palette.warning,
+                ),
+              ),
             ),
           ),
         ),
@@ -513,6 +566,7 @@ class _ReadyActions extends StatelessWidget {
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
   final bool highlightHint;
+
   /// When set, the Step 0 hint panel is docked off this link — anchored to
   /// just the +Guest/Settings pair (not the whole action row) so the panel
   /// points at the space between those two buttons specifically.
@@ -684,15 +738,19 @@ class _Step0Tip extends StatelessWidget {
                   TextSpan(
                     text: '+Guest',
                     style: TextStyle(
-                        fontWeight: FontWeight.w700, color: palette.textPrimary),
+                        fontWeight: FontWeight.w700,
+                        color: palette.textPrimary),
                   ),
                   const TextSpan(text: ' to connect your guest, or '),
                   TextSpan(
                     text: 'Settings',
                     style: TextStyle(
-                        fontWeight: FontWeight.w700, color: palette.textPrimary),
+                        fontWeight: FontWeight.w700,
+                        color: palette.textPrimary),
                   ),
-                  const TextSpan(text: ' to check in on training. Click either to keep going.'),
+                  const TextSpan(
+                      text:
+                          ' to check in on training. Click either to keep going.'),
                 ],
               ),
             ),
@@ -739,16 +797,27 @@ class _StatusBadge extends StatelessWidget {
     // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
     // bioluminescent mint; emergencies/errors get warm red glow.
     final (label, bg, fg, glowAlpha) = switch (status) {
-      'Ingesting' || 'Training' =>
-        ('Processing', p.accentContainer, p.accent, 0.25),
+      'Ingesting' || 'Training' => (
+          'Processing',
+          p.accentContainer,
+          p.accent,
+          0.25
+        ),
       'Ingested' => ('Ingested', p.warningContainer, p.warning, 0.35),
-      'Merged' || 'Trained' || 'Resolved' =>
-        ('Ready', p.successContainer, p.success, 0.35),
+      'Merged' || 'Trained' || 'Resolved' => (
+          'Ready',
+          p.successContainer,
+          p.success,
+          0.35
+        ),
       'Active' => ('Active', p.accentContainer, p.accent, 0.30),
-      'Conflict_Pending' =>
-        ('Conflicts', p.warningContainer, p.warning, 0.35),
-      String s when s.contains('Error') =>
-        ('Error', p.dangerContainer, p.danger, 0.40),
+      'Conflict_Pending' => ('Conflicts', p.warningContainer, p.warning, 0.35),
+      String s when s.contains('Error') => (
+          'Error',
+          p.dangerContainer,
+          p.danger,
+          0.40
+        ),
       _ => (
           status.isNotEmpty ? status : 'Unknown',
           p.surfaceAlt,
@@ -891,8 +960,7 @@ class _HeroImageState extends State<_HeroImage> {
     try {
       final url = await Supabase.instance.client.storage
           .from('Property_assets')
-          .createSignedUrl(
-              '${widget.propertyId}/hero_image/main.jpg', 3600);
+          .createSignedUrl('${widget.propertyId}/hero_image/main.jpg', 3600);
       if (mounted) setState(() => _url = url);
     } catch (_) {}
     if (mounted) setState(() => _loaded = true);
