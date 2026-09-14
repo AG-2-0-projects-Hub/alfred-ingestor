@@ -4,14 +4,24 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'chat_live_dialog.dart';
 
+/// Lists a property's conversations and opens the tapped one in
+/// [ChatLiveDialog]. Doubles as both "Chat History" (showArchived: true, the
+/// original use) and the in-app "Host Chat" entry point (showArchived:
+/// false) — the latter replaces a property-level "Host Chat" button that
+/// used to push the legacy, unstyled HostPanelScreen (plain Material
+/// colors, no glass treatment, missing this dialog's guest-link/archive
+/// context). Reusing this widget rather than building a second one keeps
+/// both lists visually and behaviorally identical.
 class ArchivedChatsDialog extends StatefulWidget {
   final String propertyId;
   final String propertyName;
+  final bool showArchived;
 
   const ArchivedChatsDialog({
     super.key,
     required this.propertyId,
     required this.propertyName,
+    this.showArchived = true,
   });
 
   @override
@@ -31,20 +41,30 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
   Future<void> _load() async {
     try {
       // Chat History = archived conversations (auto-archived once the
-      // reservation ended, or manually archived by the host). Active ones live
-      // on the dashboard. Joined to the guest for name + booking display.
-      final data = await Supabase.instance.client
-          .from('conversations')
-          .select('booking_id, archived_at, guests(name, created_at)')
-          .eq('property_id', widget.propertyId)
-          .not('archived_at', 'is', null)
-          .order('archived_at', ascending: false);
+      // reservation ended, or manually archived by the host). Host Chat =
+      // active (not-yet-archived) ones. Joined to the guest for name +
+      // booking display; the timestamp column differs per list (when it was
+      // archived vs. when it was last active).
+      final data = widget.showArchived
+          ? await Supabase.instance.client
+              .from('conversations')
+              .select('booking_id, archived_at, guests(name, created_at)')
+              .eq('property_id', widget.propertyId)
+              .not('archived_at', 'is', null)
+              .order('archived_at', ascending: false)
+          : await Supabase.instance.client
+              .from('conversations')
+              .select('booking_id, last_message_at, guests(name, created_at)')
+              .eq('property_id', widget.propertyId)
+              .filter('archived_at', 'is', null)
+              .order('last_message_at', ascending: false);
       final guests = [
         for (final c in data)
           {
             'booking_id': c['booking_id'],
             'name': (c['guests'] as Map?)?['name'] ?? 'Guest',
-            'created_at': c['archived_at'],
+            'created_at':
+                widget.showArchived ? c['archived_at'] : c['last_message_at'],
           }
       ];
       if (mounted) {
@@ -95,7 +115,10 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                       color: context.palette.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.history_rounded,
+                    child: Icon(
+                        widget.showArchived
+                            ? Icons.history_rounded
+                            : Icons.chat_bubble_outline_rounded,
                         color: context.palette.primary, size: 18),
                   ),
                   const SizedBox(width: 12),
@@ -104,7 +127,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Chat History',
+                          widget.showArchived ? 'Chat History' : 'Host Chat',
                           style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w500,
                             fontSize: 16,
@@ -125,6 +148,7 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                   IconButton(
                     icon: Icon(Icons.close_rounded,
                         size: 20, color: context.palette.textMuted),
+                    tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -158,7 +182,9 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                'No past chats yet.',
+                                widget.showArchived
+                                    ? 'No past chats yet.'
+                                    : 'No conversations yet.',
                                 style: GoogleFonts.plusJakartaSans(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
@@ -167,7 +193,9 @@ class _ArchivedChatsDialogState extends State<ArchivedChatsDialog> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Guest conversations will appear here.',
+                                widget.showArchived
+                                    ? 'Guest conversations will appear here.'
+                                    : 'Generate a guest link to start one.',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
                                     color: context.palette.textSecondary),

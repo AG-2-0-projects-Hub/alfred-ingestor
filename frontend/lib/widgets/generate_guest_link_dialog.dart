@@ -54,6 +54,11 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     if (widget.isDev) return;
     final seen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
     if (seen || !mounted) return;
+    // The tip panel explaining each step is hidden below this width (see the
+    // ValueListenableBuilder's own screenW < 1000 check below) — never start
+    // the walkthrough at all on a narrow viewport, rather than disabling
+    // Cancel/Done with no visible explanation of why.
+    if (MediaQuery.sizeOf(context).width < 1000) return;
     setState(() {
       _wtActive = true;
       _nameController.text = 'Test walkthrough';

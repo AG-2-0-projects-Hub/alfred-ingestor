@@ -177,7 +177,15 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   void initState() {
     super.initState();
     _loadConversation();
-    if (widget.continueWalkthrough) {
+    // Also re-checked here (not just at the GenerateGuestLinkDialog step that
+    // sets continueWalkthrough) in case the viewport narrowed between the two
+    // — the tip panel is hidden below this width (see the
+    // ValueListenableBuilder's own screenW < 1000 check below), so never
+    // start the walkthrough state without it: that would silently lock the
+    // chat into "Intervene" mode with injected demo messages and no visible
+    // way to progress.
+    if (widget.continueWalkthrough &&
+        MediaQuery.sizeOf(context).width >= 1000) {
       _wtStep = 0;
       _wtStepNotifier.value = 0;
     }
@@ -477,7 +485,22 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         .order('created_at', ascending: true)
         .listen((data) {
           if (mounted) {
-            setState(() => _messages = data);
+            setState(() {
+              if (_wtStep != null) {
+                // A real message can land while the walkthrough demo is
+                // active — its own final step explicitly invites the host to
+                // trigger this, by opening their own guest link. Replacing
+                // _messages wholesale would silently wipe the locally
+                // injected wt-demo-* bubbles the host is mid-tutorial on, so
+                // merge instead: keep the demo messages, refresh everything
+                // real underneath them.
+                final demoMessages = _messages.where(
+                    (m) => (m['id'] as String?)?.startsWith('wt-demo-') ?? false);
+                _messages = [...data, ...demoMessages];
+              } else {
+                _messages = data;
+              }
+            });
             _scrollToBottom();
             // An escalation can land while this dialog is open. Detect it from
             // the messages themselves — scanning ALL rows, since the last one is
@@ -952,7 +975,14 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           IconButton(
             icon: const Icon(Icons.close_rounded),
             tooltip: 'Close',
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () {
+              // Previously only the tip panel's own close icon called
+              // _wtFinish() — dismissing via this main close button (the more
+              // obvious one) left the walkthrough unmarked, so it re-ran on
+              // the next guest link generated.
+              if (_wtStep != null) _wtFinish();
+              Navigator.of(context).pop();
+            },
             color: palette.textMuted,
           ),
         ],

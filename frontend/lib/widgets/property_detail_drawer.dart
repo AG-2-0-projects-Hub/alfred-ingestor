@@ -10,7 +10,7 @@ import 'voice_recorder.dart';
 import 'file_status_list.dart';
 import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
-import '../screens/host_panel_screen.dart';
+import 'archived_chats_dialog.dart';
 import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
@@ -135,7 +135,14 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final status = _property['status'] as String? ?? '';
     if (!_wtReadyStatuses.contains(status)) return;
     final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
-    if (!seen && mounted) _setWtStep(0);
+    if (seen || !mounted) return;
+    // The tip panel explaining each highlighted step is hidden below this
+    // width (see _ensureWtOverlayInserted's own screenW < 1000 check) — never
+    // start the walkthrough state at all on a narrow viewport, rather than
+    // starting it with highlighted/locked UI and no visible explanation or
+    // way to progress.
+    if (MediaQuery.sizeOf(context).width < 1000) return;
+    _setWtStep(0);
   }
 
   Future<void> _loadReplayPending() async {
@@ -2049,10 +2056,17 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             child: FilledButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => HostPanelScreen(
-                        propertyId: _property['id'] as String),
+                // Was HostPanelScreen (plain Material colors, no glass
+                // treatment, missing guest-link/archive context) — reuses the
+                // same themed conversation-list dialog "Chat History" already
+                // used correctly elsewhere, just scoped to active
+                // conversations instead of archived ones.
+                showDialog(
+                  context: context,
+                  builder: (_) => ArchivedChatsDialog(
+                    propertyId: _property['id'] as String,
+                    propertyName: _property['name'] as String? ?? 'Property',
+                    showArchived: false,
                   ),
                 );
               },
