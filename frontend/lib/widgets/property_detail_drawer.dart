@@ -39,6 +39,9 @@ class PropertyDetailDrawer extends StatefulWidget {
 class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  // Kept in sync with _tabController's length via _syncTabControllerForConflict
+  // — see that method for why this can't just be recomputed inline in build().
+  bool _hasConflict = false;
   late Map<String, dynamic> _property;
   String? _heroUrl;
   bool _heroLoaded = false;
@@ -114,11 +117,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   void initState() {
     super.initState();
     _property = Map<String, dynamic>.from(widget.property);
-    final hasConflict = _property['Conflict_status'] == 'pending';
+    _hasConflict = _property['Conflict_status'] == 'pending';
     // Dev: Overview, Files, Knowledge(, Resolve). User: Overview, Knowledge(,
     // Resolve) — the Files tab folds into Overview's file summary card instead.
     _tabController = TabController(
-      length: (widget.isDev ? 3 : 2) + (hasConflict ? 1 : 0),
+      length: (widget.isDev ? 3 : 2) + (_hasConflict ? 1 : 0),
       vsync: this,
     );
     _loadHeroUrl();
@@ -350,8 +353,32 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           if (!mounted || rows.isEmpty) return;
           setState(() {
             _property = <String, dynamic>{..._property, ...rows.first};
+            _syncTabControllerForConflict(
+                _property['Conflict_status'] == 'pending');
           });
         });
+  }
+
+  // TabController.length is immutable once created, but the tab count
+  // depends on _hasConflict, which can flip live — either because this
+  // drawer's own Resolve tab just cleared it (_onResolved) or because the
+  // realtime subscription above replaced _property with a row where it
+  // changed (resolved/created elsewhere). Without this, TabBar/TabBarView
+  // throw a tab-count assertion the instant the tab list and the controller's
+  // length disagree. Must be called from inside the same setState that
+  // changes Conflict_status so the rebuild sees the new controller and the
+  // new tab list together.
+  void _syncTabControllerForConflict(bool newHasConflict) {
+    if (newHasConflict == _hasConflict) return;
+    final newLength = (widget.isDev ? 3 : 2) + (newHasConflict ? 1 : 0);
+    final oldController = _tabController;
+    _tabController = TabController(
+      length: newLength,
+      vsync: this,
+      initialIndex: oldController.index.clamp(0, newLength - 1),
+    );
+    oldController.dispose();
+    _hasConflict = newHasConflict;
   }
 
   Future<void> _loadHeroUrl() async {
@@ -565,6 +592,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _property['status'] = status;
       _property['master_json'] = masterJson;
       _property['Conflict_status'] = null;
+      _syncTabControllerForConflict(false);
     });
     widget.onRefresh();
   }
@@ -899,7 +927,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   @override
   Widget build(BuildContext context) {
-    final hasConflict = _property['Conflict_status'] == 'pending';
+    // Reads the field kept in sync by _syncTabControllerForConflict, not a
+    // fresh recompute — build() must agree with _tabController.length, and
+    // those two are set together at every Conflict_status mutation site.
+    final hasConflict = _hasConflict;
     final screenW = MediaQuery.of(context).size.width;
     final drawerW = screenW < 600 ? screenW : 440.0;
 
@@ -1985,7 +2016,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         key: ValueKey(conflictReport.length),
         propertyId: _property['id'] as String,
         conflictReport: conflictReport,
-        backendUrl: dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
         onResolved: _onResolved,
       ),
     );

@@ -21,11 +21,18 @@ const List<String> trainingWaitFacts = [
   "The more documents and photos you upload now, the fewer late-night \"how does the AC work?\" messages later.",
 ];
 
-/// Shown for the duration of a Train Now run (User mode). Purely visual —
-/// callers show it via showDialog and pop it themselves once ingest+merge
-/// finish; it has no close button and never dismisses itself.
+/// Shown for the duration of a Train Now run (User mode). Callers show it via
+/// showDialog and pop it themselves once ingest+merge finish. It also offers
+/// its own "Continue in background" exit — true mid-flight cancellation of
+/// the backend job isn't safe (ingest/merge aren't designed to be aborted
+/// mid-run), so this dismisses the dialog without touching the in-flight
+/// request; the caller still surfaces the eventual success/error result via
+/// its normal SnackBar/dialog path once the request completes, whether or
+/// not this dialog is still open to see it.
 class TrainingWaitDialog extends StatefulWidget {
-  const TrainingWaitDialog({super.key});
+  final VoidCallback? onRunInBackground;
+
+  const TrainingWaitDialog({super.key, this.onRunInBackground});
 
   @override
   State<TrainingWaitDialog> createState() => _TrainingWaitDialogState();
@@ -131,6 +138,23 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
                   ),
                 ),
               ),
+              if (widget.onRunInBackground != null) ...[
+                const SizedBox(height: 14),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    widget.onRunInBackground!();
+                  },
+                  child: Text(
+                    'Continue in background',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: palette.textMuted,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

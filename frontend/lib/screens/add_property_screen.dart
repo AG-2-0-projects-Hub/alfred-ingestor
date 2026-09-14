@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
@@ -43,6 +44,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   String? _resolvedPropertyId;
   bool _isIngesting = false;
   bool _isMerging = false;
+  // True once the host taps TrainingWaitDialog's "Continue in background" —
+  // guards _startIngest's two Navigator...pop() calls so they don't try to
+  // pop a dialog that's already gone (which would pop whatever route is now
+  // on top instead, e.g. this screen itself).
+  bool _waitDialogDismissed = false;
   // Single list, tracked from upload through ingestion completion — status
   // updates in place (queued → processing → done/error) rather than a second
   // "Files Ingested" list appearing below a frozen first one.
@@ -166,6 +172,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
     setState(() {
       _isIngesting = true;
+      _waitDialogDismissed = false;
       _resolvedPropertyId = null;
       _ingestedMarkdown = null;
       _officialPropertyName = null;
@@ -184,7 +191,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         context: context,
         barrierDismissible: false,
         barrierColor: Colors.black.withValues(alpha: 0.65),
-        builder: (_) => const TrainingWaitDialog(),
+        builder: (_) => TrainingWaitDialog(
+          onRunInBackground: () => setState(() => _waitDialogDismissed = true),
+        ),
       );
     }
 
@@ -193,7 +202,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       backendUrl = ApiClient.backendUrl;
     } on ConfigurationException catch (e) {
       _showError(e.userMessage);
-      if (showWaitDialog && mounted) {
+      if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
       }
       setState(() => _isIngesting = false);
@@ -213,7 +222,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         'airbnb_url': url,
       });
 
-      final response = await http.Client().send(request);
+      // Connection-level timeout — without it, a backend that never responds
+      // at all (vs. streaming slowly) left "Ingesting…" hanging forever: only
+      // the stream-of-chunks below had a timeout, and that timer never starts
+      // until a response begins.
+      final response =
+          await http.Client().send(request).timeout(const Duration(seconds: 20));
       try {
         await for (final chunk in response.stream
             .transform(utf8.decoder)
@@ -291,6 +305,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               'Ingest could not complete. Please try again, or contact support if it persists.');
         }
       }
+    } on TimeoutException {
+      _showError("Couldn't reach Alfred. Check your connection and try again.");
     } on ApiException catch (e) {
       _showError(e.userMessage);
     } catch (e) {
@@ -302,7 +318,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         _showError('Ingest failed: $e');
       }
     } finally {
-      if (showWaitDialog && mounted) {
+      if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
       }
       setState(() => _isIngesting = false);
@@ -973,8 +989,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                         propertyId: _propertyId,
                         onFileAdded: _onFileAdded,
                         onFileResult: _onFileResult,
-                        isDuplicate: (filename) =>
-                            _filesToIngest.any((e) => e['file'] == filename),
+                        // Excludes error/timeout entries so a failed upload
+                        // can be re-dropped under the same filename instead of
+                        // being permanently rejected as "already in the queue"
+                        // with no recovery short of renaming the file.
+                        isDuplicate: (filename) => _filesToIngest.any((e) =>
+                            e['file'] == filename &&
+                            e['status'] != 'error' &&
+                            e['status'] != 'timeout'),
                       ),
                       const SizedBox(height: 16),
                       VoiceRecorderWidget(
@@ -1126,7 +1148,6 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       key: ValueKey(conflictReport.length),
                       propertyId: effectiveId,
                       conflictReport: conflictReport,
-                      backendUrl: ApiClient.backendUrl,
                       onResolved: _onResolved,
                       onAnswersSubmitted: () =>
                           setState(() => _resolutionsSubmitted = true),

@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -40,6 +40,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   bool _isIngesting = false;
   bool _isMerging = false;
   bool _isDeletingFile = false;
+  // True once the host taps TrainingWaitDialog's "Continue in background" —
+  // guards _hideTrainingWaitDialog's pop() so it doesn't try to pop a dialog
+  // that's already gone.
+  bool _waitDialogDismissed = false;
   // Single list, tracked from upload through ingestion completion — status
   // updates in place (queued → processing → done/error) rather than a second
   // "Files Ingested" list appearing below a frozen first one.
@@ -155,16 +159,19 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   // Dev mode keeps its plain button spinner, no popup.
   void _showTrainingWaitDialog() {
     if (widget.isDev || !mounted) return;
+    _waitDialogDismissed = false;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.65),
-      builder: (_) => const TrainingWaitDialog(),
+      builder: (_) => TrainingWaitDialog(
+        onRunInBackground: () => _waitDialogDismissed = true,
+      ),
     );
   }
 
   void _hideTrainingWaitDialog() {
-    if (widget.isDev || !mounted) return;
+    if (widget.isDev || !mounted || _waitDialogDismissed) return;
     Navigator.of(context, rootNavigator: true).pop();
   }
 
@@ -179,7 +186,18 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     });
     _showTrainingWaitDialog();
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+    // Previously fell back to 'http://localhost:8000' if BACKEND_URL was
+    // unset, bypassing ApiClient's fail-loud config guard — matches
+    // add_property_screen.dart's _startIngest pattern now.
+    final String backendUrl;
+    try {
+      backendUrl = ApiClient.backendUrl;
+    } on ConfigurationException catch (e) {
+      _showError(e.userMessage);
+      _hideTrainingWaitDialog();
+      if (mounted) setState(() => _isIngesting = false);
+      return;
+    }
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
@@ -193,7 +211,12 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         'airbnb_url': widget.property['airbnb_url'] as String? ?? '',
       });
 
-      final response = await http.Client().send(request);
+      // Connection-level timeout — without it, a backend that never responds
+      // at all (vs. streaming slowly) left "Ingesting…" hanging forever: only
+      // the stream-of-chunks below had a timeout, and that timer never starts
+      // until a response begins.
+      final response =
+          await http.Client().send(request).timeout(const Duration(seconds: 20));
       try {
         await for (final chunk in response.stream
             .transform(utf8.decoder)
@@ -235,6 +258,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
           });
         }
       }
+    } on TimeoutException {
+      _showError("Couldn't reach Alfred. Check your connection and try again.");
     } catch (e) {
       _showError('Ingest failed: $e');
     } finally {
@@ -702,7 +727,6 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       key: ValueKey(conflictReport.length),
                       propertyId: _propertyId,
                       conflictReport: conflictReport,
-                      backendUrl: dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
                       onResolved: _onResolved,
                     ),
                   ],

@@ -1,20 +1,17 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../services/api_client.dart';
 
 class ConflictQuestionnaireWidget extends StatefulWidget {
   const ConflictQuestionnaireWidget({
     super.key,
     required this.propertyId,
     required this.conflictReport,
-    required this.backendUrl,
     required this.onResolved,
     this.onAnswersSubmitted,
   });
 
   final String propertyId;
   final List<dynamic> conflictReport;
-  final String backendUrl;
   final void Function(String status, Map<String, dynamic> masterJson) onResolved;
   // Fires once the resolutions are saved server-side (before the host clicks
   // "Update Knowledge"). Lets the parent retitle its status badge to reflect
@@ -81,25 +78,27 @@ class _ConflictQuestionnaireWidgetState
 
     setState(() => _isSubmitting = true);
     try {
-      final response = await http.post(
-        Uri.parse('${widget.backendUrl}/api/resolve/${widget.propertyId}'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'resolutions': resolutions}),
+      // ApiClient.postJson resolves BACKEND_URL itself and applies a real
+      // timeout + one transient-failure retry — previously this widget took a
+      // raw backendUrl string (one caller had it falling back to
+      // 'http://localhost:8000' if unset) and called http.post directly with
+      // no timeout at all, so a cold-starting backend could leave a host
+      // stuck on "Saving..." during onboarding's conflict-resolution step
+      // with no way out.
+      final data = await ApiClient.postJson(
+        '/api/resolve/${widget.propertyId}',
+        {'resolutions': resolutions},
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        widget.onAnswersSubmitted?.call();
-        // Auto-apply the resolution — no separate "Update Knowledge" step.
-        // The parent updates status + master_json and shows the completion
-        // popup directly. This widget is torn down on the resulting rebuild.
-        widget.onResolved(
-          data['status'] as String,
-          data['master_json'] as Map<String, dynamic>,
-        );
-        return;
-      } else {
-        _showError('Resolve failed (${response.statusCode}): ${response.body}');
-      }
+      widget.onAnswersSubmitted?.call();
+      // Auto-apply the resolution — no separate "Update Knowledge" step.
+      // The parent updates status + master_json and shows the completion
+      // popup directly. This widget is torn down on the resulting rebuild.
+      widget.onResolved(
+        data['status'] as String,
+        data['master_json'] as Map<String, dynamic>,
+      );
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       _showError('Resolve failed: $e');
     } finally {
