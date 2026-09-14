@@ -60,6 +60,15 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
       final stream = await web.window.navigator.mediaDevices
           .getUserMedia(web.MediaStreamConstraints(audio: true.toJS))
           .toDart;
+      if (!mounted) {
+        // Widget was disposed while the permission prompt was pending --
+        // stop the tracks immediately rather than starting a recording on
+        // disposed state, which dispose() (already run) would never stop.
+        for (final t in stream.getTracks().toDart) {
+          t.stop();
+        }
+        return;
+      }
       _micStream = stream;
       _recordChunks.clear();
 
@@ -73,7 +82,6 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
       _mediaRecorder = rec;
       rec.start(); // one blob delivered at stop()
 
-      if (!mounted) return;
       setState(() => _isRecording = true);
     } catch (e) {
       if (!mounted) return;
@@ -127,11 +135,15 @@ class _VoiceRecorderWidgetState extends State<VoiceRecorderWidget> {
       return;
     }
     _mediaRecorder = null;
+    // Checked before calling into the parent (unlike a stray earlier version
+    // of this code) -- if disposed here, the parent is almost certainly also
+    // being torn down, and calling its callback would hit an unguarded
+    // setState on a disposed State.
+    if (!mounted) return;
 
     // Notify the parent screen immediately so the file appears in the
     // unified file list, then upload.
     widget.onFileAdded(filename);
-    if (!mounted) return;
     setState(() => _isUploading = true);
     try {
       await Supabase.instance.client.storage

@@ -738,6 +738,11 @@ class _ChatScreenState extends State<ChatScreen>
           label: 'Undo',
           onPressed: () {
             if (!mounted) return;
+            // Guard against overwriting a newer take: if the guest recorded
+            // (and is reviewing) a fresh take within the undo window,
+            // _pendingVoiceWav is no longer null — restoring the discarded
+            // one would silently clobber it.
+            if (_pendingVoiceWav != null) return;
             setState(() {
               _pendingVoiceWav = discardedWav;
               _recordSeconds = discardedSeconds;

@@ -424,7 +424,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _openDrawer(Map<String, dynamic> property) {
     showGeneralDialog(
       context: context,
-      barrierDismissible: true,
+      // Was dismissible by tapping outside -- the drawer holds editable
+      // state (the Knowledge text field, in-progress conflict-questionnaire
+      // answers) that a stray outside tap would silently discard, the same
+      // data-loss class fixed for ProfileDialog. The drawer's own explicit
+      // close (X) button is still the way out.
+      barrierDismissible: false,
       barrierLabel: 'Close',
       barrierColor: Colors.black38,
       transitionDuration: const Duration(milliseconds: 250),
