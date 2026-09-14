@@ -41,8 +41,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? _hostAvatarUrl;
   bool _isDev = false;
   // Part A of the User-mode post-training walkthrough (Step 0) — property IDs
-  // that have already had their dashboard nudge dismissed.
+  // that have already had their dashboard nudge dismissed. Step 0 points at
+  // both +Guest and Settings, so it only actually dismisses once BOTH the
+  // per-property Settings walkthrough (Part B) and the global Guest Link
+  // walkthrough (Part C) have been seen — see _showStep0Hint below.
   Set<String> _walkthroughSeenIds = {};
+  bool _guestLinkWalkthroughSeen = true;
 
   static const _readyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
 
@@ -149,6 +153,13 @@ class _DashboardScreenState extends State<DashboardScreen>
           _conversationPreviews = previews;
           _guestNamesByBooking = guestNames;
         });
+        // Piggybacks on this call's existing cadence (initial load, the 10s
+        // silent timer, post-chat-resolve refresh) instead of threading a
+        // refresh callback through every possible Guest Link/Host Chat entry
+        // point — Part C's "seen" flag can flip several dialogs deep (e.g.
+        // GenerateGuestLinkDialog → ChatLiveDialog), so catching it here is
+        // simpler than chasing every call site.
+        _loadWalkthroughSeenIds();
       }
     } catch (e) {
       // Silent refreshes must not surface SnackBar errors — they fire every
@@ -353,14 +364,21 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _loadWalkthroughSeenIds() async {
     final ids = await WalkthroughPrefs.seenPostTrainingPropertyIds();
-    if (mounted) setState(() => _walkthroughSeenIds = ids);
+    final guestLinkSeen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
+    if (mounted) {
+      setState(() {
+        _walkthroughSeenIds = ids;
+        _guestLinkWalkthroughSeen = guestLinkSeen;
+      });
+    }
   }
 
   bool _showStep0Hint(Map<String, dynamic> property) {
     if (_isDev) return false;
     final status = property['status'] as String? ?? '';
     if (!_readyStatuses.contains(status)) return false;
-    return !_walkthroughSeenIds.contains(property['id'] as String);
+    final settingsSeen = _walkthroughSeenIds.contains(property['id'] as String);
+    return !(settingsSeen && _guestLinkWalkthroughSeen);
   }
 
   Widget _profileGlyph(double size, Color color) {
@@ -478,7 +496,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     showDialog(
       context: context,
       builder: (_) => GenerateGuestLinkDialog(property: property, isDev: _isDev),
-    );
+    ).then((_) => _loadWalkthroughSeenIds());
   }
 
   void _openArchivedChats(Map<String, dynamic> property) {

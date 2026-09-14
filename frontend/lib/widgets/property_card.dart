@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'conversation_pill.dart';
-import 'glass_panel.dart';
+import 'walkthrough_tip_panel.dart';
 
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
@@ -219,7 +219,7 @@ class _PropertyCardState extends State<_PropertyCard> {
             showWhenUnlinked: false,
             targetAnchor: Alignment.bottomLeft,
             followerAnchor: Alignment.topLeft,
-            offset: const Offset(0, 12),
+            offset: const Offset(0, 20),
             child: const _Step0Tip(),
           ),
         ),
@@ -403,6 +403,12 @@ class _PropertyCardState extends State<_PropertyCard> {
                               onOpenAll: widget.onOpenExpanded,
                             ),
                           ),
+                          // _PillPreviewList deliberately fills every pixel of
+                          // its Expanded box (it greedily fits as many pills
+                          // as the space allows), so its last line — often
+                          // "+N more active" — otherwise lands flush against
+                          // the action row below with no breathing room.
+                          const SizedBox(height: 8),
                         ] else
                           const Spacer(),
                         _buildActions(context, status, palette),
@@ -620,7 +626,8 @@ class _CardAction extends StatelessWidget {
 // ── Step 0 tip — Part A of the User-mode post-training walkthrough ────────
 // Anchored below the +Guest/Settings row via CompositedTransformFollower (see
 // _PropertyCardState) since GridView cells are fixed-height and can't just
-// grow to fit an inline tip. No arrow — it points at two buttons, not one.
+// grow to fit an inline tip. Points up at +Guest specifically (the first of
+// the two buttons the copy names) rather than trying to straddle both.
 class _Step0Tip extends StatelessWidget {
   const _Step0Tip();
 
@@ -629,11 +636,11 @@ class _Step0Tip extends StatelessWidget {
     final palette = context.palette;
     return Material(
       color: Colors.transparent,
-      child: GlassPanel(
+      child: WalkthroughBubble(
         radius: 14,
-        blurSigma: AppTheme.glassBlurSigmaHeavy,
-        tint: palette.glassTintHeavy,
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        pointer: WalkthroughPointer.up,
+        pointerOffset: 28,
+        contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -158,6 +158,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   // (see _wtTriggerEscalation/_wtPrefillReply and the demo branches in
   // _sendHostMessage/_resolveIssue) rather than hitting the real backend.
   int? _wtStep;
+  bool _wtEscalationShown = false;
   final _wtHeaderKey = GlobalKey();
   final _wtLinksKey = GlobalKey();
   final _wtModeKey = GlobalKey();
@@ -273,12 +274,16 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
   }
 
-  // Fake, local-only escalation demo — no conversation exists yet at this
-  // point in the walkthrough (the guest hasn't messaged), so this can't hit
-  // the real backend. Purely visual: mirrors what a real escalation looks
-  // like without writing anything.
+  // Fake, local-only escalation demo. Originally guarded on
+  // `_conversationId == null`, on the assumption no conversation would exist
+  // yet at this point — wrong: GenerateGuestLinkDialog's steps 1-2 (which run
+  // right before this) always call the real backend to create one, so that
+  // guard silently blocked the demo for every host, every time. Gated on
+  // _wtEscalationShown instead — purely about not re-injecting the fake
+  // messages if the host goes Back then Next through this step again.
   void _wtTriggerEscalation() {
-    if (_conversationId != null) return;
+    if (_wtEscalationShown) return;
+    _wtEscalationShown = true;
     setState(() {
       _mode = 'intervene';
       _escalationReason = 'Guest asked about early check-in — outside my confidence';
@@ -337,6 +342,8 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 onNext: _wtNext,
                 onClose: _wtFinish,
                 isLast: info.isLast,
+                pointer: WalkthroughPointer.left,
+                pointerOffset: 24,
               ),
             ),
           );
@@ -546,9 +553,12 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   Future<void> _resolveIssue() async {
     if (_isResolving) return;
-    // Walkthrough demo, no real conversation yet — resolve locally instead
-    // of calling the real endpoint with nothing behind it.
-    if (_conversationId == null && _wtStep != null) {
+    // Walkthrough demo — resolve locally instead of calling the real
+    // endpoint. Gated on _wtStep alone (not _conversationId == null, which is
+    // never true here — see _wtTriggerEscalation): the walkthrough's own real
+    // "Test walkthrough" conversation always exists by this point, but the
+    // escalation it's resolving was only ever staged locally, never written.
+    if (_wtStep != null) {
       setState(() => _isResolving = true);
       await Future.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
@@ -674,9 +684,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   Future<void> _sendHostMessage() async {
     final text = _hostController.text.trim();
     if (text.isEmpty || _isSending) return;
-    // Walkthrough demo, no real conversation yet — simulate the send locally
-    // rather than hitting an endpoint with no conversation_id to act on.
-    if (_conversationId == null && _wtStep != null) {
+    // Walkthrough demo — simulate the send locally rather than hitting the
+    // real endpoint. Gated on _wtStep alone — see _resolveIssue's comment.
+    if (_wtStep != null) {
       _hostController.clear();
       setState(() {
         _messages = [

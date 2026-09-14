@@ -104,6 +104,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // own text stayed stale even after markNeedsBuild() calls and a 3s wait.
   // A ValueListenableBuilder inside the entry is the documented-safe pattern.
   final _wtStepNotifier = ValueNotifier<int?>(null);
+  // "+ Show walkthrough again" switch state — true while either half (this
+  // property's Settings walkthrough, or the global Guest Link walkthrough)
+  // hasn't been seen yet. Loaded async since both live in SharedPreferences;
+  // null until the first load resolves. See _loadReplayPending/_toggleReplayWalkthrough.
+  bool? _wtReplayPending;
 
   @override
   void initState() {
@@ -119,6 +124,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     _loadHeroUrl();
     _subscribeProperty();
     _maybeStartWalkthrough();
+    _loadReplayPending();
   }
 
   Future<void> _maybeStartWalkthrough() async {
@@ -127,6 +133,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     if (!_wtReadyStatuses.contains(status)) return;
     final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
     if (!seen && mounted) _setWtStep(0);
+  }
+
+  Future<void> _loadReplayPending() async {
+    if (widget.isDev) return;
+    final settingsSeen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
+    final guestLinkSeen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
+    if (mounted) setState(() => _wtReplayPending = !(settingsSeen && guestLinkSeen));
   }
 
   // Single point of mutation for _wtStep — keeps the highlight (plain
@@ -222,18 +235,29 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
   }
 
-  // Manual replay trigger for the Overview tab's "Show walkthrough again"
-  // switch. Its displayed value is _wtStep != null, so finishing/closing the
-  // walkthrough (which already nulls _wtStep via _wtFinish) flips it off on
-  // its own — no separate reset bookkeeping needed.
+  // "+ Show walkthrough again" switch. One control for both halves: turning
+  // it on resets BOTH the Settings walkthrough (this property) and the Guest
+  // Link walkthrough (global) and sends the host back to the dashboard, where
+  // Step 0 now points at both +Guest and Settings again — see
+  // dashboard_screen.dart's _showStep0Hint. Each dedicated walkthrough then
+  // starts on its own the next time its real entry point opens
+  // (_maybeStartWalkthrough here, GenerateGuestLinkDialog's own equivalent for
+  // Guest Link) — no need to drive either one directly from here. Turning it
+  // off cancels/dismisses both at once, same as closing today.
   Future<void> _toggleReplayWalkthrough(bool value) async {
     if (!value) {
-      _wtFinish();
+      await WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
+      await WalkthroughPrefs.markGuestLinkWalkthroughSeen();
+      if (!mounted) return;
+      if (_wtStep != null) _setWtStep(null);
+      setState(() => _wtReplayPending = false);
       return;
     }
     await WalkthroughPrefs.resetPostTrainingWalkthrough(_property['id'] as String);
+    await WalkthroughPrefs.resetGuestLinkWalkthrough();
     if (!mounted) return;
-    _wtGoToStep(0);
+    setState(() => _wtReplayPending = true);
+    Navigator.of(context).pop();
   }
 
   // Inserts the docked tip panel as a real Overlay entry
@@ -272,6 +296,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 onNext: _wtNext,
                 onClose: _wtFinish,
                 isLast: step == _wtStepCount - 1,
+                pointer: WalkthroughPointer.right,
+                pointerOffset: 24,
               ),
             ),
           );
@@ -1198,7 +1224,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           Expanded(
             child: Tooltip(
               message: 'Replays the setup tips shown right after this '
-                  "property finished training.",
+                  'property finished training — both the Settings walkthrough '
+                  'and the guest link walkthrough.',
               waitDuration: const Duration(milliseconds: 300),
               child: Text(
                 '+ Show walkthrough again',
@@ -1212,7 +1239,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           ),
           const SizedBox(width: 12),
           Switch(
-            value: _wtStep != null,
+            value: _wtReplayPending ?? false,
             activeThumbColor: palette.primary,
             onChanged: _toggleReplayWalkthrough,
           ),
