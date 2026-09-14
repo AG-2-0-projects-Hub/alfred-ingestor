@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'conversation_pill.dart';
 import 'glass_panel.dart';
+import 'walkthrough_tip_panel.dart';
 
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
@@ -217,8 +218,8 @@ class _PropertyCardState extends State<_PropertyCard> {
           child: CompositedTransformFollower(
             link: _step0Link,
             showWhenUnlinked: false,
-            targetAnchor: Alignment.bottomLeft,
-            followerAnchor: Alignment.topLeft,
+            targetAnchor: Alignment.bottomCenter,
+            followerAnchor: Alignment.topCenter,
             offset: const Offset(0, 12),
             child: const _Step0Tip(),
           ),
@@ -489,16 +490,14 @@ class _PropertyCardState extends State<_PropertyCard> {
     }
 
     if (isReady) {
-      final actions = _ReadyActions(
+      return _ReadyActions(
         onGuestLink: widget.onGuestLink,
         onOpenSettings: widget.onOpenSettings,
         onArchivedChats: widget.onArchivedChats,
         onCalendar: widget.onCalendar,
         highlightHint: widget.showStep0Hint,
+        step0Link: widget.showStep0Hint ? _step0Link : null,
       );
-      return widget.showStep0Hint
-          ? CompositedTransformTarget(link: _step0Link, child: actions)
-          : actions;
     }
 
     return Align(
@@ -519,6 +518,10 @@ class _ReadyActions extends StatelessWidget {
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
   final bool highlightHint;
+  /// When set, the Step 0 hint panel is docked off this link — anchored to
+  /// just the +Guest/Settings pair (not the whole action row) so the panel
+  /// points at the space between those two buttons specifically.
+  final LayerLink? step0Link;
 
   const _ReadyActions({
     required this.onGuestLink,
@@ -526,11 +529,13 @@ class _ReadyActions extends StatelessWidget {
     required this.onArchivedChats,
     required this.onCalendar,
     this.highlightHint = false,
+    this.step0Link,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final buttonPair = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         _CardAction(
           icon: Icons.link_rounded,
@@ -546,6 +551,13 @@ class _ReadyActions extends StatelessWidget {
           onTap: onOpenSettings,
           highlighted: highlightHint,
         ),
+      ],
+    );
+    return Row(
+      children: [
+        step0Link != null
+            ? CompositedTransformTarget(link: step0Link!, child: buttonPair)
+            : buttonPair,
         const Spacer(),
         _TinyIconBtn(
           icon: Icons.calendar_month_outlined,
@@ -586,7 +598,7 @@ class _CardAction extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
@@ -623,10 +635,12 @@ class _CardAction extends StatelessWidget {
   }
 }
 
-// ── Step 0 tip — Part A of the User-mode post-training walkthrough ────────
+// ── Step 0 tip — shared entry point for the Part B/C post-training
+// walkthroughs ───────────────────────────────────────────────────────────
 // Anchored below the +Guest/Settings row via CompositedTransformFollower (see
 // _PropertyCardState) since GridView cells are fixed-height and can't just
-// grow to fit an inline tip. No arrow — it points at two buttons, not one.
+// grow to fit an inline tip. Points up at the space between the two buttons
+// (docked off just that pair, not the whole action row — see _ReadyActions).
 class _Step0Tip extends StatelessWidget {
   const _Step0Tip();
 
@@ -639,6 +653,12 @@ class _Step0Tip extends StatelessWidget {
         radius: 14,
         blurSigma: AppTheme.glassBlurSigmaHeavy,
         tint: palette.glassTintHeavy,
+        border: Colors.transparent,
+        clipper: const WalkthroughPointerClipper(
+          radius: 14,
+          side: WalkthroughPointerSide.top,
+          pointerCenter: 140,
+        ),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           mainAxisSize: MainAxisSize.min,

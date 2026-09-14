@@ -15,6 +15,10 @@ class GlassPanel extends StatefulWidget {
   final bool hoverable;
   final List<BoxShadow>? shadow;
   final VoidCallback? onTap;
+  /// Opt-in custom clip shape (e.g. a rounded rect with a pointer tail cut
+  /// into one edge). Null (the default, used everywhere else) keeps the
+  /// plain ClipRRect path unchanged.
+  final CustomClipper<Path>? clipper;
 
   const GlassPanel({
     super.key,
@@ -27,6 +31,7 @@ class GlassPanel extends StatefulWidget {
     this.hoverable = false,
     this.shadow,
     this.onTap,
+    this.clipper,
   });
 
   @override
@@ -60,14 +65,17 @@ class _GlassPanelState extends State<GlassPanel> {
       child: widget.child,
     );
 
-    final blurred = ClipRRect(
-      borderRadius: BorderRadius.circular(widget.radius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-            sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
-        child: panel,
-      ),
+    final backdropChild = BackdropFilter(
+      filter: ImageFilter.blur(
+          sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
+      child: panel,
     );
+    final blurred = widget.clipper != null
+        ? ClipPath(clipper: widget.clipper, child: backdropChild)
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(widget.radius),
+            child: backdropChild,
+          );
 
     // The drop shadow has to live OUTSIDE the ClipRRect above: a BoxShadow
     // painted by a clipped descendant gets cut off at the clip's own bounds
