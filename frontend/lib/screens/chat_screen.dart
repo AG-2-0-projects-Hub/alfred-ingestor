@@ -142,11 +142,24 @@ class _ChatScreenState extends State<ChatScreen>
   // Returns the dedicated guest SupabaseClient, creating it on first call.
   // Using a separate client keeps the host's global auth session untouched.
   SupabaseClient get _db {
-    _guestClient ??= SupabaseClient(
-      dotenv.env['SUPABASE_URL']!,
-      dotenv.env['SUPABASE_ANON_KEY']!,
-      accessToken: _getOrRefreshToken,
-    );
+    if (_guestClient == null) {
+      // In practice this app never reaches ChatScreen with these unset —
+      // main() validates and fails loudly on boot before runApp() — but this
+      // guard keeps that failure mode explicit here too rather than a bare
+      // null-check crash, in case chat routing is ever reached before boot
+      // validation runs.
+      final url = dotenv.env['SUPABASE_URL'];
+      final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
+      if (url == null || url.isEmpty || anonKey == null || anonKey.isEmpty) {
+        throw StateError(
+            'SUPABASE_URL/SUPABASE_ANON_KEY not configured — cannot open guest chat.');
+      }
+      _guestClient = SupabaseClient(
+        url,
+        anonKey,
+        accessToken: _getOrRefreshToken,
+      );
+    }
     return _guestClient!;
   }
 

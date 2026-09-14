@@ -98,19 +98,86 @@ Future<void> main() async {
           (q.containsKey('code') && !_openedFromPasswordRecovery) || // PKCE confirmation code
           q.containsKey('token_hash');   // older verify-OTP links
 
-  await dotenv.load(fileName: '.env');
+  // Boot-time config is validated below and, on failure, this function
+  // renders a legible error screen instead of letting an uncaught exception
+  // (a bad/missing env var, or the deliberate StateError in
+  // _assertNotAServiceRoleKey) propagate to a blank white tab. The fail-loud
+  // *intent* is unchanged — a misconfigured deploy still never reaches
+  // runApp(const IngestorApp()) — only the rendered behavior differs: hosts
+  // and guests see "couldn't start" instead of nothing, while the real error
+  // is still logged loudly to the console for debugging.
+  try {
+    await dotenv.load(fileName: '.env');
 
-  final anonKey = dotenv.env['SUPABASE_ANON_KEY']!;
-  _assertNotAServiceRoleKey(anonKey);
+    final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
+    final supabaseUrl = dotenv.env['SUPABASE_URL'];
+    if (anonKey == null || anonKey.isEmpty) {
+      throw StateError('SUPABASE_ANON_KEY is missing or empty.');
+    }
+    if (supabaseUrl == null || supabaseUrl.isEmpty) {
+      throw StateError('SUPABASE_URL is missing or empty.');
+    }
+    _assertNotAServiceRoleKey(anonKey);
 
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    anonKey: anonKey,
-  );
+    await Supabase.initialize(
+      url: supabaseUrl,
+      anonKey: anonKey,
+    );
 
-  await themeController.load();
+    await themeController.load();
+  } catch (e, st) {
+    // ignore: avoid_print
+    print('Alfred failed to start: $e\n$st');
+    runApp(_BootFailureApp(error: e));
+    return;
+  }
 
   runApp(const IngestorApp());
+}
+
+/// Rendered in place of the real app when boot-time config validation fails
+/// (see the try/catch in `main()` above). Deliberately has no dependency on
+/// Supabase/theme/anything else that might itself be broken.
+class _BootFailureApp extends StatelessWidget {
+  final Object error;
+  const _BootFailureApp({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF1B1C21),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🤖', style: TextStyle(fontSize: 40)),
+                const SizedBox(height: 16),
+                const Text(
+                  "Alfred couldn't start",
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Please try again in a moment. If this keeps happening, '
+                  'contact support.',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class IngestorApp extends StatefulWidget {
