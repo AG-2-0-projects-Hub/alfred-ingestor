@@ -9,7 +9,6 @@ import 'chat_live_dialog.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 import '../theme/app_theme.dart';
-import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
@@ -60,13 +59,11 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       _nameController.text = 'Test walkthrough';
     });
     _wtStepNotifier.value = 0;
-    WalkthroughActivity.isActive.value = true;
   }
 
   void _wtClose() {
     setState(() => _wtActive = false);
     _wtStepNotifier.value = null;
-    WalkthroughActivity.isActive.value = false;
   }
 
   void _wtNext() {
@@ -92,7 +89,10 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
               showWhenUnlinked: false,
               targetAnchor: Alignment.topRight,
               followerAnchor: Alignment.topLeft,
-              offset: const Offset(20, 0),
+              // 26, not 20: step 2's WalkthroughHighlight wrap adds 6px of
+              // its own padding around the target box, which had eaten into
+              // the tail's clearance without anyone re-tuning this offset.
+              offset: const Offset(26, 0),
               child: WalkthroughTipPanel(
                 stepIndex: step,
                 stepCount: 9,
@@ -122,7 +122,6 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
 
   @override
   void dispose() {
-    if (_wtActive) WalkthroughActivity.isActive.value = false;
     _wtOverlay?.remove();
     _wtOverlay = null;
     _wtStepNotifier.dispose();

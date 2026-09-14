@@ -10,12 +10,14 @@ class WalkthroughHighlight extends StatefulWidget {
   final bool active;
   final Widget child;
   final double borderRadius;
+  final double padding;
 
   const WalkthroughHighlight({
     super.key,
     required this.active,
     required this.child,
     this.borderRadius = 14,
+    this.padding = 6,
   });
 
   @override
@@ -46,7 +48,7 @@ class _WalkthroughHighlightState extends State<WalkthroughHighlight>
     final palette = context.palette;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
-      padding: const EdgeInsets.all(6),
+      padding: EdgeInsets.all(widget.padding),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(widget.borderRadius),
         border: Border.all(

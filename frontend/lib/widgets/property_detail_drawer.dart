@@ -15,7 +15,6 @@ import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
-import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
 import 'walkthrough_highlight.dart';
@@ -149,7 +148,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   void _setWtStep(int? step) {
     setState(() => _wtStep = step);
     _wtStepNotifier.value = step;
-    WalkthroughActivity.isActive.value = step != null;
   }
 
   // (tab index, anchor key, title, body) for each of the 5 steps — tab index
@@ -325,7 +323,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   @override
   void dispose() {
-    if (_wtStep != null) WalkthroughActivity.isActive.value = false;
     _wtOverlay?.remove();
     _wtOverlay = null;
     _wtStepNotifier.dispose();

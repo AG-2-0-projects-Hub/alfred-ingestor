@@ -17,7 +17,6 @@ import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
 import '../services/push_notification_service.dart';
-import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
 
@@ -376,7 +375,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   bool _showStep0Hint(Map<String, dynamic> property) {
     if (_isDev) return false;
-    if (WalkthroughActivity.isActive.value) return false;
     final status = property['status'] as String? ?? '';
     if (!_readyStatuses.contains(status)) return false;
     final settingsSeen = _walkthroughSeenIds.contains(property['id'] as String);
@@ -927,23 +925,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     final items = [..._properties, <String, dynamic>{}];
     final n = items.length;
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: WalkthroughActivity.isActive,
-      builder: (context, _, __) => _buildGridBody(
-        items,
-        n,
-        topInsetDesktop: topInsetDesktop,
-        topInsetMobile: topInsetMobile,
-      ),
-    );
-  }
-
-  Widget _buildGridBody(
-    List<Map<String, dynamic>> items,
-    int n, {
-    required double topInsetDesktop,
-    required double topInsetMobile,
-  }) {
     return LayoutBuilder(builder: (context, constraints) {
       final viewportW = constraints.maxWidth;
       final viewportH = constraints.maxHeight;
@@ -999,6 +980,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showStep0Hint: _showStep0Hint(item),
                   );
             return _StaggeredEntry(
+              key: ValueKey(item['id'] as String? ?? 'add-property'),
               delayMs: (index * 40).clamp(0, 240),
               child: card,
             );
@@ -1073,6 +1055,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   showStep0Hint: _showStep0Hint(item),
                 );
           return _StaggeredEntry(
+            key: ValueKey(item['id'] as String? ?? 'add-property'),
             delayMs: (index * 50).clamp(0, 400),
             child: card,
           );
@@ -1086,7 +1069,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 class _StaggeredEntry extends StatefulWidget {
   final Widget child;
   final int delayMs;
-  const _StaggeredEntry({required this.child, required this.delayMs});
+  const _StaggeredEntry({super.key, required this.child, required this.delayMs});
 
   @override
   State<_StaggeredEntry> createState() => _StaggeredEntryState();

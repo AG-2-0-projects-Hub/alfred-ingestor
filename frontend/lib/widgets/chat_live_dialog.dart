@@ -10,7 +10,6 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
-import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
@@ -181,13 +180,11 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     if (widget.continueWalkthrough) {
       _wtStep = 0;
       _wtStepNotifier.value = 0;
-      WalkthroughActivity.isActive.value = true;
     }
   }
 
   @override
   void dispose() {
-    if (_wtStep != null) WalkthroughActivity.isActive.value = false;
     _wtOverlay?.remove();
     _wtOverlay = null;
     _wtStepNotifier.dispose();
@@ -201,7 +198,6 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   void _setWtStep(int? step) {
     setState(() => _wtStep = step);
     _wtStepNotifier.value = step;
-    WalkthroughActivity.isActive.value = step != null;
   }
 
   void _wtNext() {
@@ -569,6 +565,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     // "Test walkthrough" conversation always exists by this point, but the
     // escalation it's resolving was only ever staged locally, never written.
     if (_wtStep != null) {
+      final wasStep4 = _wtStep == 4;
       setState(() => _isResolving = true);
       await Future.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
@@ -588,6 +585,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           },
         ];
       });
+      // Resolving IS the completed action for this step — advance rather
+      // than making the host find and click a separate Next.
+      if (wasStep4) _wtNext();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Issue resolved. Alfred is back on autopilot.'),
@@ -1831,9 +1831,11 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             ),
           ),
           const SizedBox(width: 8),
-          _wtHighlight(
+          WalkthroughHighlight(
             key: _wtSendKey,
             active: _wtStep == 4 && !_wtReplySent,
+            borderRadius: 22,
+            padding: 2,
             child: IconButton(
               onPressed: _isSending ? null : _sendHostMessage,
               icon: const Icon(Icons.send_rounded, size: 18),
