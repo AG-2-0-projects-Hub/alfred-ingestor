@@ -458,6 +458,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         property: property,
         activeConversations: _conversationPreviews[property['id']] ?? [],
         onChatResolved: _onChatResolved,
+        isDev: _isDev,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);

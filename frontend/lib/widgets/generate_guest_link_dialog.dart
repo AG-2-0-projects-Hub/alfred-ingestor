@@ -1,13 +1,11 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/walkthrough_prefs.dart';
 
@@ -136,42 +134,36 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
 
   Future<void> _generate() async {
     setState(() => _loading = true);
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
+    // Was a raw http.post with a dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000'
+    // fallback (bypassing ApiClient's fail-loud config guard) and no timeout —
+    // ApiClient.postJson resolves BACKEND_URL itself and times out/retries.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/guests'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
+      final data = await ApiClient.postJson(
+        '/api/guests',
+        {
           'property_id': widget.property['id'],
           'guest_name': _nameController.text.trim().isEmpty
               ? 'Guest'
               : _nameController.text.trim(),
-        }),
+        },
+        bearer: token,
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (mounted) setState(() => _result = data);
-        if (_wtActive) _wtStepNotifier.value = 1;
-        widget.onCreated?.call();
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Error ${response.statusCode}: ${response.body}'),
-                backgroundColor: context.palette.danger),
-          );
-        }
+      if (mounted) setState(() => _result = data);
+      if (_wtActive) _wtStepNotifier.value = 1;
+      widget.onCreated?.call();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage), backgroundColor: context.palette.danger),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
+              content: const Text('Something went wrong. Please try again.'),
               backgroundColor: context.palette.danger),
         );
       }

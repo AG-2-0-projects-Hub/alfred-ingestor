@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'voice_recorder.dart';
 import 'file_status_list.dart';
@@ -419,45 +417,37 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _knowledgeError = null;
     });
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    // Was a raw http.post with a dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000'
+    // fallback (bypassing ApiClient's fail-loud config guard) and no timeout —
+    // ApiClient.postJson resolves BACKEND_URL itself and times out/retries.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/add-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'property_id': _property['id'],
-          'text': text,
-        }),
+      final data = await ApiClient.postJson(
+        '/api/ingest/add-knowledge',
+        {'property_id': _property['id'], 'text': text},
+        bearer: token,
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final updatedJson = data['master_json'];
-        if (mounted) {
-          setState(() {
-            _knowledgeController.clear();
-            _knowledgeSuccess = true;
-            _knowledgeError = null;
-            if (updatedJson != null) {
-              _property['master_json'] = updatedJson;
-            }
-          });
-          Future.delayed(const Duration(seconds: 4), () {
-            if (mounted) setState(() => _knowledgeSuccess = false);
-          });
-        }
-      } else {
-        setState(() => _knowledgeError =
-            'Failed (${response.statusCode}): ${response.body}');
+      final updatedJson = data['master_json'];
+      if (mounted) {
+        setState(() {
+          _knowledgeController.clear();
+          _knowledgeSuccess = true;
+          _knowledgeError = null;
+          if (updatedJson != null) {
+            _property['master_json'] = updatedJson;
+          }
+        });
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted) setState(() => _knowledgeSuccess = false);
+        });
       }
+    } on ApiException catch (e) {
+      setState(() => _knowledgeError = e.userMessage);
     } catch (e) {
-      setState(() => _knowledgeError = 'Error: $e');
+      setState(() =>
+          _knowledgeError = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _addingKnowledge = false);
     }
@@ -484,54 +474,48 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   }
 
   Future<void> _triggerVoiceIngest(String filename) async {
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    // Was a raw http.post with the same BACKEND_URL-fallback + no-timeout
+    // pattern as _addKnowledge above — same ApiClient.postJson fix.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/add-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
+      final data = await ApiClient.postJson(
+        '/api/ingest/add-knowledge',
+        {
           'property_id': _property['id'],
           'storage_path': '${_property['id']}/user_uploads/$filename',
-        }),
+        },
+        bearer: token,
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final updatedJson = data['master_json'];
-        if (mounted) {
-          setState(() {
-            final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
-            if (idx >= 0) {
-              _voiceStatuses[idx] = {
-                'file': filename,
-                'status': 'done',
-                'message': '',
-              };
-            }
-            if (updatedJson != null) {
-              _property['master_json'] = updatedJson;
-            }
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
-            if (idx >= 0) {
-              _voiceStatuses[idx] = {
-                'file': filename,
-                'status': 'error',
-                'message': 'Processing failed',
-              };
-            }
-          });
-        }
+      final updatedJson = data['master_json'];
+      if (mounted) {
+        setState(() {
+          final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
+          if (idx >= 0) {
+            _voiceStatuses[idx] = {
+              'file': filename,
+              'status': 'done',
+              'message': '',
+            };
+          }
+          if (updatedJson != null) {
+            _property['master_json'] = updatedJson;
+          }
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
+          if (idx >= 0) {
+            _voiceStatuses[idx] = {
+              'file': filename,
+              'status': 'error',
+              'message': e.userMessage,
+            };
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -541,7 +525,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _voiceStatuses[idx] = {
               'file': filename,
               'status': 'error',
-              'message': 'Error: $e',
+              'message': 'Something went wrong. Please try again.',
             };
           }
         });
@@ -553,7 +537,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final q = _kbChatController.text.trim();
     if (q.isEmpty || _kbQuerying) return;
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
@@ -563,30 +546,33 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _kbChatController.clear();
     });
 
+    // Was a raw http.post with the same BACKEND_URL-fallback + no-timeout
+    // pattern as _addKnowledge above — same ApiClient.postJson fix.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/query-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'property_id': _property['id'],
-          'question': q,
-        }),
+      final data = await ApiClient.postJson(
+        '/api/ingest/query-knowledge',
+        {'property_id': _property['id'], 'question': q},
+        bearer: token,
       );
       if (mounted) {
-        final answer = response.statusCode == 200
-            ? (jsonDecode(response.body) as Map<String, dynamic>)['answer'] as String? ?? ''
-            : 'Error (${response.statusCode}): ${response.body}';
+        final answer = data['answer'] as String? ?? '';
         setState(() {
           _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': answer};
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': e.userMessage};
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': 'Error: $e'};
+          _kbHistory[_kbHistory.length - 1] = {
+            'q': q,
+            'a': 'Something went wrong. Please try again.',
+          };
         });
       }
     } finally {
@@ -1941,14 +1927,16 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             icon: Icon(Icons.delete_forever_outlined, size: 16),
             label: const Text('Delete Property'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.red.shade700,
-              side: BorderSide(color: Colors.red.shade300),
+              foregroundColor: context.palette.danger,
+              side: BorderSide(color: context.palette.danger.withValues(alpha: 0.5)),
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Deletes this property entry.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            // Was "Deletes this property entry." — understated the actual
+            // severity of the confirm dialog it triggers, below.
+            'Permanently deletes this property and all its training data.',
+            style: TextStyle(fontSize: 11, color: context.palette.textMuted),
           ),
         ],
       ),
@@ -2060,7 +2048,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 showDialog(
                   context: context,
                   builder: (_) =>
-                      GenerateGuestLinkDialog(property: _property),
+                      GenerateGuestLinkDialog(
+                          property: _property, isDev: widget.isDev),
                 );
               },
               icon: Icon(Icons.link, size: 16),

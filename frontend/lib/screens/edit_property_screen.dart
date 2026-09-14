@@ -201,6 +201,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    final client = http.Client();
     try {
       final request = http.Request('POST', Uri.parse('$backendUrl/api/ingest'))
         ..headers['Content-Type'] = 'application/json';
@@ -216,7 +217,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       // the stream-of-chunks below had a timeout, and that timer never starts
       // until a response begins.
       final response =
-          await http.Client().send(request).timeout(const Duration(seconds: 20));
+          await client.send(request).timeout(const Duration(seconds: 20));
       try {
         await for (final chunk in response.stream
             .transform(utf8.decoder)
@@ -263,6 +264,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     } catch (e) {
       _showError('Ingest failed: $e');
     } finally {
+      client.close();
       _hideTrainingWaitDialog();
       if (mounted) setState(() => _isIngesting = false);
     }

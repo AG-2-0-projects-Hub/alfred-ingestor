@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../screens/auth_screen.dart';
 
@@ -23,6 +24,16 @@ class _InactivityWrapperState extends State<InactivityWrapper> {
   void initState() {
     super.initState();
     _resetTimer();
+    // Was pointer-events only -- a host composing a long reply using only
+    // the keyboard, mouse idle, could be silently signed out mid-reply with
+    // the draft lost. A global handler (not tied to any one widget's focus)
+    // catches keystrokes anywhere in the subtree without consuming them.
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
+  }
+
+  bool _onKeyEvent(KeyEvent event) {
+    _resetTimer();
+    return false;
   }
 
   void _resetTimer() {
@@ -48,6 +59,7 @@ class _InactivityWrapperState extends State<InactivityWrapper> {
   @override
   void dispose() {
     _timer?.cancel();
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     super.dispose();
   }
 

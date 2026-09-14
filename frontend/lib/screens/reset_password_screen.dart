@@ -110,12 +110,26 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
+              content: const Text('Something went wrong. Please try again.'),
               backgroundColor: context.palette.danger),
         );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// This screen previously had no way out at all — no back button, no
+  /// "nevermind" link — for a host who followed the link by mistake or wants
+  /// to abandon the reset. Tears down the recovery session (it must not be
+  /// left alive with no way to set a password for it) and returns to sign-in.
+  Future<void> _cancel() async {
+    if (_isLoading) return;
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const AuthScreen()),
+      );
     }
   }
 
@@ -252,6 +266,20 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                               fontWeight: FontWeight.w500,
                             ),
                           ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: _isLoading ? null : _cancel,
+                    child: Text(
+                      'Cancel and sign in',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.palette.textSecondary,
+                      ),
+                    ),
                   ),
                 ),
               ],

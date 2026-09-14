@@ -5,19 +5,28 @@ import '../theme/app_theme.dart';
 class FileStatusList extends StatelessWidget {
   final List<Map<String, String>> statuses;
 
-  const FileStatusList({super.key, required this.statuses});
+  /// Optional per-row remove action, keyed by index into [statuses]. Null
+  /// (the default) renders no remove button, matching every existing
+  /// consumer of this widget — only the pre-Train-Now queue in
+  /// add_property_screen.dart opts in. Previously there was no way to drop a
+  /// file from the queue at all, not even an accidentally-dropped one.
+  final void Function(int index)? onRemove;
+
+  const FileStatusList({super.key, required this.statuses, this.onRemove});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: statuses
-          .map((s) => _FileStatusRow(
-                filename: s['file'] ?? '',
-                status: s['status'] ?? '',
-                message: s['message'] ?? '',
-              ))
-          .toList(),
+      children: [
+        for (var i = 0; i < statuses.length; i++)
+          _FileStatusRow(
+            filename: statuses[i]['file'] ?? '',
+            status: statuses[i]['status'] ?? '',
+            message: statuses[i]['message'] ?? '',
+            onRemove: onRemove == null ? null : () => onRemove!(i),
+          ),
+      ],
     );
   }
 }
@@ -26,11 +35,13 @@ class _FileStatusRow extends StatelessWidget {
   final String filename;
   final String status;
   final String message;
+  final VoidCallback? onRemove;
 
   const _FileStatusRow({
     required this.filename,
     required this.status,
     this.message = '',
+    this.onRemove,
   });
 
   @override
@@ -55,6 +66,18 @@ class _FileStatusRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _StatusLabel(status: status),
+              if (onRemove != null) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  tooltip: 'Remove',
+                  color: palette.textMuted,
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: EdgeInsets.zero,
+                  onPressed: onRemove,
+                ),
+              ],
             ],
           ),
           if ((status == 'error' || status == 'timeout') && message.isNotEmpty)

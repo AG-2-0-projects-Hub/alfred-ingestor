@@ -316,6 +316,17 @@ class _IngestorAppState extends State<IngestorApp> {
             '/dashboard': (_) => const DashboardScreen(),
             '/add-property': (_) => const AddPropertyScreen(),
           },
+          // Was an abrupt full-screen color snap on toggle — MaterialApp
+          // swaps theme/darkTheme instantly with no transition of its own.
+          // AnimatedTheme cross-fades it (AppPalette.lerp already exists for
+          // the custom tokens, so this covers those too, not just the base
+          // ColorScheme).
+          builder: (context, child) => AnimatedTheme(
+            duration: const Duration(milliseconds: 300),
+            curve: AppTheme.standardEasing,
+            data: Theme.of(context),
+            child: child!,
+          ),
         );
       },
     );

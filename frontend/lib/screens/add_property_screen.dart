@@ -212,6 +212,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    final client = http.Client();
     try {
       final request = http.Request('POST', Uri.parse('$backendUrl/api/ingest'))
         ..headers['Content-Type'] = 'application/json';
@@ -227,7 +228,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // the stream-of-chunks below had a timeout, and that timer never starts
       // until a response begins.
       final response =
-          await http.Client().send(request).timeout(const Duration(seconds: 20));
+          await client.send(request).timeout(const Duration(seconds: 20));
       try {
         await for (final chunk in response.stream
             .transform(utf8.decoder)
@@ -318,6 +319,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         _showError('Ingest failed: $e');
       }
     } finally {
+      client.close();
       if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
       }
@@ -1057,7 +1059,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                           .titleSmall
                           ?.copyWith(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  FileStatusList(statuses: _filesToIngest),
+                  FileStatusList(
+                    statuses: _filesToIngest,
+                    // Only removable before Train Now starts -- once ingest
+                    // is running this list is a read-only status display.
+                    onRemove: _isIngesting
+                        ? null
+                        : (index) =>
+                            setState(() => _filesToIngest.removeAt(index)),
+                  ),
                 ],
                 const SizedBox(height: 28),
                 _walkthroughHighlight(

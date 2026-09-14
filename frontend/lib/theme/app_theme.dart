@@ -362,7 +362,12 @@ class AppTheme {
   static const double glassBlurSigma = 20.0;
   static const double glassBlurSigmaHeavy = 24.0;
 
-  // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — replaces Curves.easeOut/easeInOut.
+  // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — the intended
+  // standard for new UI animations (see glass_panel.dart, main.dart's
+  // AnimatedTheme). Older call sites elsewhere still use raw Curves.easeOut/
+  // easeInOut directly and haven't been migrated — this does not yet
+  // "replace" them app-wide, despite what an earlier version of this comment
+  // claimed.
   static const Cubic standardEasing = Cubic(0.16, 1.0, 0.3, 1.0);
 
   // Design-token interaction-scale: 0.97 → 1.0 on press.

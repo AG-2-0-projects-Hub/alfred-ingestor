@@ -719,12 +719,33 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Throw the take away. Only reachable from the review state — never while
   /// recording, where it would be one mis-tap away from destroying the message.
+  /// A low-cost undo snackbar (rather than a blocking confirm dialog) covers
+  /// the mis-tap case without adding a second tap to the normal discard path.
   void _discardPendingVoice() {
     if (!mounted) return;
+    final discardedWav = _pendingVoiceWav;
+    final discardedSeconds = _recordSeconds;
     setState(() {
       _pendingVoiceWav = null;
       _recordSeconds = 0;
     });
+    if (discardedWav == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Recording discarded.'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            setState(() {
+              _pendingVoiceWav = discardedWav;
+              _recordSeconds = discardedSeconds;
+            });
+          },
+        ),
+      ),
+    );
   }
 
   /// Upload and send the take the guest reviewed and approved.

@@ -202,35 +202,48 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     Center(child: _buildAvatar(palette)),
                     const SizedBox(height: 20),
                     _label('Name', palette),
-                    TextField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(
-                        hintText: 'Your name',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    // Semantics wraps here associate the visible label above
+                    // with the field for a screen reader -- previously only
+                    // the (non-semantic) hintText and a separate Text widget
+                    // existed, with no programmatic link between them.
+                    Semantics(
+                      label: 'Name',
+                      child: TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          hintText: 'Your name',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
                     _label('Nickname', palette),
-                    TextField(
-                      controller: _nicknameController,
-                      decoration: const InputDecoration(
-                        hintText: 'What guests should call you',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    Semantics(
+                      label: 'Nickname',
+                      child: TextField(
+                        controller: _nicknameController,
+                        decoration: const InputDecoration(
+                          hintText: 'What guests should call you',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
                     _label('Short bio', palette),
-                    TextField(
-                      controller: _bioController,
-                      minLines: 2,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.newline,
-                      decoration: const InputDecoration(
-                        hintText: 'A sentence or two about you',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    Semantics(
+                      label: 'Short bio',
+                      child: TextField(
+                        controller: _bioController,
+                        minLines: 2,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: 'A sentence or two about you',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -378,23 +391,38 @@ class _ProfileDialogState extends State<ProfileDialog> {
               ? Icon(Icons.person_rounded, size: 44, color: palette.primary)
               : null,
         ),
-        Material(
-          color: palette.primary,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: _uploading ? null : _pickAvatar,
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: _uploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.camera_alt_rounded,
-                      size: 16, color: Colors.white),
+        // The visual badge stays small (~28px) — only the tap target grows,
+        // to the ~44px minimum touch-target guidance. Previously they were
+        // the same size, at the corner of a larger avatar where mis-taps
+        // were easy.
+        SizedBox(
+          width: 40,
+          height: 40,
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: _uploading ? null : _pickAvatar,
+              child: Center(
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                      color: palette.primary, shape: BoxShape.circle),
+                  child: Center(
+                    child: _uploading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.camera_alt_rounded,
+                            size: 16, color: Colors.white),
+                  ),
+                ),
+              ),
             ),
           ),
         ),

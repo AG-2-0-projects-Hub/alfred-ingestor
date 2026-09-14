@@ -14,11 +14,16 @@ class PropertyExpandedView extends StatefulWidget {
   // Forwarded to ChatLiveDialog so the dashboard can refresh optimistically
   // when the host resolves an escalation from inside this expanded view.
   final VoidCallback? onChatResolved;
+  // Forwarded to GenerateGuestLinkDialog -- without it, a Dev account could
+  // get the first-time guest-link walkthrough incorrectly triggered from
+  // this entry point (it always defaulted to false).
+  final bool isDev;
   const PropertyExpandedView({
     super.key,
     required this.property,
     required this.activeConversations,
     this.onChatResolved,
+    this.isDev = false,
   });
 
   @override
@@ -304,7 +309,8 @@ class _PropertyExpandedViewState extends State<PropertyExpandedView> {
                       Navigator.of(context).pop();
                       showDialog(
                         context: context,
-                        builder: (_) => GenerateGuestLinkDialog(property: widget.property),
+                        builder: (_) => GenerateGuestLinkDialog(
+                            property: widget.property, isDev: widget.isDev),
                       );
                     },
                     icon: const Icon(Icons.link_rounded, size: 16),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../services/api_client.dart';
+import '../theme/app_theme.dart';
 
 class ConflictQuestionnaireWidget extends StatefulWidget {
   const ConflictQuestionnaireWidget({
@@ -112,7 +114,7 @@ class _ConflictQuestionnaireWidgetState
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+        SnackBar(content: Text(msg), backgroundColor: context.palette.danger));
   }
 
   @override
@@ -166,11 +168,12 @@ class _ConflictQuestionnaireWidgetState
         (item['options'] as List).map((o) => o.toString()).toList();
     final selected = _selectedValues[id];
 
+    final palette = context.palette;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        border: Border.all(color: Colors.orange.shade200),
+        color: palette.warningContainer,
+        border: Border.all(color: palette.warning.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -178,13 +181,17 @@ class _ConflictQuestionnaireWidgetState
         children: [
           Text(
             question,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: palette.textPrimary,
+            ),
           ),
           if (contextText.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
               contextText,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              style: GoogleFonts.inter(fontSize: 13, color: palette.textSecondary),
             ),
           ],
           const SizedBox(height: 12),
@@ -193,7 +200,8 @@ class _ConflictQuestionnaireWidgetState
               value: option,
               groupValue: selected,
               onChanged: (v) => setState(() => _selectedValues[id] = v),
-              title: Text(option, style: const TextStyle(fontSize: 14)),
+              title: Text(option,
+                  style: GoogleFonts.inter(fontSize: 14, color: palette.textPrimary)),
               contentPadding: EdgeInsets.zero,
               dense: true,
             ),

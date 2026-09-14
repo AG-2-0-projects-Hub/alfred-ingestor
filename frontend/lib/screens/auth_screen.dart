@@ -47,6 +47,7 @@ class _AuthScreenState extends State<AuthScreen> {
   String? _resetSentTo;
 
   bool _isSendingReset = false;
+  bool _isResendingConfirmation = false;
 
   static const _minPasswordLength = 8;
 
@@ -88,7 +89,12 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _submit() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
-    if (email.isEmpty || password.isEmpty) return;
+    if (email.isEmpty || password.isEmpty) {
+      // Was a silent no-op — tapping Sign In/Sign Up with a blank field did
+      // nothing visible, reading as a broken button.
+      setState(() => _fieldError = 'Enter your email and password.');
+      return;
+    }
 
     if (!_isLogin) {
       final (problem, focusOn) = _validateSignUp(password, _confirmController.text);
@@ -145,12 +151,42 @@ class _AuthScreenState extends State<AuthScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
+              content: const Text('Something went wrong. Please try again.'),
               backgroundColor: context.palette.danger),
         );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Re-sends the signup confirmation email. Neither "check your inbox"
+  /// screen previously offered a way to resend if the email didn't arrive
+  /// (spam filter, typo, delay) — the only action was "Back to sign in".
+  Future<void> _resendConfirmation() async {
+    final email = _awaitingConfirmationFor;
+    if (email == null || _isResendingConfirmation) return;
+    setState(() => _isResendingConfirmation = true);
+    try {
+      await Supabase.instance.client.auth.resend(
+        type: OtpType.signup,
+        email: email,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Confirmation email resent.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: const Text('Could not resend. Please try again.'),
+              backgroundColor: context.palette.danger),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isResendingConfirmation = false);
     }
   }
 
@@ -188,7 +224,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
+              content: const Text('Something went wrong. Please try again.'),
               backgroundColor: context.palette.danger),
         );
       }
@@ -426,6 +462,20 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton(
+            onPressed: _isResendingConfirmation ? null : _resendConfirmation,
+            child: Text(
+              _isResendingConfirmation ? 'Resending…' : 'Resend email',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.palette.primary,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -469,6 +519,20 @@ class _AuthScreenState extends State<AuthScreen> {
               'Back to sign in',
               style: GoogleFonts.plusJakartaSans(
                   fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton(
+            onPressed: _isSendingReset ? null : _sendPasswordReset,
+            child: Text(
+              _isSendingReset ? 'Resending…' : 'Resend email',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.palette.primary,
+              ),
             ),
           ),
         ),
