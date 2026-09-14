@@ -980,7 +980,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showStep0Hint: _showStep0Hint(item),
                   );
             return _StaggeredEntry(
-              key: ValueKey(item['id'] as String? ?? 'add-property'),
               delayMs: (index * 40).clamp(0, 240),
               child: card,
             );
@@ -1055,7 +1054,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   showStep0Hint: _showStep0Hint(item),
                 );
           return _StaggeredEntry(
-            key: ValueKey(item['id'] as String? ?? 'add-property'),
             delayMs: (index * 50).clamp(0, 400),
             child: card,
           );
@@ -1069,7 +1067,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 class _StaggeredEntry extends StatefulWidget {
   final Widget child;
   final int delayMs;
-  const _StaggeredEntry({super.key, required this.child, required this.delayMs});
+  const _StaggeredEntry({required this.child, required this.delayMs});
 
   @override
   State<_StaggeredEntry> createState() => _StaggeredEntryState();

@@ -196,68 +196,41 @@ class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
   bool _pressed = false;
   final LayerLink _step0Link = LayerLink();
-  OverlayEntry? _step0Overlay;
-  final ValueNotifier<bool> _step0Visible = ValueNotifier(false);
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _syncStep0Overlay();
-  }
-
-  @override
-  void didUpdateWidget(covariant _PropertyCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncStep0Overlay();
-  }
-
-  void _syncStep0Overlay() {
-    _step0Visible.value = widget.showStep0Hint;
-    if (widget.showStep0Hint && _step0Overlay == null) {
-      final overlay = OverlayEntry(
-        builder: (_) => Positioned(
-          width: 280,
-          child: CompositedTransformFollower(
-            link: _step0Link,
-            showWhenUnlinked: false,
-            // Left-aligned with the card (not centered on the button pair) —
-            // centering pushed the panel off the left edge of the screen for
-            // cards near the edge of the grid. The pointer doesn't need to
-            // land exactly between the two buttons.
-            targetAnchor: Alignment.bottomLeft,
-            followerAnchor: Alignment.topLeft,
-            offset: const Offset(0, 12),
-            child: ValueListenableBuilder<bool>(
-              valueListenable: _step0Visible,
-              builder: (_, visible, child) => IgnorePointer(
-                ignoring: !visible,
-                child: AnimatedOpacity(
-                  opacity: visible ? 1 : 0,
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeInOut,
-                  child: child,
-                ),
-              ),
-              child: const _Step0Tip(),
-            ),
+  // Step 0's tip used to be injected via a raw Overlay entry, in the same
+  // shared layer dialogs use for their own modal content — meaning which one
+  // ended up "in front" depended on manually-managed insertion order, and
+  // occasionally landed wrong (rendering above an open dialog, undimmed).
+  // The card itself never has this problem because it's an ordinary part of
+  // the dashboard's own widget tree, so a dialog opened on top of it is
+  // always guaranteed to render above it. Building the tip as a normal
+  // Positioned/CompositedTransformFollower inside this card's own Stack
+  // (below) gives it that same guarantee for free, instead of managing the
+  // ordering by hand.
+  Widget _buildStep0Tip() {
+    return Positioned(
+      width: 280,
+      child: CompositedTransformFollower(
+        link: _step0Link,
+        showWhenUnlinked: false,
+        // Left-aligned with the card (not centered on the button pair) —
+        // centering pushed the panel off the left edge of the screen for
+        // cards near the edge of the grid. The pointer doesn't need to land
+        // exactly between the two buttons.
+        targetAnchor: Alignment.bottomLeft,
+        followerAnchor: Alignment.topLeft,
+        offset: const Offset(0, 12),
+        child: IgnorePointer(
+          ignoring: !widget.showStep0Hint,
+          child: AnimatedOpacity(
+            opacity: widget.showStep0Hint ? 1 : 0,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeInOut,
+            child: const _Step0Tip(),
           ),
         ),
-      );
-      _step0Overlay = overlay;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _step0Overlay == overlay) {
-          Overlay.of(context, rootOverlay: true).insert(overlay);
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _step0Overlay?.remove();
-    _step0Overlay = null;
-    _step0Visible.dispose();
-    super.dispose();
+      ),
+    );
   }
 
   List<BoxShadow> _statusGlow(AppPalette p) {
@@ -304,7 +277,10 @@ class _PropertyCardState extends State<_PropertyCard> {
     final media = masterJson?['media'] as Map<String, dynamic>?;
     final thumbnailUrl = media?['thumbnail_url'] as String?;
 
-    return MouseRegion(
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
@@ -438,6 +414,9 @@ class _PropertyCardState extends State<_PropertyCard> {
           ),
         ),
       ),
+        ),
+        _buildStep0Tip(),
+      ],
     );
   }
 
