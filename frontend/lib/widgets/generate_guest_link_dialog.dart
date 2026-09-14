@@ -6,8 +6,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
+import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 import '../theme/app_theme.dart';
+import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
@@ -58,11 +60,13 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       _nameController.text = 'Test walkthrough';
     });
     _wtStepNotifier.value = 0;
+    WalkthroughActivity.isActive.value = true;
   }
 
   void _wtClose() {
     setState(() => _wtActive = false);
     _wtStepNotifier.value = null;
+    WalkthroughActivity.isActive.value = false;
   }
 
   void _wtNext() {
@@ -118,6 +122,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
 
   @override
   void dispose() {
+    if (_wtActive) WalkthroughActivity.isActive.value = false;
     _wtOverlay?.remove();
     _wtOverlay = null;
     _wtStepNotifier.dispose();
@@ -193,30 +198,39 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     );
   }
 
+  // During the walkthrough, only the intended next action is clickable —
+  // the alternate escape hatch (Cancel / Done) is disabled so a first-time
+  // host goes through the full sequence instead of bailing out early.
   List<Widget> get _actions => _result == null
       ? [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: _loading ? null : _generate,
-            child: _loading
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: Colors.white))
-                : const Text('Generate Link'),
+          WalkthroughHighlight(
+            active: _wtActive,
+            child: FilledButton(
+              onPressed: _loading ? null : _generate,
+              child: _loading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
+                  : const Text('Generate Link'),
+            ),
           ),
         ]
       : [
-          TextButton(
-            onPressed: _openHostChat,
-            child: const Text('Open Host Chat'),
+          WalkthroughHighlight(
+            active: _wtActive,
+            child: TextButton(
+              onPressed: _openHostChat,
+              child: const Text('Open Host Chat'),
+            ),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
             child: const Text('Done'),
           ),
         ];
@@ -238,7 +252,9 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     // dialog-sized widget) gives a sane box to anchor beside instead.
     final content = CompositedTransformTarget(
       link: _wtDockLink,
-      child: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
+      child: _result == null
+          ? _buildStep1(isMobile)
+          : WalkthroughHighlight(active: _wtActive, child: _buildStep2(isMobile)),
     );
 
     final dialog = AlertDialog(

@@ -10,6 +10,7 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
+import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
@@ -159,11 +160,16 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   // _sendHostMessage/_resolveIssue) rather than hitting the real backend.
   int? _wtStep;
   bool _wtEscalationShown = false;
+  // Step 4 ("Your turn") is a two-phase gate: Send is the only enabled
+  // action until it's used, then the highlight moves to Mark Issue as
+  // Resolved and that becomes the only enabled action — never both at once.
+  bool _wtReplySent = false;
   final _wtHeaderKey = GlobalKey();
   final _wtLinksKey = GlobalKey();
   final _wtModeKey = GlobalKey();
   final _wtPillKey = GlobalKey();
   final _wtResolveKey = GlobalKey();
+  final _wtSendKey = GlobalKey();
   final _wtDockLink = LayerLink();
   OverlayEntry? _wtOverlay;
   final _wtStepNotifier = ValueNotifier<int?>(null);
@@ -175,11 +181,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     if (widget.continueWalkthrough) {
       _wtStep = 0;
       _wtStepNotifier.value = 0;
+      WalkthroughActivity.isActive.value = true;
     }
   }
 
   @override
   void dispose() {
+    if (_wtStep != null) WalkthroughActivity.isActive.value = false;
     _wtOverlay?.remove();
     _wtOverlay = null;
     _wtStepNotifier.dispose();
@@ -193,6 +201,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   void _setWtStep(int? step) {
     setState(() => _wtStep = step);
     _wtStepNotifier.value = step;
+    WalkthroughActivity.isActive.value = step != null;
   }
 
   void _wtNext() {
@@ -312,6 +321,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   }
 
   void _wtPrefillReply() {
+    _wtReplySent = false;
     _hostController.text =
         "Yes, early check-in is available — I'll make sure it's ready before they arrive.";
   }
@@ -689,6 +699,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     if (_wtStep != null) {
       _hostController.clear();
       setState(() {
+        if (_wtStep == 4) _wtReplySent = true;
         _messages = [
           ..._messages,
           <String, dynamic>{
@@ -1439,9 +1450,11 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         width: double.infinity,
         child: _wtHighlight(
           key: _wtResolveKey,
-          active: _wtStep == 4,
+          active: _wtStep == 4 && _wtReplySent,
           child: ElevatedButton.icon(
-          onPressed: _isResolving ? null : _resolveIssue,
+          onPressed: (_isResolving || (_wtStep == 4 && !_wtReplySent))
+              ? null
+              : _resolveIssue,
           icon: _isResolving
               ? const SizedBox(
                   width: 14,
@@ -1818,14 +1831,18 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            onPressed: _isSending ? null : _sendHostMessage,
-            icon: const Icon(Icons.send_rounded, size: 18),
-            style: IconButton.styleFrom(
-              backgroundColor: context.palette.primary,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: context.palette.border,
-              disabledForegroundColor: context.palette.textMuted,
+          _wtHighlight(
+            key: _wtSendKey,
+            active: _wtStep == 4 && !_wtReplySent,
+            child: IconButton(
+              onPressed: _isSending ? null : _sendHostMessage,
+              icon: const Icon(Icons.send_rounded, size: 18),
+              style: IconButton.styleFrom(
+                backgroundColor: context.palette.primary,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: context.palette.border,
+                disabledForegroundColor: context.palette.textMuted,
+              ),
             ),
           ),
         ],

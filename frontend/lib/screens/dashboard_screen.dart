@@ -17,6 +17,7 @@ import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
 import '../services/push_notification_service.dart';
+import '../utils/walkthrough_activity.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
 
@@ -375,6 +376,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   bool _showStep0Hint(Map<String, dynamic> property) {
     if (_isDev) return false;
+    if (WalkthroughActivity.isActive.value) return false;
     final status = property['status'] as String? ?? '';
     if (!_readyStatuses.contains(status)) return false;
     final settingsSeen = _walkthroughSeenIds.contains(property['id'] as String);
@@ -925,6 +927,23 @@ class _DashboardScreenState extends State<DashboardScreen>
     final items = [..._properties, <String, dynamic>{}];
     final n = items.length;
 
+    return ValueListenableBuilder<bool>(
+      valueListenable: WalkthroughActivity.isActive,
+      builder: (context, _, __) => _buildGridBody(
+        items,
+        n,
+        topInsetDesktop: topInsetDesktop,
+        topInsetMobile: topInsetMobile,
+      ),
+    );
+  }
+
+  Widget _buildGridBody(
+    List<Map<String, dynamic>> items,
+    int n, {
+    required double topInsetDesktop,
+    required double topInsetMobile,
+  }) {
     return LayoutBuilder(builder: (context, constraints) {
       final viewportW = constraints.maxWidth;
       final viewportH = constraints.maxHeight;

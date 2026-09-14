@@ -197,6 +197,7 @@ class _PropertyCardState extends State<_PropertyCard> {
   bool _pressed = false;
   final LayerLink _step0Link = LayerLink();
   OverlayEntry? _step0Overlay;
+  final ValueNotifier<bool> _step0Visible = ValueNotifier(false);
 
   @override
   void didChangeDependencies() {
@@ -211,6 +212,7 @@ class _PropertyCardState extends State<_PropertyCard> {
   }
 
   void _syncStep0Overlay() {
+    _step0Visible.value = widget.showStep0Hint;
     if (widget.showStep0Hint && _step0Overlay == null) {
       final overlay = OverlayEntry(
         builder: (_) => Positioned(
@@ -218,10 +220,26 @@ class _PropertyCardState extends State<_PropertyCard> {
           child: CompositedTransformFollower(
             link: _step0Link,
             showWhenUnlinked: false,
-            targetAnchor: Alignment.bottomCenter,
-            followerAnchor: Alignment.topCenter,
+            // Left-aligned with the card (not centered on the button pair) —
+            // centering pushed the panel off the left edge of the screen for
+            // cards near the edge of the grid. The pointer doesn't need to
+            // land exactly between the two buttons.
+            targetAnchor: Alignment.bottomLeft,
+            followerAnchor: Alignment.topLeft,
             offset: const Offset(0, 12),
-            child: const _Step0Tip(),
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _step0Visible,
+              builder: (_, visible, child) => IgnorePointer(
+                ignoring: !visible,
+                child: AnimatedOpacity(
+                  opacity: visible ? 1 : 0,
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeInOut,
+                  child: child,
+                ),
+              ),
+              child: const _Step0Tip(),
+            ),
           ),
         ),
       );
@@ -231,9 +249,6 @@ class _PropertyCardState extends State<_PropertyCard> {
           Overlay.of(context, rootOverlay: true).insert(overlay);
         }
       });
-    } else if (!widget.showStep0Hint && _step0Overlay != null) {
-      _step0Overlay!.remove();
-      _step0Overlay = null;
     }
   }
 
@@ -241,6 +256,7 @@ class _PropertyCardState extends State<_PropertyCard> {
   void dispose() {
     _step0Overlay?.remove();
     _step0Overlay = null;
+    _step0Visible.dispose();
     super.dispose();
   }
 
