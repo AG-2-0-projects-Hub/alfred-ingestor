@@ -158,6 +158,19 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **status:** passing
 - **promoted from intake:** new 2026-07-14 (`59fd4d5`)
 
+### A8. Profile dialog doesn't lose edits on outside-tap; load failure shows retry, not a blank form
+- **id:** auth-profile-guard-01
+- **touches:** `frontend/lib/widgets/profile_dialog.dart`
+- **layer:** 2
+- **setup:** logged-in host, Profile dialog open
+- **action:** (1) click outside the dialog (the dimmed barrier); (2) separately, simulate `host_profiles` fetch failing (network block) and reopen Profile
+- **host_expected:**
+  1. Clicking outside does **not** dismiss the dialog or lose edited fields — `barrierDismissible` was true with no unsaved-changes guard; a host who edited name/nickname/bio and tapped outside silently lost every edit.
+  2. A failed load shows a distinct retry state ("Couldn't load your profile" + Retry), never the same blank editable form a genuine first-time host sees — the two were previously indistinguishable, and Save on the blank form would upsert blanks over real existing data.
+  3. Save is disabled while an avatar upload is still in flight.
+- **last_tested:** 2026-09-14 (automated Playwright, session-injected auth, assertion 1 confirmed live on staging — clicking the barrier at (100,800) left the dialog open with fields unchanged, zero console/page errors; assertions 2-3 code-verified only, not yet driven live)
+- **status:** passing (assertion 1); pending (assertions 2-3)
+
 ---
 
 ## B. Ingestor (property creation)
@@ -332,6 +345,26 @@ Not all fields are required for every scenario — drop irrelevant ones.
 - **last_tested:** 2026-06-09
 - **status:** passing
 - **promoted from intake:** `4336ebd`, `0f019f2`, `feaf8fd`, `1dded18`, `55c7efa`
+
+### B13. Resolving a conflict from the drawer doesn't crash the tab bar
+- **id:** ingest-conflict-tabcrash-01
+- **touches:** `frontend/lib/widgets/property_detail_drawer.dart`
+- **layer:** 2
+- **setup:** a property in `Conflict_Pending` status, opened in the drawer (Resolve tab visible)
+- **action:** submit conflict resolutions from the Resolve tab
+- **host_expected:** the Resolve tab disappears and the drawer keeps working — no red-screen. Regression guard: `TabController.length` was fixed at drawer-open time from `hasConflict`, but the tab count depends on live conflict state (mutated by this exact action, and separately by the realtime `properties` subscription) — the two could disagree and throw Flutter's tab-count assertion right as the host finished resolving.
+- **last_tested:** 2026-09-14 (code-verified: `_syncTabControllerForConflict` recreates the controller whenever `hasConflict` changes, called from both mutation sites. Live-verified only the *unaffected* path — opening the drawer for a property with **no** pending conflict renders the correct 2-tab layout with zero page errors; the live conflict-resolve transition itself was not driven, to avoid mutating this project's shared QA property's conflict state)
+- **status:** passing (no-conflict path, live); pending (live conflict→resolved transition)
+
+### B14. In-app "Host Chat" opens the themed dialog, not the legacy screen
+- **id:** ingest-hostchat-entrypoint-01
+- **touches:** `frontend/lib/widgets/property_detail_drawer.dart`, `frontend/lib/widgets/archived_chats_dialog.dart`
+- **layer:** 2
+- **setup:** logged-in host, property drawer open
+- **action:** click "Host Chat"
+- **host_expected:** a themed dialog opens titled "Host Chat" (not "Chat History"), with the property name as subtitle, a chat-bubble icon, and — with no active conversations — "No conversations yet." / "Generate a guest link to start one." This replaces a `Navigator.push(HostPanelScreen(...))` call to a plain-Material, unstyled legacy screen.
+- **last_tested:** 2026-09-14 (automated Playwright, session-injected auth — PASS, live on staging: exact title/subtitle/icon/empty-state copy confirmed via screenshot, zero page errors)
+- **status:** passing
 
 ---
 
