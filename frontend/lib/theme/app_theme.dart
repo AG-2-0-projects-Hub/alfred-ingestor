@@ -239,14 +239,7 @@ final AppPalette _daylightPalette = AppPalette(
   dangerContainer: const Color(0xFFFEE2E2),
   glassTint: const Color.fromRGBO(255, 255, 255, 0.60),
   glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.75),
-  // Walkthrough tip panels only (see grep before changing) — the real
-  // "backlit glass" backing tint, painted in its own layer by
-  // WalkthroughBubble (see walkthrough_tip_panel.dart's class doc: Flutter
-  // drops `color` outright when `gradient` is also set on a BoxDecoration,
-  // so this value never actually rendered before that rebuild — every prior
-  // tuning pass here, 0.90/0.97/0.96, was invisible). 0.95 reads as a lit
-  // panel while leaving a whisper of the blurred backdrop through.
-  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.95),
+  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.90),
   glassBorder: const Color.fromRGBO(0, 0, 0, 0.08),
   glassBorderStrong: const Color.fromRGBO(0, 0, 0, 0.15),
   // Aurora — amethyst-aurora aesthetic. Baked alphas are render-faithful at
@@ -313,12 +306,7 @@ final AppPalette _midnightPalette = AppPalette(
   dangerContainer: const Color.fromRGBO(224, 82, 82, 0.15),
   glassTint: const Color.fromRGBO(255, 255, 255, 0.04),
   glassTintStrong: const Color.fromRGBO(255, 255, 255, 0.08),
-  // See light palette's glassTintHeavy comment for why this now actually
-  // renders for the first time. Kept lower than light mode's 0.95 so dark
-  // mode's light text (textPrimary/textSecondary) stays legible against it —
-  // not independently verified live this pass; revisit if dark mode is
-  // actually in use and this reads too dim/bright.
-  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.22),
+  glassTintHeavy: const Color.fromRGBO(255, 255, 255, 0.12),
   glassBorder: const Color.fromRGBO(255, 255, 255, 0.08),
   glassBorderStrong: const Color.fromRGBO(255, 255, 255, 0.20),
   // Aurora — Midnight aesthetic. Baked alphas are render-faithful at

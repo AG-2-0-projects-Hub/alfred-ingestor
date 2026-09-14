@@ -296,8 +296,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 onNext: _wtNext,
                 onClose: _wtFinish,
                 isLast: step == _wtStepCount - 1,
-                pointer: WalkthroughPointer.right,
-                pointerOffset: 24,
               ),
             ),
           );

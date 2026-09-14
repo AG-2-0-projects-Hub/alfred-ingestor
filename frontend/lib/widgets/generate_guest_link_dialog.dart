@@ -102,8 +102,6 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
                 onNext: _wtNext,
                 onClose: _wtClose,
                 isLast: false,
-                pointer: WalkthroughPointer.left,
-                pointerOffset: 24,
               ),
             ),
           );

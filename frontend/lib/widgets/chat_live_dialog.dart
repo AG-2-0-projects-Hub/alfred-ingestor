@@ -342,8 +342,6 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 onNext: _wtNext,
                 onClose: _wtFinish,
                 isLast: info.isLast,
-                pointer: WalkthroughPointer.left,
-                pointerOffset: 24,
               ),
             ),
           );
