@@ -423,13 +423,26 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // wait for it to actually signal done before falling through to the
       // dialog-hide in `finally`. Skip the wait if the row was never even
       // created (this request never reached the backend at all) — nothing
-      // will ever complete it. Capped so a genuinely stuck backend can't trap
-      // the dialog open forever.
+      // will ever complete it.
+      //
+      // Capped so a genuinely stuck backend can't trap the dialog open
+      // forever -- but the cap firing must never look like the dialog just
+      // vanished for no reason (confirmed live 2026-09-15: a real backend
+      // hang left the row silent for 14+ minutes with no error, and the
+      // first version of this cap closed the dialog with zero explanation,
+      // which read as exactly the kind of silent failure this whole fix
+      // exists to prevent). So: tell the host explicitly when the cap fires,
+      // same as if they'd tapped "Continue in background" themselves.
       if (!widget.isDev && result != null) {
+        var timedOut = false;
         await _flowCompleter?.future.timeout(
-          const Duration(minutes: 4),
-          onTimeout: () {},
+          const Duration(minutes: 6),
+          onTimeout: () => timedOut = true,
         );
+        if (timedOut) {
+          _showInfo(
+              "This is taking longer than usual. Alfred is still working -- check back on the dashboard for progress.");
+        }
       }
     } on TimeoutException {
       _showError("Couldn't reach Alfred. Check your connection and try again.");
@@ -562,6 +575,18 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
       backgroundColor: context.palette.danger,
+      duration: const Duration(seconds: 8),
+    ));
+  }
+
+  // Non-error status update -- distinct from _showError's danger styling so
+  // "still working, nothing's wrong" never reads as a failure.
+  void _showInfo(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: context.palette.accent,
       duration: const Duration(seconds: 8),
     ));
   }
