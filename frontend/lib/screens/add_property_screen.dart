@@ -50,6 +50,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   bool _autoMergeTriggered = false;
   // Same guard for the dev-mode "Files Ingested" dialog.
   bool _ingestedDialogShown = false;
+  // Signals when the whole non-dev ingest+merge chain has concluded, one way
+  // or another — merge now fires from _subscribeToProperty's listener rather
+  // than being awaited inline in _startIngest, so this is what lets
+  // _startIngest still wait for the real end of the chain before it hides
+  // the training-wait dialog (TrainingWaitDialog's own contract: shown for
+  // the whole ingest+merge span, not just one request). Completed by
+  // _runMerge's finally, or immediately if ingest itself lands on
+  // Ingest_Error with nothing to merge.
+  Completer<void>? _flowCompleter;
   // True once the host taps TrainingWaitDialog's "Continue in background" —
   // guards _startIngest's two Navigator...pop() calls so they don't try to
   // pop a dialog that's already gone (which would pop whatever route is now
@@ -173,6 +182,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       if (status == 'Ingested' && !_autoMergeTriggered && !_isMerging) {
         _autoMergeTriggered = true;
         _runMerge();
+      } else if (status == 'Ingest_Error' &&
+          _flowCompleter != null &&
+          !_flowCompleter!.isCompleted) {
+        // Nothing usable came out of ingest — no merge will ever fire to
+        // complete the chain, so signal done here, or _startIngest's wait
+        // for it would just sit until the 4-minute safety timeout.
+        _flowCompleter!.complete();
       }
       if (status != 'Ingested') _autoMergeTriggered = false;
     });
@@ -270,7 +286,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _heroImageUrl = null;
       _propertyStatus = null;
       _masterJson = null;
+      _autoMergeTriggered = false;
+      _ingestedDialogShown = false;
     });
+
+    // Start watching the row immediately, using the ID this client already
+    // generated (initState), rather than waiting for the backend to echo it
+    // back via the '(system)'/'property_id' SSE event below. If the
+    // connection drops or never delivers even that first event -- the exact
+    // scenario this whole realtime backstop exists for -- waiting for the
+    // echo meant the backstop never activated at all (confirmed live
+    // 2026-09-15: browser lost the stream before any event arrived, screen
+    // had zero way to learn the backend kept working). The backend resolves
+    // the canonical property_id (a rename onto an existing same-named
+    // property) before it inserts the row or emits anything, so _propertyId
+    // is already correct for the common case; _handleSseEvent below still
+    // re-subscribes if the resolved ID ever differs (the rename case).
+    _flowCompleter = Completer<void>();
+    _subscribeToProperty(_propertyId);
 
     // Train Now (User mode) can take a couple of minutes across scrape +
     // ingest + merge — show the wait dialog for that whole span so it doesn't
@@ -382,6 +415,22 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               'Ingest could not complete. Please try again, or contact support if it persists.');
         }
       }
+
+      // The training-wait dialog is meant to span the whole ingest+merge
+      // chain (TrainingWaitDialog's own doc comment), not just this request's
+      // own SSE read — merge now fires from _subscribeToProperty's listener
+      // once the row shows 'Ingested', not from an inline await here, so
+      // wait for it to actually signal done before falling through to the
+      // dialog-hide in `finally`. Skip the wait if the row was never even
+      // created (this request never reached the backend at all) — nothing
+      // will ever complete it. Capped so a genuinely stuck backend can't trap
+      // the dialog open forever.
+      if (!widget.isDev && result != null) {
+        await _flowCompleter?.future.timeout(
+          const Duration(minutes: 4),
+          onTimeout: () {},
+        );
+      }
     } on TimeoutException {
       _showError("Couldn't reach Alfred. Check your connection and try again.");
     } on ApiException catch (e) {
@@ -479,6 +528,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _showError('Merge failed: $e');
     } finally {
       setState(() => _isMerging = false);
+      if (_flowCompleter != null && !_flowCompleter!.isCompleted) {
+        _flowCompleter!.complete();
+      }
     }
   }
 
