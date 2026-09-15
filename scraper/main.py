@@ -271,7 +271,7 @@ async def _run_photo_triage_phase1(client, candidates: list[dict], property_cont
     parts.append(genai.types.Part(text=_PHASE1_OUTPUT_INSTRUCTIONS))
     response = _generate_with_retry(
         client,
-        model="gemini-3.8-flash",
+        model="gemini-3.6-flash",
         contents=[genai.types.Content(role="user", parts=parts)],
         config=genai.types.GenerateContentConfig(
             temperature=0.0, response_mime_type="application/json"
@@ -392,7 +392,7 @@ def _run_photo_triage_phase2(
     parts.append(genai.types.Part(text=_PHASE2_OUTPUT_INSTRUCTIONS))
     response = _generate_with_retry(
         client,
-        model="gemini-3.8-flash",
+        model="gemini-3.6-flash",
         contents=[genai.types.Content(role="user", parts=parts)],
         config=genai.types.GenerateContentConfig(
             temperature=0.0, response_mime_type="application/json"
@@ -473,7 +473,7 @@ async def scrape_airbnb(req: ScrapeRequest):
         final_prompt = get_gemini_prompt(extracted_markdown)
         response = _generate_with_retry(
             client,
-            model="gemini-3.8-flash",
+            model="gemini-3.6-flash",
             contents=final_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=(

@@ -8,7 +8,7 @@ from services import genai_factory
 
 log = logging.getLogger(__name__)
 
-MODEL = "gemini-3.8-flash"
+MODEL = "gemini-3.6-flash"
 
 
 def _get_client() -> genai.Client:
