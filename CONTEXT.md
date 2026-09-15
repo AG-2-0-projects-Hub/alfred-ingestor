@@ -11,21 +11,55 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 Part 2 of the 2026-09-14 handoff (full pre-beta UX/bug audit, report-only, no fixes until
-  founder approves) never started — founder flagged it same-day time-sensitive; likely passed by now.
 - 🟡 Fix 2 (walkthrough panel opacity/"backlit glass") still not started. Fix 1 (pointer/notch) IS
   now done and founder-verified live across all 4 docked panels (Settings drawer, Guest Link, Host
   Chat, dashboard Step 0). The `GlassPanel` bug below is the likely root cause of the low opacity —
   fixing that may largely BE Fix 2.
 - 🟡 `GlassPanel` silently drops its `color` app-wide whenever `gradient` is also set (real Flutter
   BoxDecoration behavior, found 2026-09-14) — still not fixed anywhere.
+- 🟡 Founder should self-verify the raw-Postgres-error-text shown in the ingest error banner on a
+  duplicate-Airbnb-URL collision (the guard itself is intentional, confirmed 2026-09-15) — backend
+  code, out of scope for the 2026-09-14/15 frontend mitigation pass. See its report (linked below).
 - 🔴 Standing, carried across many sessions: has the founder retried training since `44cbfc1`
   end-to-end (Santa Prisca / Dos Rios / a fresh Bungalow)? Still unconfirmed.
 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-14 continuation (**Walkthrough Fix 1 (pointer/notch) shipped and founder-verified live across all 4 panels, after 4 rounds of real bugs found via live testing, not just compiling — plus a full single-actionable-option audit/fix on the 9-step Guest-Link/Host-Chat sequence.** — `staging` @ `9ab4c34`, pushed across 4 commits (`aeba3ee`, `d09f36b`, `c797c2e`, `9ab4c34`). Frontend-only; Vercel auto-deploys, no manual deploy needed.
+**Last Session:** 2026-09-14→15 (**Full pre-beta UX/accessibility/correctness/deploy audit (57
+findings, published as an artifact) → 6-phase mitigation plan, implemented, live-verified against
+staging, and code-reviewed.** — `staging`, 8 commits (`9ee94e4`..`3e23660`), each phase pushed as
+its own separate `git push` so bisection never needs a redeploy. Full detail, every bug found/fixed,
+the scope correction made mid-plan, and a reusable tooling discovery (session-injection + manual
+InputEvent dispatch to reliably drive this app's Flutter-web login/forms from headless Playwright,
+since `keyboard.type` doesn't reliably reach Flutter's canvas here) are in
+`_Context/Pre_Beta_Mitigation_Report_2026-09-14.md` — read that before this terse summary if you
+need depth; this entry stays short on purpose.
+> **✅ Audit → plan → execute → verify → review, in one continuous session.** Critical/High fixes:
+> app-wide crash on a missing Supabase env var (now a legible fallback screen); a `TabController`
+> crash on conflict-resolve; the in-app "Host Chat" button opening a legacy unstyled screen (fixed
+> — `/chat-live`/`/host-panel` routes deliberately left alone, see report §3); an uncancellable
+> ~3.5min Train Now modal (added "Continue in background"); a stuck-file retry trap; no favicon +
+> a 404'ing `manifest.json`; all 7 of the audit's `BACKEND_URL`-fail-loud-guard bypass sites (now
+> all route through `ApiClient.postJson`); 3 onboarding walkthroughs silently breaking below
+> ~1000px width; keyboard-inaccessible primary navigation; a voice-recorder rewrite (was crash-prone
+> `dart:html`/`record`, now the same native MediaRecorder+WAV pipeline `chat_screen.dart` already
+> used for guests — same audio-quality bug class, host side had never been fixed).
+> **✅ Live-verified on the real staging site**, not just `flutter analyze`/`build` — logged in as
+> the existing QA test account via session injection, drove login, dashboard, the drawer, Host Chat,
+> dark mode, the Profile dialog, and a full real Train Now run including a real voice recording via
+> Chromium's fake-mic device. Cleaned up the one throwaway test property created for that run.
+> **✅ `/code-review` caught 4 real bugs** the audit missed: a voice-note "Undo" snackbar that could
+> silently overwrite a *newer* recording if re-recorded within the undo window; a mic-left-open
+> risk in the recorder if disposed mid-permission-prompt; a disposed-callback ordering bug in the
+> same file; and `PropertyDetailDrawer` still had the exact barrier-dismiss data-loss bug just
+> fixed for `ProfileDialog`, not applied there. All 4 fixed, verified, pushed (`3e23660`).
+> **🔴 New bug found by the founder live-testing 2026-09-15, added to `QUEUE.md`:** User (non-Dev)
+> mode's Add Property screen should show a single "Train Now" button, currently shows "Ingest"
+> instead — not investigated this session.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-14 continuation (**Walkthrough Fix 1 (pointer/notch) shipped and founder-verified live across all 4 panels, after 4 rounds of real bugs found via live testing, not just compiling — plus a full single-actionable-option audit/fix on the 9-step Guest-Link/Host-Chat sequence.** — `staging` @ `9ab4c34`, pushed across 4 commits (`aeba3ee`, `d09f36b`, `c797c2e`, `9ab4c34`). Frontend-only; Vercel auto-deploys, no manual deploy needed.
 > **✅ Fix 1 shipped correctly this time**: single-shape `Path` clip (rounded rect + tail cut into one edge) via a new opt-in `clipper` param on `GlassPanel`, deliberately avoiding the `ClipPath`+`BackdropFilter`+`CustomPaint` combo suspected of causing the prior session's underline regression — used only `ClipPath`+`BackdropFilter` (the same combo every other panel already used safely via `ClipRRect`). Confirmed via live browser testing (not just screenshots) across every panel; no underline bug recurred anywhere.
 > **🔴→✅ Real, structural bug found and fixed: dashboard Step 0's tip was rendered via a raw `Overlay.insert()`, in the same shared layer dialogs use for their own modal content** — so which one ended up "in front" depended on manually-managed insertion timing, not anything guaranteed, and it intermittently rendered undimmed on top of an open dialog. Root cause wasn't list-reconciliation (a stable-`ValueKey` fix was tried and reverted — didn't help, added complexity for nothing). Real fix: build Step 0's tip as a normal `Positioned`/`CompositedTransformFollower` inside the property card's own `Stack` (`clipBehavior: Clip.none` lets it hang below the fixed-height grid cell) instead of a separate Overlay — the same structural guarantee the card itself already had for free, since dialogs are strictly-ordered separate routes. Removed the `WalkthroughActivity` flag mechanism entirely (an earlier, fragile attempt at the same problem that depended on the dashboard happening to rebuild).
 > **✅ Single-actionable-option audit, founder-directed, Guest-Link/Host-Chat's 9 steps only** (Settings drawer explicitly excluded — informative-only, no clickthrough required): step 1 disables Cancel + highlights Generate Link; step 2 disables Done + highlights Open Host Chat and the links box; step 7 (Send/Resolve) now gates Resolve disabled+unhighlighted until Send is used, then hands off the highlight and enabled state together, and clicking Resolve now auto-advances the walkthrough instead of requiring a separate Next click.
