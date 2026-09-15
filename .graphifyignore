@@ -1,0 +1,26 @@
+# Graphify-specific exclusions, layered on top of .gitignore (which graphify
+# respects automatically — only add what .gitignore doesn't already cover).
+
+# Prevent recursive self-ingestion of this project's own graph output.
+graphify-out/
+**/graphify-out/
+
+# The project's own .gitignore excludes _Context/ wholesale (it's meant to stay
+# untracked by git), but it holds the real specs/plans/schemas for this project —
+# un-ignore it specifically for graphify, which is not a git-tracking decision.
+!_Context/
+!_Context/**
+
+# Project-local skill/tool scaffolding, not authored project content.
+.agents/
+.claude/skills/
+skills/
+skills-lock.json
+
+# Accidental artifact — a literal folder named "wsl.localhost" from a botched
+# UNC path somewhere, not part of the project (contains one stray tmp PNG).
+wsl.localhost/
+
+# Large binary installer, not authored content and not part of any supported
+# extension anyway.
+google-chrome-stable_current_amd64.deb
