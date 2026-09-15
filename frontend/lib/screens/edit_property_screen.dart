@@ -44,6 +44,13 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   // guards _hideTrainingWaitDialog's pop() so it doesn't try to pop a dialog
   // that's already gone.
   bool _waitDialogDismissed = false;
+  // Tracks whether a TrainingWaitDialog is actually on screen right now —
+  // needed once User-mode ingest auto-chains into merge (each phase used to
+  // show/hide its own dialog independently, one click apart; chaining them
+  // means the ingest phase may already have closed its dialog before the
+  // outer finally runs). Without this, _hideTrainingWaitDialog's pop() could
+  // fire with no dialog left to pop, closing the whole screen instead.
+  bool _waitDialogOpen = false;
   // Single list, tracked from upload through ingestion completion — status
   // updates in place (queued → processing → done/error) rather than a second
   // "Files Ingested" list appearing below a frozen first one.
@@ -160,10 +167,11 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   void _showTrainingWaitDialog() {
     if (widget.isDev || !mounted) return;
     _waitDialogDismissed = false;
+    _waitDialogOpen = true;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.65),
+      barrierColor: AppTheme.trainingBarrierColor,
       builder: (_) => TrainingWaitDialog(
         onRunInBackground: () => _waitDialogDismissed = true,
       ),
@@ -171,7 +179,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   }
 
   void _hideTrainingWaitDialog() {
-    if (widget.isDev || !mounted || _waitDialogDismissed) return;
+    if (widget.isDev || !mounted || _waitDialogDismissed || !_waitDialogOpen) {
+      return;
+    }
+    _waitDialogOpen = false;
     Navigator.of(context, rootNavigator: true).pop();
   }
 
@@ -258,6 +269,13 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
             // "what's actually stored" list regardless.
           });
         }
+        // Retrain (User mode): no manual "Merge Now" click — chain straight
+        // into it, mirroring add_property_screen.dart's Train Now. Dev mode
+        // keeps the separate guided-banner/manual-button step.
+        if (!widget.isDev && _propertyStatus == 'Ingested') {
+          _hideTrainingWaitDialog();
+          if (await _confirmFailedFiles()) await _runMerge();
+        }
       }
     } on TimeoutException {
       _showError("Couldn't reach Alfred. Check your connection and try again.");
@@ -300,6 +318,51 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         }
       }
     });
+  }
+
+  // Guards the transition into merge: a permanently-failed file (exhausted
+  // its retries) still lets the batch as a whole reach "Ingested" server-side
+  // (backend/routers/ingest.py — partial failures don't block training), but
+  // that file's content silently never makes it in. Surface that instead of
+  // letting it pass unnoticed.
+  bool get _hasFailedFiles => _filesToIngest
+      .any((f) => f['status'] == 'error' || f['status'] == 'timeout');
+
+  // Returns true if it's fine to proceed to merge — either nothing failed,
+  // or the host explicitly chose to continue anyway.
+  Future<bool> _confirmFailedFiles() async {
+    if (!_hasFailedFiles) return true;
+    final failedNames = _filesToIngest
+        .where((f) => f['status'] == 'error' || f['status'] == 'timeout')
+        .map((f) => f['file'])
+        .join(', ');
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Some files didn't finish"),
+        content: Text(
+            '$failedNames couldn\'t be processed and won\'t be included. '
+            'Continue training with what succeeded, or go back and retry '
+            'the file first?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Go Back')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return proceed == true;
+  }
+
+  // Dev's manual "Merge Now" button / a non-dev fallback from the guided
+  // banner — either way, still gate on failed files first.
+  Future<void> _confirmAndMerge() async {
+    if (!await _confirmFailedFiles()) return;
+    await _runMerge();
   }
 
   Future<void> _runMerge() async {
@@ -356,7 +419,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       // way to kick off ingestion once files are queued — a no-op before that.
       if (_filesToIngest.any((f) => f['status'] == 'queued')) _startIngest();
     } else if (status == 'Ingested') {
-      _runMerge();
+      _confirmAndMerge();
     } else if (status == 'Ingest_Error') {
       _startIngest();
     }
@@ -439,6 +502,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                           hasMasterJson: _masterJson != null,
                           hasQueuedFiles: _filesToIngest
                               .any((f) => f['status'] == 'queued'),
+                          isDev: widget.isDev,
                         );
                   if (step == null) return const SizedBox.shrink();
                   return Padding(
@@ -689,7 +753,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       _propertyStatus == 'Ingested' &&
                       (_ingestedMarkdown?.isNotEmpty ?? false)) ...[
                     FilledButton(
-                      onPressed: _isMerging ? null : _runMerge,
+                      onPressed: _isMerging ? null : _confirmAndMerge,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         backgroundColor: context.palette.primary,
@@ -732,9 +796,45 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       onResolved: _onResolved,
                     ),
                   ],
-                  if (widget.isDev && _postMergeStatuses.contains(_propertyStatus)) ...[
-                    const SizedBox(height: 24),
-                    if (_masterJson != null) ...[
+                  if (_postMergeStatuses.contains(_propertyStatus)) ...[
+                    // Non-dev previously had no completion state here at all —
+                    // once a retrain finished, the whole block below was
+                    // isDev-gated, leaving them on the form with no signal it
+                    // was done and no way back.
+                    if (!widget.isDev) ...[
+                      const SizedBox(height: 24),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: context.palette.accentContainer,
+                          border: Border.all(color: context.palette.accent.withValues(alpha: 0.4)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.check_circle_rounded, color: context.palette.accent, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text('Alfred is up to date with your latest files.',
+                                  style: TextStyle(color: context.palette.textPrimary, fontSize: 13)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.dashboard_outlined, size: 18),
+                        label: const Text('Back to Dashboard'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          foregroundColor: context.palette.primary,
+                          side: BorderSide(color: context.palette.primaryContainer, width: 1.5),
+                        ),
+                      ),
+                    ],
+                    if (widget.isDev && _masterJson != null) ...[
+                      const SizedBox(height: 24),
                       Row(
                         children: [
                           Text('Master JSON',

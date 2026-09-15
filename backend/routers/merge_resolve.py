@@ -99,7 +99,15 @@ async def resolve_conflicts(property_id: str, req: ResolveRequest):
     status = prop.get("status", "")
 
     if status in _POST_RESOLVE_STATUSES:
-        return {"status": status, "message": "Already resolved — returning current state."}
+        # Same response shape as every other branch below — a duplicate/
+        # retried call (e.g. a client-side timeout retry racing a request
+        # that actually succeeded) used to come back missing `master_json`
+        # entirely, which crashed the frontend's unconditional cast.
+        return {
+            "status": status,
+            "message": "Already resolved — returning current state.",
+            "master_json": prop.get("master_json"),
+        }
 
     if status != "Conflict_Pending":
         raise HTTPException(

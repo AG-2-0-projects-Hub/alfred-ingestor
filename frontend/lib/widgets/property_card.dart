@@ -462,10 +462,18 @@ class _PropertyCardState extends State<_PropertyCard> {
     final isProcessing = status == 'Ingesting' || status == 'Training';
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
+    // A retrain on an already-live property legitimately passes back through
+    // 'Ingested'/'Merged' (backend/routers/ingest.py) — those used to fall
+    // through to a bare "Details" button, hiding +Guest/Settings for a
+    // property guests could still be actively messaging. master_json only
+    // gets cleared once a *new* merge actually completes, so its presence
+    // here reliably means "this property has been trained before."
+    final wasTrainedBefore = widget.property['master_json'] != null;
     final isReady = status == 'Trained' ||
         status == 'Active' ||
         status == 'Resolved' ||
-        status == 'Merged';
+        status == 'Merged' ||
+        (wasTrainedBefore && status == 'Ingested');
 
     if (isProcessing) {
       return Row(children: [

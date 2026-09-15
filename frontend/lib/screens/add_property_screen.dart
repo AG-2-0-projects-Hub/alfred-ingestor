@@ -190,7 +190,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       showDialog<void>(
         context: context,
         barrierDismissible: false,
-        barrierColor: Colors.black.withValues(alpha: 0.65),
+        barrierColor: AppTheme.trainingBarrierColor,
         builder: (_) => TrainingWaitDialog(
           onRunInBackground: () => setState(() => _waitDialogDismissed = true),
         ),
@@ -1091,7 +1091,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2.5, color: Colors.white)),
                               const SizedBox(width: 12),
-                              Text(_isIngesting ? 'Ingesting...' : 'Training...'),
+                              // Non-dev never sees "Ingesting" — Train Now is a
+                              // single continuous step from their side.
+                              Text(!widget.isDev
+                                  ? 'Training...'
+                                  : (_isIngesting ? 'Ingesting...' : 'Training...')),
                             ],
                           )
                         : Text(widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'),

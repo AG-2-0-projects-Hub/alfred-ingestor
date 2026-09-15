@@ -26,6 +26,12 @@ const _supportedExtensions = [
   'm4a',
   'aac',
   'webm',
+  // Conversation history exports / automated-message templates — the
+  // backend's file_processor.py already handles any unrecognized extension
+  // as plain text (Prompt A), same path as DOCX, so no backend change was
+  // needed to support these.
+  'json',
+  'txt',
 ];
 
 class DropZoneWidget extends StatefulWidget {
@@ -212,7 +218,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            'PDF · DOCX · Images · Sheets · Audio — up to 15 MB per file',
+                            'PDF · DOCX · Images · Sheets · Audio · Chat exports — up to 15 MB per file',
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: palette.textMuted,

@@ -18,6 +18,8 @@ const kAlfredTrainingTips = [
   'Check-in / check-out steps and house rules',
   'Parking or building access notes',
   'A voice note for anything hands-on — towels, linens, the washer, how guests get in',
+  'Past guest conversations — an Airbnb message export, or just your longest threads',
+  'Your automated or saved-reply templates, if you already use them',
 ];
 const kAlfredTrainingTipsClosing =
     "Whatever's easiest — photo, PDF, document or just tell me in a voicenote.";

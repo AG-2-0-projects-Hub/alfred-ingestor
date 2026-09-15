@@ -362,6 +362,11 @@ class AppTheme {
   static const double glassBlurSigma = 20.0;
   static const double glassBlurSigmaHeavy = 24.0;
 
+  // Scrim behind the Train Now/ingest/conflict/trained dialog sequence —
+  // was 0.65 copy-pasted at each call site (too heavy per founder feedback
+  // 2026-09-15); one shared, lighter constant now.
+  static const Color trainingBarrierColor = Color(0x59000000); // black @ 0.35
+
   // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — the intended
   // standard for new UI animations (see glass_panel.dart, main.dart's
   // AnimatedTheme). Older call sites elsewhere still use raw Curves.easeOut/

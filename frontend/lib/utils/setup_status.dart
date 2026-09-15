@@ -27,6 +27,10 @@ SetupStep? nextStepFor(
   bool hasIngestedFiles = false,
   bool hasMasterJson = false,
   bool hasQueuedFiles = false,
+  // Non-dev hosts must only ever see "Train"/"Retrain"/"Resolve" — never the
+  // raw internal pipeline words (Ingest/Merge). Dev keeps the literal stage
+  // names since those map directly to the separate manual buttons it shows.
+  bool isDev = false,
 }) {
   // A file dropped into an already-trained property's "Add New Files" only
   // uploads to storage — nothing else in this switch below covers a
@@ -36,7 +40,7 @@ SetupStep? nextStepFor(
     return SetupStep(
       headline: 'New files added',
       subtext: "Update Alfred so it learns what you just uploaded.",
-      actionLabel: 'Update Training',
+      actionLabel: isDev ? 'Update Training' : 'Retrain',
       icon: Icons.sync_rounded,
       accent: (ctx) => Theme.of(ctx).colorScheme.primary,
     );
@@ -46,7 +50,7 @@ SetupStep? nextStepFor(
       return SetupStep(
         headline: 'Add property files to train Alfred',
         subtext: 'Upload PDFs, photos, voice notes — anything Alfred should know.',
-        actionLabel: 'Continue Setup',
+        actionLabel: isDev ? 'Continue Setup' : 'Train Now',
         icon: Icons.upload_file_rounded,
         accent: (ctx) => Theme.of(ctx).colorScheme.primary,
       );
@@ -61,6 +65,19 @@ SetupStep? nextStepFor(
         isProcessing: true,
       );
     case 'Ingested':
+      // Non-dev: this is a transient mid-chain state now (edit_property_screen
+      // auto-merges right after a successful ingest) — show it as still
+      // processing rather than as a separate actionable "Merge Now" step.
+      if (!isDev) {
+        return SetupStep(
+          headline: 'Training Alfred…',
+          subtext: 'Building the master profile. This usually takes a moment.',
+          actionLabel: '',
+          icon: Icons.hourglass_top_rounded,
+          accent: (ctx) => Theme.of(ctx).colorScheme.secondary,
+          isProcessing: true,
+        );
+      }
       return SetupStep(
         headline: 'Build the master profile',
         subtext: 'Merge the file data into one profile so Alfred can use it.',
@@ -87,10 +104,12 @@ SetupStep? nextStepFor(
       );
     case 'Merged':
       if (hasMasterJson) return null;
+      // Non-dev shouldn't reach this state at all (Ingested auto-chains
+      // straight through merge), but keep a safe, on-vocabulary fallback.
       return SetupStep(
         headline: 'Train Alfred to enable AI replies',
         subtext: 'Final step — Alfred learns your property and starts answering guests.',
-        actionLabel: 'Train Alfred',
+        actionLabel: isDev ? 'Train Alfred' : 'Train Now',
         icon: Icons.auto_awesome_rounded,
         accent: (ctx) => Theme.of(ctx).colorScheme.primary,
       );

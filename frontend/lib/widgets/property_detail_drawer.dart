@@ -1078,6 +1078,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final setupStep = nextStepFor(
       status,
       hasMasterJson: _property['master_json'] != null,
+      isDev: widget.isDev,
     );
 
     return SingleChildScrollView(

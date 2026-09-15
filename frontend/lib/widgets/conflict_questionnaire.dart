@@ -98,9 +98,13 @@ class _ConflictQuestionnaireWidgetState
       // Auto-apply the resolution — no separate "Update Knowledge" step.
       // The parent updates status + master_json and shows the completion
       // popup directly. This widget is torn down on the resulting rebuild.
+      // Defensive: the backend now always includes master_json (fixed
+      // 2026-09-15 — a duplicate/retried resolve call used to omit it
+      // entirely and crash this cast), but don't let a future gap here take
+      // the whole flow down again.
       widget.onResolved(
         data['status'] as String,
-        data['master_json'] as Map<String, dynamic>,
+        data['master_json'] as Map<String, dynamic>? ?? const {},
       );
     } on ApiException catch (e) {
       _showError(e.userMessage);
