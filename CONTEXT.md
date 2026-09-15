@@ -11,22 +11,61 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🟡 Fix 2 (walkthrough panel opacity/"backlit glass") still not started. Fix 1 (pointer/notch) IS
-  now done and founder-verified live across all 4 docked panels (Settings drawer, Guest Link, Host
-  Chat, dashboard Step 0). The `GlassPanel` bug below is the likely root cause of the low opacity —
-  fixing that may largely BE Fix 2.
-- 🟡 `GlassPanel` silently drops its `color` app-wide whenever `gradient` is also set (real Flutter
-  BoxDecoration behavior, found 2026-09-14) — still not fixed anywhere.
-- 🟡 Founder should self-verify the raw-Postgres-error-text shown in the ingest error banner on a
-  duplicate-Airbnb-URL collision (the guard itself is intentional, confirmed 2026-09-15) — backend
-  code, out of scope for the 2026-09-14/15 frontend mitigation pass. See its report (linked below).
-- 🔴 Standing, carried across many sessions: has the founder retried training since `44cbfc1`
-  end-to-end (Santa Prisca / Dos Rios / a fresh Bungalow)? Still unconfirmed.
+- 🔴 TOP: Gemini docx timeout, root cause found (Dynamic Shared Quota contention, not file size —
+  ~5,200 real tokens, fails 100% of the time). No fix yet — see `_Context/session-digest.md`'s
+  full investigation prompt for the next session (founder also cross-checking with another LLM).
+- 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
+  color/gradient bug (below) is the likely root cause.
+- 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
+- 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
+- 🟡 2 Vercel tokens exposed this session (bad `grep|sed` redaction) — queued, waiting on the
+  founder's Desktop `.txt` handoff.
 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-14→15 (**Full pre-beta UX/accessibility/correctness/deploy audit (57
+**Last Session:** 2026-09-15 (**Fixed the 6 retrain-flow/UX regressions the founder found after the
+2026-09-14→15 mitigation pass, then found + fixed 2 more real bugs live-testing on a real property —
+all shipped to `staging`, live-verified. Root-caused (not yet fixed) the recurring Gemini docx
+timeout as Vertex AI Dynamic Shared Quota contention, not file size.** — `staging`, 2 commits
+(`f43bdef` the 6 fixes, `d848b5e` the 2 follow-on fixes); Cloud Run `alfred-backend-staging`
+redeployed once (rev 00012) for the `merge_resolve.py` fix.
+> **✅ 6 fixes for the retrain-an-already-trained-property flow**, which never got the same
+> User-mode simplification Add Property already had: auto-chain ingest→merge for non-dev (no more
+> "Merge Now"/"Ingesting" leaking through), property card keeps +Guest/Settings during a retrain
+> (was dropping to a bare "Details" button), a real backend bug where `/api/resolve`'s idempotent
+> branch omitted `master_json` and crashed Submit Resolutions on a retried call, a confirmation
+> before merging past a permanently-failed file, lighter Train-Now-dialog vignette (one shared
+> constant, was 5 copy-pasted 0.65-alpha literals), and new upload types (.json/.txt "chat
+> exports") — the founder's own next idea, to feed Alfred real conversation history.
+> **✅ Live-verified directly against staging**, not just `flutter analyze`: hit `/api/resolve`
+> twice on a real Trained property to reproduce and confirm the exact crash+fix; drove a real
+> retrain through a Playwright + CORS-bypass-proxy harness (staging's CORS only allows the real
+> Vercel origin) confirming the vignette, wording, and upload-type fixes live; confirmed via `curl`
+> that the deployed Vercel bundle actually contains the new strings.
+> **🔴→✅ Founder live-tested a real retrain (`Dos rios`) and hit 2 more real bugs**, found and
+> fixed same-session: (1) the edit screen only knew a run had finished when its own HTTP call
+> resolved — a dropped connection left it stuck on "Processing" forever even though the backend had
+> actually finished (confirmed: property was `Ingested` in the DB, screen never noticed). Fixed by
+> watching the property row live (same realtime pattern the dashboard card already used) instead of
+> trusting one request. (2) A file's status label showed "Timeout — try again" the moment this
+> browser stopped watching it, even though the backend kept retrying and later succeeded — read as
+> a permanent failure to the host. Fixed: no per-file failure label until the whole run has
+> genuinely concluded; only a real final verdict, once.
+> **✅ Root-caused the Gemini docx timeout, wrong on the first pass, corrected under founder
+> pushback (see below).** Original theory (payload too large for a 20s timeout) was wrong — real
+> extraction showed only ~5,200 tokens of text; founder caught this before it was accepted. Real
+> evidence found: an explicit `429 RESOURCE_EXHAUSTED` from Vertex AI landed seconds after the
+> docx's own stall, and the model in use (`gemini-3.8-flash`) isn't in this project's static
+> per-model quota list at all — confirmed via web search it's on Google's Dynamic Shared Quota
+> (no fixed per-project ceiling to request an increase on). **Not fixed yet** — deliberately handed
+> off to a fresh session with a full self-contained prompt rather than rushed.
+> **🔴 Exposed 2 Vercel account tokens** via a broken ad-hoc `grep|sed` redaction (5th such incident
+> this project in a week) — logged to `QUEUE.md`, structural fix (real parser, never redact-after)
+> written up in `lessons.md` and flagged as a Global Candidate.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-14→15 (**Full pre-beta UX/accessibility/correctness/deploy audit (57
 findings, published as an artifact) → 6-phase mitigation plan, implemented, live-verified against
 staging, and code-reviewed.** — `staging`, 8 commits (`9ee94e4`..`3e23660`), each phase pushed as
 its own separate `git push` so bisection never needs a redeploy. Full detail, every bug found/fixed,
