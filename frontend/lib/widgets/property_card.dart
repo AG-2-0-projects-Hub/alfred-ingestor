@@ -459,9 +459,6 @@ class _PropertyCardState extends State<_PropertyCard> {
 
   Widget _buildActions(
       BuildContext context, String status, AppPalette palette) {
-    final isProcessing = status == 'Ingesting' || status == 'Training';
-    final isConflict = status == 'Conflict_Pending';
-    final isError = status.contains('Error');
     // A retrain on an already-live property legitimately passes back through
     // 'Ingested'/'Merged' (backend/routers/ingest.py) — those used to fall
     // through to a bare "Details" button, hiding +Guest/Settings for a
@@ -469,6 +466,15 @@ class _PropertyCardState extends State<_PropertyCard> {
     // gets cleared once a *new* merge actually completes, so its presence
     // here reliably means "this property has been trained before."
     final wasTrainedBefore = widget.property['master_json'] != null;
+    // A first-time 'Ingested' property (no prior master_json) is still
+    // mid-chain toward merge, same as the badge above treats it — without
+    // this it fell through to a clickable "Details" button on a property
+    // that isn't actually ready to view yet.
+    final isProcessing = status == 'Ingesting' ||
+        status == 'Training' ||
+        (status == 'Ingested' && !wasTrainedBefore);
+    final isConflict = status == 'Conflict_Pending';
+    final isError = status.contains('Error');
     final isReady = status == 'Trained' ||
         status == 'Active' ||
         status == 'Resolved' ||
@@ -805,13 +811,16 @@ class _StatusBadge extends StatelessWidget {
     // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
     // bioluminescent mint; emergencies/errors get warm red glow.
     final (label, bg, fg, glowAlpha) = switch (status) {
-      'Ingesting' || 'Training' => (
+      // 'Ingested' is a mid-chain state, not a milestone the host should see
+      // as its own word — non-dev auto-merges straight through it, and dev
+      // still has to click Merge manually, but either way "Processing" reads
+      // correctly. Previously showed the raw backend enum verbatim here.
+      'Ingesting' || 'Training' || 'Ingested' => (
           'Processing',
           p.accentContainer,
           p.accent,
           0.25
         ),
-      'Ingested' => ('Ingested', p.warningContainer, p.warning, 0.35),
       'Merged' || 'Trained' || 'Resolved' => (
           'Ready',
           p.successContainer,

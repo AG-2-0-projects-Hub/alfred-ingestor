@@ -44,6 +44,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   String? _resolvedPropertyId;
   bool _isIngesting = false;
   bool _isMerging = false;
+  StreamSubscription<List<Map<String, dynamic>>>? _propertySub;
+  // Guards the auto-merge-on-Ingested trigger below so a realtime row update
+  // (which can fire more than once) doesn't queue a second merge call.
+  bool _autoMergeTriggered = false;
+  // Same guard for the dev-mode "Files Ingested" dialog.
+  bool _ingestedDialogShown = false;
   // True once the host taps TrainingWaitDialog's "Continue in background" —
   // guards _startIngest's two Navigator...pop() calls so they don't try to
   // pop a dialog that's already gone (which would pop whatever route is now
@@ -84,7 +90,92 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     _nicknameController.dispose();
     _urlController.dispose();
     _scrollController.dispose();
+    _propertySub?.cancel();
     super.dispose();
+  }
+
+  // The screen previously only knew a run had finished when its own in-flight
+  // HTTP call resolved — if that connection dropped or stalled past its own
+  // read timeout, the screen was stuck showing "Ingesting" forever, every
+  // file read as failed, and (for non-dev) the auto-chained merge never even
+  // ran, even though the backend kept working and finished for real.
+  // Watching the row directly means the UI, the per-file labels, and the
+  // non-dev auto-merge chain all follow the real backend state regardless of
+  // what happens to any single request. Mirrors edit_property_screen.dart's
+  // _subscribeToProperty, confirmed live 2026-09-15 on a real retrain.
+  void _subscribeToProperty(String propertyId) {
+    _propertySub?.cancel();
+    _propertySub = Supabase.instance.client
+        .from('properties')
+        .stream(primaryKey: ['id'])
+        .eq('id', propertyId)
+        .listen((rows) {
+      if (!mounted || rows.isEmpty) return;
+      final row = rows.first;
+      final status = row['status'] as String?;
+      final fingerprints =
+          row['file_fingerprints'] as Map<String, dynamic>? ?? {};
+      final ingested = row['ingested_markdown'] as String?;
+      final scraped = row['scraped_markdown'] as String?;
+      final batchConcluded = status != 'Ingesting' && status != 'Training';
+      setState(() {
+        _propertyStatus = status;
+        _ingestedMarkdown = ingested ?? _ingestedMarkdown;
+        _masterJson =
+            (row['master_json'] as Map<String, dynamic>?) ?? _masterJson;
+        // A file can still succeed on a later backend-side retry after this
+        // browser's own connection stopped watching — file_fingerprints is
+        // the authoritative record of what actually made it in. Never show a
+        // failure word for a file that isn't actually confirmed failed yet:
+        // while the batch is still running, an unresolved file just stays
+        // "Processing…"; only once the run has genuinely concluded and it's
+        // still missing do we call it failed — one, final verdict per file.
+        for (var i = 0; i < _filesToIngest.length; i++) {
+          final f = _filesToIngest[i];
+          final succeededFile = fingerprints.containsKey(f['file']);
+          if (succeededFile && f['status'] != 'done') {
+            _filesToIngest[i] = {'file': f['file']!, 'status': 'done', 'message': ''};
+          } else if (!succeededFile &&
+              batchConcluded &&
+              (f['status'] == 'queued' || f['status'] == 'processing')) {
+            _filesToIngest[i] = {
+              'file': f['file']!,
+              'status': 'error',
+              'message': "Couldn't be processed — try again",
+            };
+          }
+        }
+        if (batchConcluded) _isIngesting = false;
+        if (status != 'Ingested') _isMerging = false;
+      });
+      if (_officialPropertyName == null && scraped != null) {
+        final name = _parseOfficialName(scraped);
+        if (name != null) {
+          setState(() => _officialPropertyName = name);
+          _getHeroImageUrl(propertyId).then((url) {
+            if (mounted) setState(() => _heroImageUrl = url);
+          });
+        }
+      }
+      if (widget.isDev) {
+        if (status == 'Ingested' &&
+            !_ingestedDialogShown &&
+            (ingested?.isNotEmpty ?? false)) {
+          _ingestedDialogShown = true;
+          _showIngestedDialog(
+              _officialPropertyName ?? _nicknameController.text.trim());
+        }
+        if (status != 'Ingested') _ingestedDialogShown = false;
+        return;
+      }
+      // Train Now (User mode): no manual "run Merge next" step — chain
+      // straight into it, same eligibility the Dev-mode Merge button uses.
+      if (status == 'Ingested' && !_autoMergeTriggered && !_isMerging) {
+        _autoMergeTriggered = true;
+        _runMerge();
+      }
+      if (status != 'Ingested') _autoMergeTriggered = false;
+    });
   }
 
   GlobalKey _keyFor(WalkthroughScreen screen) => switch (screen) {
@@ -229,67 +320,52 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // until a response begins.
       final response =
           await client.send(request).timeout(const Duration(seconds: 20));
-      try {
-        await for (final chunk in response.stream
-            .transform(utf8.decoder)
-            .timeout(const Duration(seconds: 90),
-                onTimeout: (sink) => sink.close())) {
-          for (final line in chunk.split('\n')) {
-            if (line.startsWith('data: ')) {
-              final raw = line.substring(6).trim();
-              if (raw.isEmpty) continue;
-              try {
-                _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
-              } catch (_) {}
-            }
+      await for (final chunk in response.stream
+          .transform(utf8.decoder)
+          .timeout(const Duration(seconds: 90),
+              onTimeout: (sink) => sink.close())) {
+        for (final line in chunk.split('\n')) {
+          if (line.startsWith('data: ')) {
+            final raw = line.substring(6).trim();
+            if (raw.isEmpty) continue;
+            try {
+              _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
+            } catch (_) {}
           }
         }
-      } finally {
-        _markPendingFilesAsTimeout();
       }
+      // Any file still 'queued'/'processing' here means this browser's own
+      // connection ended before hearing back — not that the file failed. The
+      // backend keeps working regardless; _subscribeToProperty's listener
+      // (started above, as soon as the resolved property_id arrived) resolves
+      // each file to its real final state once the property row updates.
 
       final effectiveId = _resolvedPropertyId ?? _propertyId;
       final result = await Supabase.instance.client
           .from('properties')
-          .select('ingested_markdown, scraped_markdown, status, master_json')
+          .select('ingested_markdown, status')
           .eq('id', effectiveId)
           .maybeSingle();
 
-      bool succeeded = false;
-      if (result != null) {
-        final ingested = result['ingested_markdown'] as String?;
-        final scraped = result['scraped_markdown'] as String?;
-        final name = _parseOfficialName(scraped);
-        final heroUrl = await _getHeroImageUrl(effectiveId);
-        final isSuccess = ingested != null && ingested.isNotEmpty;
-        setState(() {
-          _ingestedMarkdown = ingested;
-          _officialPropertyName = name;
-          _heroImageUrl = heroUrl;
-          _propertyStatus = result['status'] as String?;
-          _masterJson = result['master_json'] as Map<String, dynamic>?;
-          // Only clear the pre-ingest queue on success. On failure, leave
-          // the files in their queued state so the user can retry without
-          // re-uploading.
-          if (isSuccess) _filesToIngest.clear();
-        });
-        if (isSuccess) {
-          succeeded = true;
-          if (widget.isDev) {
-            await _showIngestedDialog(name ?? _nicknameController.text.trim());
-          } else {
-            // Train Now (User mode): no manual "run Merge next" step — chain
-            // straight into it, same eligibility the Dev-mode Merge button uses.
-            await _runMerge();
-          }
-        }
-      }
+      // Everything else (ingested markdown/status/master_json, per-file
+      // done/error labels, hero image + official name, the dev "ingested"
+      // dialog, and non-dev's auto-chained merge) is driven by
+      // _subscribeToProperty's realtime listener instead of here, so it all
+      // still happens even if this specific request never makes it back
+      // (dropped connection, this browser's own read timeout, etc). This
+      // read only decides whether to surface an immediate error toast.
+      final resultStatus = result?['status'] as String?;
+      final resultIngested = result?['ingested_markdown'] as String?;
+      final succeeded = resultIngested != null && resultIngested.isNotEmpty;
+      final stillRunning =
+          resultStatus == 'Ingesting' || resultStatus == 'Training';
 
-      // Surface a visible error if the ingest didn't succeed. Picks the most
-      // recent backend error event when one was emitted (e.g. "(setup)" /
-      // "(unhandled)" / "(scrape)" / per-file errors). Falls back to a
-      // generic message if the stream closed without emitting any error.
-      if (!succeeded) {
+      if (!succeeded && !stillRunning) {
+        // Surface a visible error if the ingest didn't succeed. Picks the
+        // most recent backend error event when one was emitted (e.g.
+        // "(setup)" / "(unhandled)" / "(scrape)" / per-file errors). Falls
+        // back to a generic message if the stream closed without emitting
+        // any error.
         final errorEvents =
             _filesToIngest.where((s) => s['status'] == 'error').toList();
         if (errorEvents.isNotEmpty) {
@@ -336,6 +412,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
     if (file == '(system)' && status == 'property_id') {
       setState(() => _resolvedPropertyId = message);
+      _subscribeToProperty(message);
       return;
     }
 
@@ -345,21 +422,6 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         _filesToIngest[idx] = {'file': file, 'status': status, 'message': message};
       } else {
         _filesToIngest.add({'file': file, 'status': status, 'message': message});
-      }
-    });
-  }
-
-  void _markPendingFilesAsTimeout() {
-    setState(() {
-      for (var i = 0; i < _filesToIngest.length; i++) {
-        final s = _filesToIngest[i]['status'];
-        if (s == 'queued' || s == 'processing') {
-          _filesToIngest[i] = {
-            'file': _filesToIngest[i]['file']!,
-            'status': 'timeout',
-            'message': 'No response — try again',
-          };
-        }
       }
     });
   }
