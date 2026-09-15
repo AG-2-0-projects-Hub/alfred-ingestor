@@ -22,6 +22,14 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file for `PROD_BACKEND_URL`/`PROD_SCRAPER_URL` etc. (not just prefixed vars in `.env.test`); the 4 Gemini smoke checks no longer need a separate prod variant — they moved to Vertex/ADC on 2026-09-10 and that transport is already shared by staging + prod
 - [ ] Schedule the doc-staleness sweep (`HEALTH_CHECK_PROTOCOL.md` row 17) as a periodic agent pass — no mechanism exists yet, currently manual-only
 - [ ] Rotate the Firecrawl API key that got displayed in a session transcript 2026-09-10 (founder-flagged)
+- [ ] Rotate the 2 Vercel account tokens exposed in a session transcript 2026-09-15 (founder-flagged) —
+      `ingestor-staging-vercel-token` (scope: alfred-staging) and `ingestor-prod-vercel-token` (scope:
+      alwaysalfred), both created Sep 3, used by `_mcp_profiles/global.json`'s `vercel-the-ingestor`/
+      `vercel-the-ingestor-prod` MCP entries (Vercel's official remote MCP, `mcp.vercel.com`). Exposed
+      via a broken ad-hoc `grep|sed` redaction attempt — see `lessons.md`'s 2026-09-15 entry (flagged
+      as a Global Candidate) for the structural fix now in place. Revoke both on Vercel's Account →
+      Tokens page, create replacements,
+      hand new values to Claude via the usual Desktop `.txt` drop for `_mcp_profiles/global.json` update.
 - [ ] Rotate `_tests/fixtures/.env.test` test credentials printed in full in a session transcript 2026-09-10 (`GEMINI_API_TEST_KEY`, `VERCEL_API_TOKEN`, `VERCEL_BYPASS_TOKEN`, `TELEGRAM_BOT_TOKEN_TEST`, `WHATSAPP_ACCESS_TOKEN_TEST`, `FIRECRAWL_API_KEY_TEST` — a `cat`+`sed` redaction only covered the password field) — deferred, founder is treating it as local-session exposure for now
 - [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property)
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge

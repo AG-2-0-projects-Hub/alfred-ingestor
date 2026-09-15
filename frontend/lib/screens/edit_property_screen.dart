@@ -58,6 +58,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   String? _ingestedMarkdown;
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
+  StreamSubscription<List<Map<String, dynamic>>>? _propertySub;
+  // Guards the auto-merge-on-Ingested trigger below so a realtime row update
+  // (which can fire more than once) doesn't queue a second merge call.
+  bool _autoMergeTriggered = false;
 
   static const _postMergeStatuses = {
     'Merged',
@@ -76,12 +80,78 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
     _propertyStatus = widget.property['status'] as String?;
     _masterJson = widget.property['master_json'] as Map<String, dynamic>?;
+    _subscribeToProperty();
   }
 
   @override
   void dispose() {
     _nicknameController.dispose();
+    _propertySub?.cancel();
     super.dispose();
+  }
+
+  // The screen previously only knew a run had finished when its own
+  // in-flight ingest/merge HTTP call resolved — if that connection dropped
+  // (or the host reloaded mid-run) the screen was stuck showing "Processing"
+  // forever even though the backend had actually finished. Watching the row
+  // directly means the UI follows the real state regardless of what happens
+  // to any single request.
+  void _subscribeToProperty() {
+    _propertySub = Supabase.instance.client
+        .from('properties')
+        .stream(primaryKey: ['id'])
+        .eq('id', _propertyId)
+        .listen((rows) {
+      if (!mounted || rows.isEmpty) return;
+      final row = rows.first;
+      final status = row['status'] as String?;
+      final raw = row['file_fingerprints'] as Map<String, dynamic>? ?? {};
+      setState(() {
+        _propertyStatus = status;
+        _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
+        _masterJson = row['master_json'] as Map<String, dynamic>?;
+        _ingestedMarkdown = row['ingested_markdown'] as String? ?? _ingestedMarkdown;
+        // A file can still succeed on a later backend-side retry after this
+        // browser's own connection stopped watching (seen live 2026-09-15) —
+        // file_fingerprints is the authoritative record. Never show a failure
+        // word for a file that isn't actually confirmed failed yet: while the
+        // batch is still 'Ingesting', an unresolved file just stays
+        // "Processing…"; only once the whole run has genuinely finished
+        // (status left 'Ingesting') and it's still missing do we call it
+        // failed — the host should only ever see one, final verdict per file.
+        final batchConcluded = status != 'Ingesting' && status != 'Training';
+        for (var i = 0; i < _filesToIngest.length; i++) {
+          final f = _filesToIngest[i];
+          final succeeded = _existingFiles.containsKey(f['file']);
+          if (succeeded && f['status'] != 'done') {
+            _filesToIngest[i] = {'file': f['file']!, 'status': 'done', 'message': ''};
+          } else if (!succeeded &&
+              batchConcluded &&
+              (f['status'] == 'queued' || f['status'] == 'processing')) {
+            _filesToIngest[i] = {
+              'file': f['file']!,
+              'status': 'error',
+              'message': "Couldn't be processed — try again",
+            };
+          }
+        }
+        // A stuck local call (dropped connection) never clears these on its
+        // own once the row shows a resolved status — clear them here too.
+        // Merge has no distinct in-progress status server-side (status stays
+        // 'Ingested' throughout), so any status change away from it means
+        // whatever merge was running — local or stale — has concluded.
+        if (status != 'Ingesting' && status != 'Training') _isIngesting = false;
+        if (status != 'Ingested') _isMerging = false;
+      });
+      if (!widget.isDev &&
+          status == 'Ingested' &&
+          !_autoMergeTriggered &&
+          !_isMerging) {
+        _autoMergeTriggered = true;
+        _confirmAndMerge();
+      }
+      if (status != 'Ingested') _autoMergeTriggered = false;
+    });
   }
 
   Future<void> _deleteExistingFile(String filename) async {
@@ -229,24 +299,28 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       // until a response begins.
       final response =
           await client.send(request).timeout(const Duration(seconds: 20));
-      try {
-        await for (final chunk in response.stream
-            .transform(utf8.decoder)
-            .timeout(const Duration(seconds: 90),
-                onTimeout: (sink) => sink.close())) {
-          for (final line in chunk.split('\n')) {
-            if (line.startsWith('data: ')) {
-              final raw = line.substring(6).trim();
-              if (raw.isEmpty) continue;
-              try {
-                _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
-              } catch (_) {}
-            }
+      await for (final chunk in response.stream
+          .transform(utf8.decoder)
+          .timeout(const Duration(seconds: 90),
+              onTimeout: (sink) => sink.close())) {
+        for (final line in chunk.split('\n')) {
+          if (line.startsWith('data: ')) {
+            final raw = line.substring(6).trim();
+            if (raw.isEmpty) continue;
+            try {
+              _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
+            } catch (_) {}
           }
         }
-      } finally {
-        _markPendingFilesAsTimeout();
       }
+      // Any file still 'queued'/'processing' here means this browser's own
+      // connection ended before hearing back — not that the file failed.
+      // The backend keeps working regardless (confirmed live 2026-09-15:
+      // a file that looked "timed out" here had actually succeeded by the
+      // time the batch finished). Leaving it as "Processing…" instead of
+      // guessing "Timeout" avoids telling the host something failed when it
+      // hasn't been confirmed either way — _subscribeToProperty's listener
+      // resolves it to its real final state once the property row updates.
 
       final result = await Supabase.instance.client
           .from('properties')
@@ -266,16 +340,15 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
             // its entries now show each file's final done/error/timeout status
             // from this run, which the host needs to see, especially on a
             // partial failure. _existingFiles above remains the authoritative
-            // "what's actually stored" list regardless.
+            // "what's actually stored" list regardless. (Any stale error/
+            // timeout label gets reconciled by _subscribeToProperty's
+            // listener once the row updates.)
           });
         }
-        // Retrain (User mode): no manual "Merge Now" click — chain straight
-        // into it, mirroring add_property_screen.dart's Train Now. Dev mode
-        // keeps the separate guided-banner/manual-button step.
-        if (!widget.isDev && _propertyStatus == 'Ingested') {
-          _hideTrainingWaitDialog();
-          if (await _confirmFailedFiles()) await _runMerge();
-        }
+        // Retrain (User mode) auto-chains into merge once the property row
+        // itself shows 'Ingested' — handled by _subscribeToProperty's
+        // listener, not here, so it still fires even if this specific call
+        // never makes it back (dropped connection, reload, etc.).
       }
     } on TimeoutException {
       _showError("Couldn't reach Alfred. Check your connection and try again.");
@@ -301,21 +374,6 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         _filesToIngest[idx] = entry;
       } else {
         _filesToIngest.add(entry);
-      }
-    });
-  }
-
-  void _markPendingFilesAsTimeout() {
-    setState(() {
-      for (var i = 0; i < _filesToIngest.length; i++) {
-        final s = _filesToIngest[i]['status'];
-        if (s == 'queued' || s == 'processing') {
-          _filesToIngest[i] = {
-            'file': _filesToIngest[i]['file']!,
-            'status': 'timeout',
-            'message': 'No response — try again',
-          };
-        }
       }
     });
   }

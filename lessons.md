@@ -3,6 +3,16 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-15 — Ad-hoc grep/sed "redaction" of a secrets file leaks the value instead of hiding it
+
+**Context:** Checking `_mcp_profiles/global.json` for the presence of Vercel MCP tokens, to help the founder locate which two account tokens needed rotating after an earlier unrelated fix session.
+
+**Discovery:** Ran `grep -i vercel ~/AG_master_files/_mcp_profiles/global.json | sed -E 's/:.*/: <redacted>/'` intending to show only key names. The token is stored as a bare array element (`"VERCEL_AUTH_TOKEN=vcp_...",` inside an `args` list), not a `"key": "value"` JSON pair — so the `s/:.*/`  pattern never matched that line, and both full tokens printed in plain text to the transcript. This is the same failure class as four prior incidents this project (2026-09-10 x2, 2026-09-11 x2, per `CONTEXT.md`'s session log) — each one used a different ad-hoc regex/sed/tail construction that happened to not match the specific file's actual format that time. "Try to redact after printing" is fundamentally fragile because it silently fails whenever the assumed format is wrong, with no error to catch it. The reliable fix is structural, not "write a better regex": use a real parser (`jq` for JSON — not installed in this WSL2 env, or Python's `json` module as a fallback) to extract only key names/paths, never full values; for `.env`-style files, use an anchored `grep -oE '^[A-Za-z_][A-Za-z0-9_]*='` whose capture group mechanically ends at `=` and therefore cannot include the value, unlike a substitution that has to correctly strip it after the fact.
+
+**Impact:** Two Vercel account tokens (`ingestor-staging-vercel-token`, `ingestor-prod-vercel-token`) exposed, logged to `QUEUE.md` for rotation. No code changed. **Global Candidate: Yes** — this is a property of how secrets files get inspected across any project, not specific to the-ingestor; the same mistake will recur anywhere a session reaches for `grep`/`sed`/`cat` on a credentials file "just to check something."
+
+---
+
 ## 2026-09-03 — Bash-tool→WSL: `$(...)` command substitution silently returns empty; use files/pipes instead
 
 **Context:** Debugging why a WhatsApp Graph API `curl` call kept returning "An access token is required," despite a token that had just been confirmed present and correctly formatted via `gcloud secrets versions access`.
