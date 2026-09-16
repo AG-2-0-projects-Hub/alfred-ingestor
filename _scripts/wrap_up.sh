@@ -15,6 +15,13 @@ check() {
   fi
 }
 
+# Self-check (added 2026-09-16, see lessons.md): the Edit tool used to write this
+# very file has reset its executable bit 3/3 times this session. `-x` tests the
+# actual on-disk permission, independent of how this run was invoked (bash vs
+# direct), so it catches the regression even when invoked via `bash wrap_up.sh`.
+[ -x _scripts/wrap_up.sh ]
+check $? "_scripts/wrap_up.sh has its executable bit set (chmod +x if not)"
+
 grep -q '^## Pending' CONTEXT.md
 check $? "'## Pending' heading present in CONTEXT.md"
 
