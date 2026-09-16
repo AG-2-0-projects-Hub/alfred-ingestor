@@ -42,6 +42,36 @@ Not all fields are required for every scenario — drop irrelevant ones.
 
 ---
 
+## Critical Path (staging → main merge gate)
+
+Hand-picked by actual blast radius — product broken, unsafe, or trust-destroying if it fails —
+**not** by which scenarios happen to have automation already. Found 2026-09-16 while designing
+this: the 7 scenarios `npm run full` ran until now (A2, A3, A4, B6, B7, C6, G2) were automated
+in whatever order they got built, not picked for criticality — the actual core Train Now flow
+(B1) wasn't in that list at all, despite being the reason this whole project's reliability work
+existed. This list is the real `staging → main` merge gate (see QA Workflow's Promotion rule
+below) — `npm run full` stays a separate, broader-but-arbitrary regression check. Revisit this
+list when the architecture shifts meaningfully (e.g. right after a rewrite like Phase 2's), not
+on a fixed schedule — a scenario written against old mechanics can go stale the same way code does.
+
+| ID | Why it's critical | Automated? |
+|---|---|---|
+| A1 | Signup creates an account — nothing works without this | No |
+| A2 | Login with valid credentials | Yes — `_tests/runner/scenarios/a2.ts` |
+| B1 | Core ingest flow — add a property, get it trained | No |
+| B12 | Ingest error surfacing / duplicate files / completion popups | No |
+| C1 | Guest asks a benign question → gets a reply — the core product promise | No |
+| C3 | Emergency trigger escalates — safety-critical | No |
+| G2 | A guest can't read another guest's messages | Yes — `_tests/runner/scenarios/g2.ts` |
+| G4 | 🔴 Client bundle never ships a privileged key — already happened once in prod (2026-07-13) | No |
+| G5 | Host endpoints require real auth + ownership | No |
+
+**7 of 9 still need real Playwright automation** (A1, B1, B12, C1, C3, G4, G5) — real, separate
+effort, not yet scoped. Until that's done, this set can't run as one command; verify the
+unautomated ones manually before a `staging → main` merge.
+
+---
+
 ## A. Authentication
 
 ### A1. Host signup creates account

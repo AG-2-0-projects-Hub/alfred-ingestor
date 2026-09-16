@@ -13,6 +13,15 @@ npm run smoke   # runs the 3-scenario smoke test
 
 Reports land in `_tests/reports/`.
 
+## Full-suite vs. Critical Path
+
+- `npm run full` — every scenario that currently has code here (grows over time). Nothing runs
+  it automatically; use it whenever you want a broad but not comprehensive check.
+- **Critical Path** — the real gate before merging `staging → main`. A small, hand-picked list
+  of what matters most (login, the core Train Now flow, guest chat, security) — see
+  `_tests/scenarios.md`'s "## Critical Path" section for the list and why each one's there. Not
+  all of them have code here yet.
+
 ## Architecture
 
 - **TypeScript + Node 20+** — single orchestrator (`run.ts`) coordinates scenarios

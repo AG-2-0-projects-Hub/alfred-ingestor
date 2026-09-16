@@ -35,6 +35,12 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       Tokens page, create replacements,
       hand new values to Claude via the usual Desktop `.txt` drop for `_mcp_profiles/global.json` update.
 - [ ] Rotate `_tests/fixtures/.env.test` test credentials printed in full in a session transcript 2026-09-10 (`GEMINI_API_TEST_KEY`, `VERCEL_API_TOKEN`, `VERCEL_BYPASS_TOKEN`, `TELEGRAM_BOT_TOKEN_TEST`, `WHATSAPP_ACCESS_TOKEN_TEST`, `FIRECRAWL_API_KEY_TEST` — a `cat`+`sed` redaction only covered the password field) — deferred, founder is treating it as local-session exposure for now
+- [ ] Rotate `SUPABASE_SERVICE_ROLE_KEY` for staging (project `gcxxilzfhwlsjcvtpsvj`), printed in full in a
+      session transcript 2026-09-16 by a plain `grep` of `backend/.env` (same ad-hoc-redaction failure
+      class as the other rows here, structural fix already in place per `lessons.md`'s 2026-09-15 entry —
+      it just wasn't applied this time). Rotate on Supabase dashboard → staging project → Project Settings
+      → API, then update `backend/.env` and the `alfred-backend-staging` Cloud Run service env var with
+      the new value.
 - [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property). Related to but distinct from the Train Now reliability plan (`_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`) — different mechanism (nothing ever triggers, not a timeout/recovery gap during a run) — worth a look in the same pass regardless.
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)

@@ -1,8 +1,9 @@
 # the-ingestor — Local Law
 
 **Active Workspace:** `projects/the-ingestor/` — all file operations scoped here unless explicitly stated otherwise.
-**Inherits:** AG Global Constitution (GEMINI.md)
-**Also inherits:** Root `CLAUDE.md` — read it at session start.
+**Inherits:** Root `CLAUDE.md` (the AG Global Constitution for Claude Code) — read it at session
+start. Does **not** separately inherit `GEMINI.md`; Claude Code never reads that file (root
+`CLAUDE.md` §1) — an older version of this line claimed otherwise, corrected 2026-09-16.
 **Overrides:** None
 **Stack:** Frontend: Flutter (Dart) web app, deployed to Vercel — staging
 `alwaysalfred-staging.vercel.app`, prod `alwaysalfred.vercel.app`. Backend: FastAPI on Google
@@ -13,16 +14,21 @@ Firecrawl to scrape Airbnb listings. DB/Auth/Realtime/Storage: Supabase, split s
 guest JWT. LLM: Gemini via Vertex AI/ADC on both environments (no API key, no rate cap) for
 ingest/merge/chat/summarization. Guest channels: native web chat, Telegram, and WhatsApp (Meta
 Cloud API) — all three share one message-processing path ("the Brain"). Job orchestration:
-Google Cloud Tasks for the WhatsApp webhook queue; ingest/merge run directly via FastAPI SSE +
-BackgroundTasks.
+Google Cloud Tasks — one queue for the WhatsApp webhook, a separate one for ingest/merge (per-file
+Cloud Tasks workers, `backend/routers/ingest_worker.py`; DB-backed run state via `ingest_run_id`/
+`ingest_files`/`ingest_heartbeat_at` on `properties`, a self-rescheduling watchdog, host-triggered
+`/resume`). SSE + BackgroundTasks for ingest were fully retired 2026-09-16 (Phase 2 of the Train
+Now reliability work) — `/api/ingest` is now a sub-second JSON dispatcher, not a stream.
 **Data Schema:** Core Supabase tables: `host_profiles` (`is_dev` flag gates advanced/dev UI),
 `properties` (`master_json` — freeform host-knowledge blob, merged with ~12 canonical
 "universal fields" via a second strict-schema Gemini call; `curated_photos`/`rejected_photos`
-JSONB from Gemini Vision triage; `scraped_markdown`), `conversations` (`mode`:
-`autopilot`|`intervene`), `messages`, `guests` (booking-scoped), `scrape_jobs`, `feedback`,
-`file_fingerprints` (per-file ingest progress, persisted immediately per file so a retry doesn't
-lose completed work). Schema evolves per-migration in `migrations/`, applied to staging first,
-prod on the eventual `staging→main` merge.
+JSONB from Gemini Vision triage; `scraped_markdown`; `ingest_run_id`/`ingest_files`/
+`ingest_heartbeat_at`/`ingest_stage` — live per-run background-worker state, added 2026-09-16),
+`conversations` (`mode`: `autopilot`|`intervene`), `messages`, `guests` (booking-scoped),
+`scrape_jobs`, `feedback`, `file_fingerprints` (cross-run per-file dedupe key, distinct from
+`ingest_files` above — a retry doesn't lose completed work or re-process an unchanged file).
+Schema evolves per-migration in `migrations/`, applied to staging first, prod on the eventual
+`staging→main` merge.
 
 **Architecture snapshot maintenance:** the two lines above are a snapshot, not a log — update
 them **in place** (overwrite the stale part, don't append a new sentence next to it) only when a
@@ -34,11 +40,23 @@ probably doesn't.
 
 ## Shell Execution Environment
 
-**CRITICAL:** All terminal commands run in WSL2 (Ubuntu 24.04) — never Git
-Bash, PowerShell, or cmd.
-- All tools (node, npm, npx, python, pip) are installed in WSL2 only
-- Windows paths (`C:\`, `D:\`) are never valid for command execution
-- If a command fails with "not found" — wrong shell context, not missing tool
+**Corrected 2026-09-16 — the previous version of this section was wrong** (said WSL2 terminals
+were used directly and PowerShell/Git Bash were forbidden; root `CLAUDE.md` established the
+actual environment back on 2026-07-28 and this file was never updated to match, despite every
+session since actually running commands the way described below).
+
+This environment exposes a **PowerShell tool** (primary) and a **Bash tool** (Git Bash/POSIX) —
+there is no direct WSL2 terminal. All project tools (node, npm, python, flutter, gcloud, git for
+this repo) live inside WSL2 and are invisible to both shell tools unless routed through
+`wsl bash -c "..."` (from either shell tool).
+- `wsl bash -c` runs a **non-login shell with an empty `$PATH`** — a bare command name (e.g.
+  `flutter`, `gcloud`) will fail "not found" even though it's installed. Fix: `wsl bash -lc`
+  (login shell) or the tool's absolute path. Confirmed necessary for both `gcloud` and `flutter`
+  this session — check `lessons_index.md` for their current exact paths, since reinstalls can
+  move them (already happened once to `flutter`'s symlink, 2026-09-16).
+- Windows paths (`C:\`, `D:\`) are never valid inside a `wsl bash -c` command.
+- If a command fails with "not found" after prefixing with `wsl bash -c` — try `-lc` or an
+  absolute path before assuming the tool isn't installed.
 
 ---
 
@@ -250,12 +268,23 @@ incident: it ran unannounced and reasonably alarmed the founder mid-session). Th
 version costs cents in API credits instead, so it's fine to reach for more freely — still ask
 first for anything beyond a single small diff, since cost is now non-zero either way.
 
+### Full-suite QA
+`cd _tests/runner && npm run full` runs every scenario that currently has code — explicit-ask
+only, no cron yet. The real `staging → main` merge gate is the smaller Critical Path set in
+`_tests/scenarios.md` (picked by blast radius, not by what's already automated) — see the
+Promotion rule below.
+
 ### Promotion rule — run before every `staging → main` merge
+0. Before starting: proactively ask whether to run the Critical Path check first — don't wait to
+   be asked for it by name.
 1. Review the pending intake table
 2. Group rows by flow using the `Group with` column
 3. For each group: create one proper scenario (or extend an existing one) in the relevant A–H section of `_tests/scenarios.md` — multi-step assertions are preferred over micro-scenarios
 4. Delete the promoted intake rows
-5. Run any new Layer 1 scenarios immediately; schedule Layer 2 scenarios for the next Playwright run
+5. Run every Critical Path scenario (`_tests/scenarios.md`'s "## Critical Path" section) —
+   automated ones via `npm run full`, unautomated ones manually until they're built. Run any
+   other new Layer 1 scenarios immediately too; schedule non-critical Layer 2 scenarios for the
+   next Playwright run as before.
 
 ### What does NOT need a pending-intake entry
 - Pure cosmetic changes (spacing, colour tweaks) with no assertable state
