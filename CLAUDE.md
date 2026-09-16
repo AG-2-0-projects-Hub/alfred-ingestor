@@ -53,10 +53,13 @@ This project reads from AG shared resources. Never create local copies.
 | Global Lessons Index | `~/AG_master_files/_global_lessons/lessons_index.md` |
 | Protocols | `~/AG_master_files/_protocols/` |
 
-**Before infra/security/secrets/deploy/regex/MCP-config work:** grep
-`_global_lessons/lessons_index.md` (not the full `lessons.md`) for tags
-matching the task. If a line looks relevant, open `lessons.md` at that date
-heading before proceeding.
+**Before infra/security/secrets/deploy/regex/MCP-config/git work:** grep BOTH
+`lessons_index.md` (this project's own, project root) AND
+`_global_lessons/lessons_index.md` (not either full `lessons.md`) for tags
+matching the task. If a line looks relevant, open the matching `lessons.md` at
+that date heading before proceeding. Do this check itself — don't rely on
+remembering to do it; the same lesson recurring because this step was skipped
+is exactly what the 2026-09-16 entry in this project's own index is about.
 
 ---
 
@@ -96,7 +99,14 @@ This file holds the **last 5 sessions** as separate dated entries (newest first)
    it here — this section is for session-continuity state that doesn't fit a backlog line (an
    in-flight investigation, a pending commit approval), and should often be short or empty.
 3. `_Context/session-digest.md` — prepend a new dated entry per the Session Start rules above (cap at 5).
-4. **Conditional — Graphify (code graph only):** if `graphify-out/` exists for this project,
+4. **Lessons check, before any commit.** Ask explicitly: did this session hit a real discovery,
+   failure, constraint, or piece of feedback that would help a future session (not routine work)?
+   If yes, log it to `lessons.md` now (format in root `CLAUDE.md` §13) — don't defer it, and don't
+   skip it because step 1 already summarized it narratively; `lessons.md` is the searchable,
+   indexed record, `CONTEXT.md` is not. Then add the matching one-line row to `lessons_index.md`
+   in the same pass — `_scripts/wrap_up.sh` mechanically checks the two stay in sync (see below),
+   so an entry without an index row is a FAIL, not just an oversight to catch later.
+5. **Conditional — Graphify (code graph only):** if `graphify-out/` exists for this project,
    refresh the code graph (`graphify update .` — free/local, unconditional, no LLM). If
    `/graphify` doesn't show up as a recognized skill (Windows-side session — see
    `_global_lessons/lessons.md` 2026-09-10 entries), Read `SKILL.md` directly via its WSL/UNC
@@ -110,16 +120,22 @@ This file holds the **last 5 sessions** as separate dated entries (newest first)
    `_protocols/GRAPHIFY_SEMANTIC_PIPELINE_PROTOCOL.md`), meant to run standalone or on a cron
    schedule, not during interactive wrap-up. Only run it here if the user explicitly asks for a
    doc/Obsidian refresh in this session.
-5. **Run `_scripts/wrap_up.sh`.** It mechanically checks steps 1-3's structure only — never
+6. **Run `_scripts/wrap_up.sh`.** It mechanically checks steps 1-4's structure only — never
    content quality: `## Pending`/`## Unresolved Decisions` headings exist, `## Pending` is
    ≤15 lines, `session-digest.md` has ≤5 entries, this file's Stack/Data Schema lines aren't
-   still placeholder text, **and (added 2026-09-16) whether this session's commits touched
-   `backend/**`/`frontend/lib/**` without a matching diff in `_tests/scenarios.md`.**
+   still placeholder text, whether this session's commits touched `backend/**`/`frontend/lib/**`
+   without a matching diff in `_tests/scenarios.md`, **and (added 2026-09-16)
+   whether `lessons_index.md`'s row count matches `lessons.md`'s entry count.**
    - On every other FAIL: fix the underlying doc and rerun.
-   - **On the QA-gate FAIL specifically: go back and actually run the missing same-session
-     targeted replay (see `## QA Workflow` above) and log the pending-intake row now** — do not
-     just silence the check by adding an unrelated `scenarios.md` line. Only rerun once the QA
-     step for real work has actually happened.
+   - **On the QA-gate FAIL: go back and actually run the missing same-session targeted replay**
+     (see `## QA Workflow` above) **and log the pending-intake row now** — do not just silence the
+     check by adding an unrelated `scenarios.md` line. Only rerun once the QA step for real work
+     has actually happened.
+   - **On the lessons-sync FAIL: add the missing row(s) to `lessons_index.md` now** — this check
+     can't tell you *whether* a lesson was worth logging (that's step 4's judgment call), only that
+     whatever you *did* log in `lessons.md` also has a matching index row, so the index never
+     silently drifts out of date the way this project's own 2026-09-16 lesson describes happening
+     to the QA-logging discipline.
    Rerun until clean before showing the user a commit to approve.
 
 ### `CONTEXT.md`'s entry-length target (keeps it from re-bloating without splitting the file)
@@ -222,6 +238,17 @@ Before calling the fix done: grep `_tests/scenarios.md` for scenarios whose `tou
 overlaps the files just changed, and replay those (not the full suite) to confirm nothing
 adjacent broke. Cheap — minutes, not a full session extension — and this is what
 `_scripts/wrap_up.sh`'s QA-gate check (see Session End below) verifies actually happened.
+
+### Optional: OpenRouter code review for critical changes
+For a change that's genuinely high-risk (auth/security touches, or anything going into a
+`staging → main` merge) — not routine work — you can run `_scripts/or_code_review.py` (diffs
+`origin/staging...HEAD` plus uncommitted changes through `qwen/qwen3.7-flash` on OpenRouter).
+This is deliberately **never** Claude's own `/code-review` — that forks into ~10 parallel
+subagents on Claude itself, which burns Claude Code session credits fast and should never run
+without first telling the founder the expected scale and getting a go-ahead (2026-09-16
+incident: it ran unannounced and reasonably alarmed the founder mid-session). The OpenRouter
+version costs cents in API credits instead, so it's fine to reach for more freely — still ask
+first for anything beyond a single small diff, since cost is now non-zero either way.
 
 ### Promotion rule — run before every `staging → main` merge
 1. Review the pending intake table

@@ -57,4 +57,14 @@ else
   check 0 "QA gate: backend/frontend changes have a matching scenarios.md diff (or none)"
 fi
 
+# Lessons-index sync gate (added 2026-09-16, see CLAUDE.md '## Session End / Wrap-up' step 4):
+# doesn't judge whether a lesson was worth logging (that's a judgment call) — only that
+# lessons_index.md never silently drifts out of sync with whatever IS in lessons.md, since a
+# built-but-unmaintained index is worse than no index (this project already lived that once
+# with the QA-scenario check itself).
+lessons_entries=$(grep -c '^## ' lessons.md 2>/dev/null || echo 0)
+index_rows=$(grep -c '^| [0-9]' lessons_index.md 2>/dev/null || echo 0)
+[ "$lessons_entries" -eq "$index_rows" ]
+check $? "lessons_index.md row count ($index_rows) matches lessons.md entry count ($lessons_entries)"
+
 exit $fail
