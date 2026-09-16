@@ -68,6 +68,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   // pop a dialog that's already gone (which would pop whatever route is now
   // on top instead, e.g. this screen itself).
   bool _waitDialogDismissed = false;
+  // Set by _applyPropertyRow when a terminal status lands while the wait
+  // dialog is still showing. Pushing the conflict/trained dialog right then
+  // would stack it on top of the still-open wait dialog; the blind
+  // Navigator.pop() in _startIngest's finally block (meant to close the wait
+  // dialog) would then pop that new dialog instead, leaving the wait dialog
+  // stuck forever. Deferred here and only shown after the wait dialog has
+  // actually been popped.
+  Future<void> Function()? _pendingResultDialog;
   // Single list, tracked from upload through ingestion completion — status
   // updates in place (queued → processing → done/error) rather than a second
   // "Files Ingested" list appearing below a frozen first one.
@@ -213,10 +221,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     // transition (not just "status is currently X") so a later poll/realtime
     // tick while already in the same terminal status doesn't re-show it.
     if (prevStatus != status) {
+      // If the wait dialog is still showing, pushing the result dialog now
+      // would race the flowCompleter-triggered pop below — see the
+      // _pendingResultDialog field comment. Defer until _startIngest has
+      // actually closed the wait dialog.
+      final waitDialogActive = _flowCompleter != null &&
+          !_flowCompleter!.isCompleted &&
+          !_waitDialogDismissed;
       if (status == 'Conflict_Pending') {
         final report =
             (_masterJson?['conflict_report'] as List<dynamic>?) ?? [];
-        _showConflictDialog(report.length);
+        if (waitDialogActive) {
+          _pendingResultDialog = () => _showConflictDialog(report.length);
+        } else {
+          _showConflictDialog(report.length);
+        }
+      } else if (waitDialogActive) {
+        _pendingResultDialog =
+            () => _maybeShowTrainedDialog(prevStatus, status);
       } else {
         _maybeShowTrainedDialog(prevStatus, status);
       }
@@ -465,6 +487,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     } finally {
       if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
+      }
+      // Show any result dialog _applyPropertyRow deferred while the wait
+      // dialog above was still up, now that it's actually closed.
+      final pendingDialog = _pendingResultDialog;
+      _pendingResultDialog = null;
+      if (pendingDialog != null && mounted) {
+        await pendingDialog();
       }
       if (_isStalled && mounted) {
         _showInfo(
@@ -995,9 +1024,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           : 'Conflicts Pending Review',
       'Trained' => 'Trained',
       'Fully_Trained' => 'Fully Trained',
-      // Any other backend status (e.g. Ingest_Error, a real expected status
-      // per setup_status.dart) previously showed the raw enum verbatim —
-      // humanize instead of falling through unmapped.
+      // Non-dev must never see raw ingest/merge/scrape vocabulary (e.g.
+      // "Ingesting", "Merging", "Ingest Error") -- collapse anything unmapped
+      // into one of two safe labels. Dev mode keeps the humanized raw enum
+      // since it maps directly to the separate manual buttons it shows
+      // (mirrors setup_status.dart's isDev-gated split).
+      _ when !widget.isDev && status.contains('Error') => 'Needs Attention',
+      _ when !widget.isDev => 'Training in Progress',
       _ => status.replaceAll('_', ' '),
     };
     // Soft-fill using semantic container tokens (ui-ux-pro-max §6 color-semantic).
@@ -1130,6 +1163,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     final urlText = _urlController.text.trim();
     final canIngest = urlText.isNotEmpty &&
         urlText.toLowerCase().contains('airbnb.') &&
+        // Train Now is a one-shot action on this screen -- once a status
+        // exists the property is already in motion (or done); Ingest_Error
+        // has its own dedicated Retry in the recovery banner instead of
+        // re-enabling this button.
+        _propertyStatus == null &&
         !_isIngesting &&
         !_isMerging;
     final trainingInProgress = _isIngesting || (!widget.isDev && _isMerging);
