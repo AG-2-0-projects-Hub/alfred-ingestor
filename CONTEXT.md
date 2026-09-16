@@ -11,20 +11,65 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 TOP: Gemini docx timeout, root cause found (Dynamic Shared Quota contention, not file size —
-  ~5,200 real tokens, fails 100% of the time). No fix yet — see `_Context/session-digest.md`'s
-  full investigation prompt for the next session (founder also cross-checking with another LLM).
+- 🔴 TOP: Train Now reliability — self-contained handoff plan (9 items, verified-or-flagged) at
+  `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`. The Gemini docx timeout
+  investigation converged into this plan 2026-09-16 — no longer a separate pending item.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
-- 🟡 2 Vercel tokens exposed this session (bad `grep|sed` redaction) — queued, waiting on the
+- 🟡 2 Vercel tokens exposed 2026-09-15 (bad `grep|sed` redaction) — queued, waiting on the
   founder's Desktop `.txt` handoff.
 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-15 (**Fixed the 6 retrain-flow/UX regressions the founder found after the
+**Last Session:** 2026-09-15→16 (**Root-caused and substantially fixed the Train Now reliability
+crisis. Fixed 3 stacked frontend bugs in first-time Add Property (dropped-connection recovery,
+premature dialog-close, raw status leak). Root-caused the real Gemini problem — `gemini-3.8-flash`
+was a ~2-week-old model with thin quota, the 20s/90s retry-timeout architecture was undersized for
+real call latency, and staging fires ~2x the concurrent Gemini calls prod does per property (a
+legitimate merge/photo-triage feature addition). Swapped training-only Gemini calls to
+`gemini-3.6-flash`, live-verified via a real 10-file scrape+ingest+merge run: 100% success.** —
+`staging`, 4 commits (`9defe1b`, `13757b7`, `1381848`, `889e83f`); Cloud Run
+`alfred-backend-staging` + `alfred-scraper-staging` both redeployed for the model swap.
+> **✅ 3 frontend bugs fixed, `add_property_screen.dart`** — it never got the realtime-row-watch
+> fix `edit_property_screen.dart` received earlier the same day. Dropped SSE connections left the
+> screen dead with zero backstop (fixed: watch the row from click time, not the first server
+> event); the wait dialog closed before merge even started once merge moved off the request's own
+> completion (fixed with a `Completer` that waits for the real end of the chain); the dashboard
+> badge leaked the raw word "Ingested" to end users (fixed).
+> **✅ Root-caused the Gemini reliability problem via standalone smoke-test scripts against real
+> Vertex, real content, zero app code** — not guessed. `gemini-3.8-flash` (GA ~2026-09-02) hit real
+> 429s after 2 sequential calls with zero concurrency; most models tested routinely take 15-30s+ per
+> call against a 20s-per-attempt timeout that cancels-and-restarts instead of flagging slow;
+> staging's merge+scraper make ~2x prod's Gemini call count per property. Swapped
+> ingest/merge/resolve/scraper-photo-triage to `gemini-3.6-flash` (12/12 successes, most consistent
+> model tested) — chat deliberately untouched.
+> **✅ Found the exact "stuck forever, zero error" mechanism** via `gcloud logging read` +
+> `gcloud run services describe`: Cloud Run kills `/ingest` at a hard 300s timeout regardless of
+> remaining work, and nothing in the app catches that specific teardown to write a final status.
+> Not yet fixed — anchor evidence for the plan's recovery-path item.
+> **✅ Live-verified the full pipeline end-to-end**: uploaded 10 real test files (incl. the
+> long-failing docx) to a fresh property, ran the real scrape→ingest→merge chain on
+> `gemini-3.6-flash`: 10/10 files succeeded, merge succeeded, landed on a legitimate
+> `Conflict_Pending` with 2 real data conflicts — assigned to the founder's real account.
+> **🔴→ self-caught process gaps:** skipped the QA-scenario-logging rule mid-session (corrected,
+> logged retroactively); shipped one real regression (dialog-close timing) inside a fix meant to
+> prevent that exact bug class (self-caught and fixed same session); briefly mis-stated a Cloud Run
+> *maximum-allowed* timeout as a proposal, alarming the founder before self-correcting.
+> **⚠️ One credential-hygiene incident:** a live, short-lived (expires within the hour) Google
+> Cloud OAuth access token was echoed into tool output via an unredacted `gcloud` command — flagged
+> immediately; no rotation needed, it self-expires and isn't a static key.
+> **📋 Wrote a self-contained handoff plan**, `_Context/Train_Now_Reliability_and_QA_Process_Plan_
+> 2026-09-15.md` (gitignored, local-only) — 9 items: the still-open UX gaps, 2 new process
+> protocols (lightweight FMEA before code, a QA-logging backstop in `wrap_up.sh`), QA-replay
+> scoping, the retry-timeout redesign, and the full prod-vs-staging differential audit. Every claim
+> is cited to how it was verified, or explicitly flagged as unconfirmed — the founder required this
+> after finding stale/contradictory claims in an earlier draft.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-15 (**Fixed the 6 retrain-flow/UX regressions the founder found after the
 2026-09-14→15 mitigation pass, then found + fixed 2 more real bugs live-testing on a real property —
 all shipped to `staging`, live-verified. Root-caused (not yet fixed) the recurring Gemini docx
 timeout as Vertex AI Dynamic Shared Quota contention, not file size.** — `staging`, 2 commits

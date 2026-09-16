@@ -14,11 +14,15 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
-- [ ] User (non-Dev) mode's Add Property screen should show a single "Train Now" button —
-      currently shows an "Ingest" button/labeling instead (founder-flagged 2026-09-15, live-testing
-      the pre-beta mitigation deploy; not investigated yet — likely add_property_screen.dart's
-      button label/branch logic for the User-mode vs Dev-mode UI split)
-- [ ] 🔴 TOP PRIORITY — founder needs to actually retry training (Santa Prisca, Dos Rios, a fresh Bungalow) to confirm the real fix (deprecated `gemini_client.py` model, fixed 2026-09-10, `staging` @ `44cbfc1`) works end-to-end — the fix is deployed and individually verified, but not yet confirmed by a real founder retry
+- [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
+      expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
+      dumps them back on the plain form with only a "Train Now" button — no way to check progress,
+      resume watching, or know if it's really still running vs. dead. The dashboard card then just
+      shows "Processing…" with nothing clickable, for however long it takes (minutes, possibly
+      longer). Recurring, founder-flagged live 2026-09-15/16 across multiple real runs. Root cause +
+      full context: `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md` item 3
+      ("Recovery path for a genuinely stuck backend") — not yet implemented, this is the same issue
+      surfacing again, not a new one.
 - [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file for `PROD_BACKEND_URL`/`PROD_SCRAPER_URL` etc. (not just prefixed vars in `.env.test`); the 4 Gemini smoke checks no longer need a separate prod variant — they moved to Vertex/ADC on 2026-09-10 and that transport is already shared by staging + prod
 - [ ] Schedule the doc-staleness sweep (`HEALTH_CHECK_PROTOCOL.md` row 17) as a periodic agent pass — no mechanism exists yet, currently manual-only
 - [ ] Rotate the Firecrawl API key that got displayed in a session transcript 2026-09-10 (founder-flagged)
@@ -31,7 +35,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       Tokens page, create replacements,
       hand new values to Claude via the usual Desktop `.txt` drop for `_mcp_profiles/global.json` update.
 - [ ] Rotate `_tests/fixtures/.env.test` test credentials printed in full in a session transcript 2026-09-10 (`GEMINI_API_TEST_KEY`, `VERCEL_API_TOKEN`, `VERCEL_BYPASS_TOKEN`, `TELEGRAM_BOT_TOKEN_TEST`, `WHATSAPP_ACCESS_TOKEN_TEST`, `FIRECRAWL_API_KEY_TEST` — a `cat`+`sed` redaction only covered the password field) — deferred, founder is treating it as local-session exposure for now
-- [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property)
+- [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property). Related to but distinct from the Train Now reliability plan (`_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`) — different mechanism (nothing ever triggers, not a timeout/recovery gap during a run) — worth a look in the same pass regardless.
 - [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)
 - [ ] Host-recorded property walkthrough video
@@ -41,6 +45,16 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Add real sourced stats/fun facts to the Train Now wait popup's rotating card (currently Alfred-capability tips only, no stats — deliberately avoided fabricating numbers) (queued 2026-09-09)
 
 ## Done (came off the queue)
+
+- [x] ~~User-mode Add Property "Ingest" vs "Train Now" button label~~ — closed 2026-09-16, never
+      actually broken: `widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'` has been in the code unchanged
+      since the original dashboard commit (`721dd3e`); the 2026-09-15 flag was a false read, not a
+      real regression
+- [x] ~~Confirm the Sep 10 deprecated-model fix works end-to-end~~ — superseded 2026-09-16: far
+      beyond confirmed via extensive live retraining this session, and the model has since moved
+      again (`gemini-3.8-flash` → `gemini-3.6-flash`, staging `889e83f`) per
+      `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md` item 8. Ongoing Train Now
+      reliability is now tracked via the 🔴 item at the top of Open, not this one.
 
 - [x] ~~Overview tab manual walkthrough replay toggle~~ — shipped 2026-09-10, staging `6835304`, Playwright-verified live
 - [x] ~~Dev/User (beta) view split for Add Property~~ — shipped 2026-09-09, staging
