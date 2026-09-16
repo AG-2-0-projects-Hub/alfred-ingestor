@@ -193,9 +193,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         bearer: session?.accessToken,
       );
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _resumeTraining : null);
     } catch (e) {
-      _showError('Resume failed: $e');
+      _showError('Resume failed: $e', onRetry: _resumeTraining);
     } finally {
       if (mounted) setState(() => _resuming = false);
     }
@@ -343,9 +343,10 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       // is what used to be handled by a blind timeout here.
       await _flowCompleter?.future;
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _startIngest : null);
     } catch (e) {
-      _showError("Couldn't reach Alfred. Check your connection and try again.");
+      _showError("Couldn't reach Alfred. Check your connection and try again.",
+          onRetry: _startIngest);
     } finally {
       _hideTrainingWaitDialog();
       if (_isStalled && mounted) {
@@ -417,9 +418,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         _masterJson = data['master_json'] as Map<String, dynamic>?;
       });
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _runMerge : null);
     } catch (e) {
-      _showError('Merge failed: $e');
+      _showError('Merge failed: $e', onRetry: _runMerge);
     } finally {
       _hideTrainingWaitDialog();
       if (mounted) setState(() => _isMerging = false);
@@ -433,10 +434,22 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     });
   }
 
-  void _showError(String msg) {
+  // Phase 3 (2026-09-16) — item 2's "request never reaches the backend"
+  // messaging was present but not legible: RequestTimeoutException/
+  // ServerException's own userMessage literally says "Tap retry" while this
+  // SnackBar had no tappable retry at all (matches chat_screen.dart's
+  // _showApiError pattern now). onRetry is optional so most call sites are
+  // unaffected; pass it when the failure is plausibly transient.
+  void _showError(String msg, {VoidCallback? onRetry}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: context.palette.danger));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: context.palette.danger,
+      action: onRetry == null
+          ? null
+          : SnackBarAction(
+              label: 'Retry', textColor: Colors.white, onPressed: onRetry),
+    ));
   }
 
   // Non-error status update -- distinct from _showError's danger styling so

@@ -237,9 +237,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // listener picks up the resumed run's progress the moment the backend
       // writes it, same as every other state change on this screen.
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _resumeTraining : null);
     } catch (e) {
-      _showError('Resume failed: $e');
+      _showError('Resume failed: $e', onRetry: _resumeTraining);
     } finally {
       if (mounted) setState(() => _resuming = false);
     }
@@ -397,9 +397,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       // backend's own watchdog is what used to be a blind 6-minute timer.
       await _flowCompleter?.future;
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _startIngest : null);
     } catch (e) {
-      _showError("Couldn't reach Alfred. Check your connection and try again.");
+      _showError("Couldn't reach Alfred. Check your connection and try again.",
+          onRetry: _startIngest);
     } finally {
       if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -460,9 +461,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         await _maybeShowTrainedDialog(prevStatus, newStatus);
       }
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      _showError(e.userMessage, onRetry: e.retry ? _runMerge : null);
     } catch (e) {
-      _showError('Merge failed: $e');
+      _showError('Merge failed: $e', onRetry: _runMerge);
     } finally {
       setState(() => _isMerging = false);
       if (_flowCompleter != null && !_flowCompleter!.isCompleted) {
@@ -493,13 +494,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     await _showTrainedDialog(name);
   }
 
-  void _showError(String msg) {
+  // Phase 3 (2026-09-16) — item 2's "request never reaches the backend"
+  // messaging was present but not legible: RequestTimeoutException/
+  // ServerException's own userMessage literally says "Tap retry" while this
+  // SnackBar had no tappable retry at all (chat_screen.dart's
+  // _showApiError already does this correctly — same fix here). onRetry is
+  // optional so most call sites are unaffected; pass it (usually
+  // `e.retry ? theSameCall : null`) when the failure is plausibly transient.
+  void _showError(String msg, {VoidCallback? onRetry}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
       backgroundColor: context.palette.danger,
       duration: const Duration(seconds: 8),
+      action: onRetry == null
+          ? null
+          : SnackBarAction(
+              label: 'Retry', textColor: Colors.white, onPressed: onRetry),
     ));
   }
 
