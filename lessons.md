@@ -3,6 +3,29 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-16 — The Edit tool silently drops a shell script's executable bit on every edit, confirmed 3x in one session
+
+**Context:** `_scripts/wrap_up.sh` (a `#!/usr/bin/env bash` script meant to be run directly per
+`CLAUDE.md`'s own Session End instructions) was edited three separate times this session to add
+the QA gate, then the lessons-sync gate.
+
+**Discovery:** Every single Edit-tool write to this file flipped its git-tracked mode from
+`100755` to `100644` (confirmed via `git ls-files -s` and `ls -la` each time) — not an occasional
+fluke, a 3/3 repeatable pattern in this environment (Windows-side Claude Code session, WSL2/UNC
+file access). `chmod +x` after each edit fixes the working tree, but it's easy to forget and it
+silently breaks `CLAUDE.md`'s documented direct-invocation instruction (`_scripts/wrap_up.sh`,
+not `bash _scripts/wrap_up.sh`) the moment the mode-644 version gets committed.
+
+**Impact:** No functional damage (`bash _scripts/wrap_up.sh` still runs fine regardless of the
+bit; only direct `./`-style invocation would fail). Caught and fixed each time before committing,
+except the first time, which shipped mode-644 in commit `df54136` and was fixed in a later
+commit. **Practical rule going forward: after ANY Edit-tool write to a script file in this repo,
+`ls -la`/`git diff --summary` it before committing — don't assume the mode survived.**
+**Global Candidate: Yes** — this is an Edit-tool/WSL-UNC-path behavior, not specific to this
+project or this file; it would recur for any shell script edited the same way in any project.
+
+---
+
 ## 2026-09-16 — Re-hit an already-documented shell-quoting bug because I skipped the mandated lessons check, and deferred lesson-logging past "immediately"
 
 **Context:** Committing Phase 1 of the Train Now reliability work (a git commit body containing backtick-quoted code like `` `attempts` ``), constructed as `wsl bash -c "... git commit -F - <<'EOF' ... EOF"`.
