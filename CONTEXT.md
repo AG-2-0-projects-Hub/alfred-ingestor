@@ -11,20 +11,65 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 TOP: Train Now reliability — self-contained handoff plan (9 items, verified-or-flagged) at
-  `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`. The Gemini docx timeout
-  investigation converged into this plan 2026-09-16 — no longer a separate pending item.
+- 🔴 TOP: Train Now's post-completion UI signal is still unreliable on staging (wait dialog often
+  never closes even though the backend finished correctly) — self-contained handoff doc, read
+  first, at `_Context/HANDOFF_training-complete-signal_2026-09-16.md`. Phase 2's own 9-item plan
+  (`_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`) is otherwise DONE (Phases
+  0-3 shipped + live-verified except this one gap).
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
-- 🟡 2 Vercel tokens exposed 2026-09-15 (bad `grep|sed` redaction) — queued, waiting on the
-  founder's Desktop `.txt` handoff.
 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-15→16 (**Root-caused and substantially fixed the Train Now reliability
+**Last Session:** 2026-09-16 (**Continued Train Now reliability work: live-tested Phase 2 for
+real, found and fixed 2 live bugs (a Gemini audio-transcription hallucination on silent input, and
+a realtime-subscription gap that left the wait dialog stuck), designed a real QA-curation
+protocol together, rewrote `CLAUDE.md`/`QUICKSTART.md` to be fully current — then found the
+post-merge completion signal is STILL unreliable even after fixing it twice, handed off fresh
+with hard evidence rather than a third guess.** — `staging` @ **`6333721`**, 5 commits
+(`5332597`..`6333721`); Cloud Run `alfred-backend-staging` redeployed once (audio fix).
+> **✅ Audio hallucination, confirmed and fixed.** A muted external mic recorded true digital
+> silence (verified via `ffmpeg`/`webrtcvad`, independently cross-checked) — Gemini's ingest
+> prompt fabricated a fully detailed, plausible fake transcript anyway (a fake door code reached a
+> real guest-facing conflict question). Root cause: the prompt's template hardcoded
+> `contains_host_voice: Yes` with no `No` option. A VAD-based pre-filter (`ffmpeg`/`pydub`/
+> `webrtcvad`) was prototyped first but rejected — it couldn't reliably separate real loud traffic
+> noise from speech even at max aggressiveness. The founder's own simpler proposal (tell the model
+> to say it doesn't know, don't pre-filter) won on real 3-file test data and shipped instead —
+> zero new dependencies. This exact "test a competing idea for real before defending what's
+> already underway" pattern got promoted to root `CLAUDE.md` §3 at the founder's request.
+> **✅ Stuck-tab bug fixed once, found to still recur.** Realtime alone silently failed to deliver
+> a single update to the tab that clicked Train Now (confirmed via direct DB query: backend fully
+> correct, a second tab showed the real state immediately). Added an 8s polling backstop as
+> redundancy — but the SAME class of stuck-dialog bug still happened on a later real test, even
+> after hard-refresh and a fresh incognito window (ruling out caching). Real Supabase `edge_logs`
+> pulled for the failing window prove the poll itself is firing correctly and getting healthy 200
+> responses — the remaining bug is client-side Dart logic, not network/data delivery. See the
+> handoff doc above; two smaller confirmed-but-unfixed bugs found in the same testing (a raw
+> `"Ingesting"` status leak, Train Now staying clickable post-completion) are in there too.
+> **✅ Built the Critical Path QA concept together.** The prior "full suite" (7 scenarios) turned
+> out to be automated by build-order, not criticality — the actual core Train Now flow wasn't even
+> in it. Hand-picked 9 scenarios by real blast radius instead (auth, core ingest, guest chat,
+> security) as the actual `staging → main` merge gate; `CLAUDE.md` now proactively offers to run it
+> before a merge instead of requiring it be asked for by name.
+> **✅ `CLAUDE.md`/`QUICKSTART.md` audited and corrected** — found 3 real stale/contradictory
+> entries in `CLAUDE.md` (Shell Execution Environment described a pre-2026-07-28 environment that
+> hadn't been true all session; the Stack/Data Schema header still described the pre-Phase-2
+> SSE+BackgroundTasks system; a line claimed inheritance from `GEMINI.md`, which root `CLAUDE.md`
+> explicitly says Claude Code never reads). `QUICKSTART.md` was rewritten from scratch — it
+> described a `/qa-full`/`/qa-changed-since` slash-command system and an `ag-switch` session-start
+> flow that don't exist/apply anymore.
+> **⚠️ One real secret-exposure incident:** `SUPABASE_SERVICE_ROLE_KEY` (staging) printed in full
+> via a plain `grep` against `backend/.env`, despite this exact failure class already being
+> documented with a structural fix in place from a prior session. Logged as a recurrence, not a
+> new rule — the gap was execution under task pressure, not missing policy. Queued for rotation
+> alongside the other exposed credentials in `QUEUE.md`.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-15→16 (**Root-caused and substantially fixed the Train Now reliability
 crisis. Fixed 3 stacked frontend bugs in first-time Add Property (dropped-connection recovery,
 premature dialog-close, raw status leak). Root-caused the real Gemini problem — `gemini-3.8-flash`
 was a ~2-week-old model with thin quota, the 20s/90s retry-timeout architecture was undersized for

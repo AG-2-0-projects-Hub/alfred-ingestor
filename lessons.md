@@ -3,6 +3,33 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-16 — Supabase `edge_logs` (via `query_logs`) is the fastest way to prove/disprove a "did the request even happen" theory
+
+**Context:** A real live bug (Train Now's wait dialog not closing on its own even though the
+backend finished correctly) recurred a second time after being "fixed" once, then survived a hard
+refresh and a fresh incognito window — ruling out browser caching. Needed to know whether the
+frontend's 8-second polling backstop was actually firing and succeeding, without being able to
+see the browser's own console/network tab.
+
+**Discovery:** `mcp__supabase-the-ingestor__query_logs` runs read-only ClickHouse SQL against the
+project's unified log stream (`source = 'edge_logs'` for the PostgREST/API gateway layer,
+`'realtime_logs'` for the Realtime service, plus `postgres_logs`/`auth_logs`/etc). Filtering
+`edge_logs` by `log_attributes['request.path']` and `log_attributes['request.search']` (the query
+string) for the specific property id showed the poll firing every ~8s, every request returning
+200 with exactly the right single row — hard, real proof the network/data layer was completely
+healthy, narrowing the bug to client-side Dart logic in one query instead of guessing between
+"deploy didn't happen," "caching," "RLS blocking silently," or "the poll isn't running at all."
+Large result sets (e.g. `select *`) blow the tool's per-call token limit fast — select only the
+specific `log_attributes` keys needed, and check `select distinct source from logs` /
+`select log_attributes from logs limit 1` first to learn the actual field names rather than
+guessing them.
+
+**Impact:** No code changed — this is a debugging technique, not a bug fix. Reuse directly any
+time a bug's symptom could plausibly be "the request never happened" vs. "something client-side
+mishandled a response that arrived fine" — this tool answers that distinction from real evidence
+in under a minute, instead of a round-trip asking the user to open DevTools. **Global Candidate:
+Yes** — any project with a Supabase MCP that exposes `query_logs` can use this same technique.
+
 ## 2026-09-16 — `/usr/local/bin/flutter` symlink is dangling; the working install is the snap one
 
 **Context:** Verifying a frontend fix with `flutter analyze` (mandatory before calling frontend work
@@ -117,6 +144,13 @@ project or this file; it would recur for any shell script edited the same way in
 **Discovery:** Ran `grep -i vercel ~/AG_master_files/_mcp_profiles/global.json | sed -E 's/:.*/: <redacted>/'` intending to show only key names. The token is stored as a bare array element (`"VERCEL_AUTH_TOKEN=vcp_...",` inside an `args` list), not a `"key": "value"` JSON pair — so the `s/:.*/`  pattern never matched that line, and both full tokens printed in plain text to the transcript. This is the same failure class as four prior incidents this project (2026-09-10 x2, 2026-09-11 x2, per `CONTEXT.md`'s session log) — each one used a different ad-hoc regex/sed/tail construction that happened to not match the specific file's actual format that time. "Try to redact after printing" is fundamentally fragile because it silently fails whenever the assumed format is wrong, with no error to catch it. The reliable fix is structural, not "write a better regex": use a real parser (`jq` for JSON — not installed in this WSL2 env, or Python's `json` module as a fallback) to extract only key names/paths, never full values; for `.env`-style files, use an anchored `grep -oE '^[A-Za-z_][A-Za-z0-9_]*='` whose capture group mechanically ends at `=` and therefore cannot include the value, unlike a substitution that has to correctly strip it after the fact.
 
 **Impact:** Two Vercel account tokens (`ingestor-staging-vercel-token`, `ingestor-prod-vercel-token`) exposed, logged to `QUEUE.md` for rotation. No code changed. **Global Candidate: Yes** — this is a property of how secrets files get inspected across any project, not specific to the-ingestor; the same mistake will recur anywhere a session reaches for `grep`/`sed`/`cat` on a credentials file "just to check something."
+
+**Addendum, 2026-09-16 — recurred anyway.** A plain `grep` against `backend/.env` printed
+`SUPABASE_SERVICE_ROLE_KEY` (staging) in full, mid-investigation, under task pressure, despite
+this exact lesson already existing. Documenting the fix once was not sufficient — the fix has to
+be a hard reflex triggered by the mere act of touching a path containing `.env`/`secrets`/
+`credentials`, checked *before* the tool call, not recalled from memory when convenient. Queued
+for rotation in `QUEUE.md` alongside the Vercel tokens above.
 
 ---
 
