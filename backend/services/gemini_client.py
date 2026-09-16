@@ -133,7 +133,22 @@ SYSTEM_INSTRUCTION_C = "You are a Transcription and Knowledge Extraction Special
 USER_PROMPT_C = """\
 You are an expert Knowledge Base Architect for vacation rentals. This audio recording is from a property host. Your job is to transcribe it fully and extract ALL actionable information for the property knowledge base.
 
-ANALYSIS PROCESS:
+CRITICAL: First determine whether this audio actually contains audible human speech.
+If the audio is silent, contains no discernible speech, or is too noisy/unclear to make
+out actual words, DO NOT invent or guess a transcript. Instead output ONLY:
+
+---
+document_type: "Host Audio Note"
+contains_host_voice: No
+---
+
+### Full Transcript
+[NO_SPEECH_DETECTED — audio was silent, unintelligible, or contained no discernible speech]
+
+Do this instead of the normal output below whenever you are not confident real words are
+present. Never fabricate plausible-sounding content to fill in gaps.
+
+ANALYSIS PROCESS (only if real speech IS present):
 1. Transcribe the audio verbatim
 2. Identify all distinct topics/subjects mentioned
 3. Extract specific, actionable information for each topic
@@ -145,7 +160,7 @@ OUTPUT FORMAT (Hybrid Frontmatter + Adaptive Markdown):
 document_type: "Host Audio Note"
 primary_language: [e.g., "English", "Spanish", "Mixed"]
 information_density: [High/Medium/Low]
-contains_host_voice: Yes
+contains_host_voice: [Yes/No]
 ---
 
 ### Full Transcript
