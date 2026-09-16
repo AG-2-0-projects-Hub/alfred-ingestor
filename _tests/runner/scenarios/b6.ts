@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { judgeScreenshot } from '../lib/gemini-judge.ts';
+import { judgeScreenshot } from '../lib/screenshot-judge.ts';
 import { hydratePage, loginAs, VP, DASHBOARD, ADD_PROPERTY } from '../lib/playwright-helpers.ts';
 import { supabaseAnon, createAuthedClient } from '../lib/supabase.ts';
 import { env } from '../lib/env.ts';

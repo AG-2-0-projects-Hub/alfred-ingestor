@@ -112,9 +112,15 @@ This file holds the **last 5 sessions** as separate dated entries (newest first)
    doc/Obsidian refresh in this session.
 5. **Run `_scripts/wrap_up.sh`.** It mechanically checks steps 1-3's structure only — never
    content quality: `## Pending`/`## Unresolved Decisions` headings exist, `## Pending` is
-   ≤15 lines, `session-digest.md` has ≤5 entries, and this file's Stack/Data Schema lines aren't
-   still placeholder text. Fix anything it reports FAIL on and rerun until clean before showing
-   the user a commit to approve.
+   ≤15 lines, `session-digest.md` has ≤5 entries, this file's Stack/Data Schema lines aren't
+   still placeholder text, **and (added 2026-09-16) whether this session's commits touched
+   `backend/**`/`frontend/lib/**` without a matching diff in `_tests/scenarios.md`.**
+   - On every other FAIL: fix the underlying doc and rerun.
+   - **On the QA-gate FAIL specifically: go back and actually run the missing same-session
+     targeted replay (see `## QA Workflow` above) and log the pending-intake row now** — do not
+     just silence the check by adding an unrelated `scenarios.md` line. Only rerun once the QA
+     step for real work has actually happened.
+   Rerun until clean before showing the user a commit to approve.
 
 ### `CONTEXT.md`'s entry-length target (keeps it from re-bloating without splitting the file)
 
@@ -194,8 +200,28 @@ so don't assume it's still correct without checking if you're touching Auth-rela
 
 ## QA Workflow
 
+**Why this section has two checkpoints, not one:** the recurring Train Now reliability failures
+(2026-09-14→16) traced back to fixes being reactive — shipped, then the founder hit the *next*
+failure mode live, repeat — because nothing enumerated failure modes up front, and the existing
+pending-intake rule below was still skipped once under session pressure despite already being
+documented. Full history: `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`.
+
+### Before any fix or feature: failure-mode check
+For anything touching a user-facing flow (skip for pure docs/config/copy changes — same exemption
+list as below): before writing code, state a short table inline in the session — *failure mode →
+user-facing effect → mitigation* — covering at minimum: all succeed / partial fail / total fail /
+connection drops mid-request / request never reaches backend / backend hangs past any timeout.
+Same requirement pattern as root `CLAUDE.md`'s "Mechanical Logic First" (§3) — stated before
+implementation, not after.
+
 ### On any fix or feature
 After closing out any fix or feature with observable behaviour, append **one row** to the `## Pending intake` section of `_tests/scenarios.md`. Do not create a full scenario — just log the entry. Use the `Group with` column to flag entries that share a flow and should be merged into one compound scenario when promoted.
+
+### Same-session targeted replay
+Before calling the fix done: grep `_tests/scenarios.md` for scenarios whose `touches:` list
+overlaps the files just changed, and replay those (not the full suite) to confirm nothing
+adjacent broke. Cheap — minutes, not a full session extension — and this is what
+`_scripts/wrap_up.sh`'s QA-gate check (see Session End below) verifies actually happened.
 
 ### Promotion rule — run before every `staging → main` merge
 1. Review the pending intake table

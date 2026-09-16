@@ -35,4 +35,26 @@ else
   check 0 "CLAUDE.md Stack/Data Schema filled in"
 fi
 
+# QA gate (added 2026-09-16, see CLAUDE.md '## QA Workflow'): backend/frontend source
+# changed without a matching _tests/scenarios.md diff in the same range. Structural only —
+# it can't judge whether the right scenario was logged, only whether scenarios.md moved at all.
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+committed_changed=""
+if [ -n "$upstream" ]; then
+  committed_changed=$(git diff --name-only "$upstream...HEAD" 2>/dev/null || true)
+fi
+uncommitted_changed=$(git status --porcelain 2>/dev/null | sed -E 's/^...//; s/.* -> //')
+changed_files=$(printf '%s\n%s\n' "$committed_changed" "$uncommitted_changed" | sort -u)
+
+source_changed=$(printf '%s\n' "$changed_files" | grep -E '^(backend/|frontend/lib/)' || true)
+scenarios_changed=$(printf '%s\n' "$changed_files" | grep -Fx '_tests/scenarios.md' || true)
+
+if [ -n "$source_changed" ] && [ -z "$scenarios_changed" ]; then
+  n=$(printf '%s\n' "$source_changed" | grep -c .)
+  first=$(printf '%s\n' "$source_changed" | head -1)
+  check 1 "QA gate: $n backend/frontend file(s) changed (e.g. $first) with no _tests/scenarios.md diff — run the same-session targeted replay and log a pending-intake row"
+else
+  check 0 "QA gate: backend/frontend changes have a matching scenarios.md diff (or none)"
+fi
+
 exit $fail

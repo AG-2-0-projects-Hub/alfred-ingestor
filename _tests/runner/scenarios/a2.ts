@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { env } from '../lib/env.ts';
-import { judgeScreenshot } from '../lib/gemini-judge.ts';
+import { judgeScreenshot } from '../lib/screenshot-judge.ts';
 import { hydratePage, loginAs, saveScreenshot, REPORTS_DIR, VP, AUTH } from '../lib/playwright-helpers.ts';
 import type { ScenarioResult } from '../run.ts';
 
