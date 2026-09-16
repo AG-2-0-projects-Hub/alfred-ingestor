@@ -3,6 +3,46 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-16 — The Bash tool (Git Bash) can silently lose its ability to invoke `wsl` after `cd`-ing across a Windows-path/WSL-UNC boundary
+
+**Context:** Mid-session, testing the new Phase 2 background-worker backend locally. Ran `cd /tmp`
+then `cd /c/Users/San_8` in the Bash tool between `wsl bash -c "..."` calls (unrelated cleanup),
+each of which succeeded with no visible error and the harness even printed a "shell cwd was reset"
+confirmation.
+
+**Discovery:** Every `wsl bash -c "..."` call issued through the Bash tool afterward failed with
+`bash: line 1: C:/Program: No such file or directory` (exit 127) — a classic unquoted-Windows-path-
+with-a-space word-split, even though the command line I gave contained no such path. `python3
+--version` alone reproduced it. The Bash tool's own native commands (plain `curl`, `cat
+/proc/sys/kernel/random/uuid`) kept working fine throughout — only the `wsl` sub-invocation broke.
+Switching the exact same `wsl bash -c "..."` command to the **PowerShell tool** worked immediately,
+with no other change. Root cause not fully isolated (didn't spend further turns confirming exactly
+which cd, or the mix of Windows-drive-letter vs WSL-UNC cwd forms, corrupted the environment Git
+Bash hands to `wsl.exe`) — but the fix is simple and cheap: if `wsl bash -c` starts failing with a
+`C:/...: No such file or directory`-shaped error from the Bash tool, don't debug the cwd — just
+retry the identical command via the PowerShell tool.
+
+**Impact:** Cost several tool-call round trips mid-task (diagnosing before finding the PowerShell
+workaround) but no data loss — a backgrounded `uvicorn` process from before the break also had to
+be restarted since it seems tied to the Bash tool's shell session. **Global Candidate: Yes** — this
+is a Bash-tool/WSL-interop environment behavior, not specific to this project; worth remembering
+site-wide for any session juggling both Windows-path and WSL-UNC `cd` targets in the Bash tool.
+
+**Addendum, same session — the Bash tool's own `git`/`chmod` can also misreport file MODE for a
+WSL-UNC path, independent of the `wsl` sub-invocation above.** `_scripts/wrap_up.sh` showed a
+`100755 => 100644` mode diff via the Bash tool's own native `git diff --summary` even immediately
+after `chmod +x` confirmed 755 via that same tool's `ls -la` — the Bash tool's git was reading a
+*different, stale/inverted* view of the executable bit than reality. Running the identical
+`chmod +x` + `git diff`/`git add` through **PowerShell → `wsl bash -c` (WSL's own native git)**
+showed the correct direction (`100644 => 100755`) and staged cleanly. This may be the real
+mechanism behind the "Edit tool drops the executable bit" pattern logged separately below — the
+drop might not be the Edit tool's write itself, but any Bash-tool-native git/chmod operation on a
+`\\wsl.localhost\...` path giving unreliable mode readings. **Practical rule: for any script-mode
+fix in this repo, do the `chmod`/`git add` via `wsl bash -c` through PowerShell, not the Bash
+tool's own native commands, and trust that result over the Bash tool's.**
+
+---
+
 ## 2026-09-16 — The Edit tool silently drops a shell script's executable bit on every edit, confirmed 3x in one session
 
 **Context:** `_scripts/wrap_up.sh` (a `#!/usr/bin/env bash` script meant to be run directly per

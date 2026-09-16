@@ -80,13 +80,21 @@ class _FileStatusRow extends StatelessWidget {
               ],
             ],
           ),
-          if ((status == 'error' || status == 'timeout') && message.isNotEmpty)
+          if ((status == 'error' || status == 'timeout' || status == 'processing') &&
+              message.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 28, top: 4),
               child: Text(
                 message,
                 style: GoogleFonts.inter(
-                    fontSize: 11, color: palette.danger),
+                    fontSize: 11,
+                    // 'processing' with a message is a benign "Retrying
+                    // (attempt N)…" note (backend auto-retry, still working —
+                    // see ingest_files.attempts), not a failure — only
+                    // error/timeout get the alarming danger color.
+                    color: status == 'processing'
+                        ? palette.textMuted
+                        : palette.danger),
               ),
             ),
         ],

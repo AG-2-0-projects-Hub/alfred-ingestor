@@ -7,10 +7,20 @@ Both endpoints are idempotent:
   /resolve returns 200 with current state if status is already past "Conflict_Pending"
 
 Status transitions:
-  Ingested → Merged           (no conflicts)
-  Ingested → Conflict_Pending (conflicts detected)
+  Ingested → Merging → Merged           (no conflicts)
+  Ingested → Merging → Conflict_Pending (conflicts detected)
   Conflict_Pending → Trained           (all conflicts resolved)
   Conflict_Pending → Conflict_Pending  (partial resolution)
+
+"Merging" added 2026-09-16 (Phase 2, background ingest worker): a transient
+in-flight state entered via supabase_client.claim_merge's atomic
+Ingested->Merging transition, so a retried/duplicate merge task (Cloud Tasks
+retry, or a host mashing the /resume button) can never run two Gemini merges
+concurrently for the same property. _run_merge_and_save below is the actual
+merge logic, shared between this HTTP endpoint (host-triggered, still
+guarded by the Ingested-only check) and routers/ingest_worker.py's
+merge-step task (background-triggered, already past claim_merge when it
+calls this).
 """
 
 import asyncio
@@ -37,6 +47,50 @@ class ResolveRequest(BaseModel):
     resolutions: list[Resolution]
 
 
+def has_mergeable_content(prop: dict) -> bool:
+    """True if there's anything for the merger to work with. Callers check
+    this BEFORE calling run_merge_and_save — kept separate (rather than
+    folded into that function) so each caller can report the empty-content
+    case in its own terms: the HTTP endpoint as a 422, the background
+    merge-step task as a terminal 'failed' state on the run."""
+    return bool((prop.get("scraped_markdown") or "").strip()) or bool(
+        (prop.get("ingested_markdown") or "").strip()
+    )
+
+
+async def run_merge_and_save(property_id: str, prop: dict) -> dict:
+    """Core merge logic: run the Gemini merger and persist the result. Callers
+    own the status guard/transition (merge_property below checks 'Ingested';
+    ingest_worker's merge-step task already won claim_merge's Ingested->Merging
+    race before calling this) AND the has_mergeable_content check above — this
+    function assumes both are already satisfied and does the work
+    unconditionally. May raise ValueError if the Gemini call itself fails
+    (e.g. malformed response) — a genuine upstream failure, distinct from the
+    empty-content case above.
+    """
+    scraped = prop.get("scraped_markdown") or ""
+    ingested = prop.get("ingested_markdown") or ""
+
+    result = await gemini_merge_resolve.run_merger(
+        scraped, ingested, prop.get("name") or "", prop.get("curated_photos")
+    )
+
+    has_conflicts = result.get("_conflicts_summary", {}).get("_has_conflicts", False)
+    new_status = "Conflict_Pending" if has_conflicts else "Merged"
+    new_conflict_status = "pending" if has_conflicts else "none"
+
+    await asyncio.to_thread(
+        supabase_client.save_merge_result,
+        property_id, result, new_status, new_conflict_status,
+    )
+
+    return {
+        "status": new_status,
+        "has_conflicts": has_conflicts,
+        "master_json": result,
+    }
+
+
 @router.post("/merge/{property_id}")
 async def merge_property(property_id: str):
     prop = await asyncio.to_thread(supabase_client.get_property_for_merge, property_id)
@@ -53,41 +107,34 @@ async def merge_property(property_id: str):
             "message": "Already merged — returning current state.",
         }
 
+    if status == "Merging":
+        # A background merge-step task already won the claim and is running
+        # right now (or a retry of it is) — do not start a second Gemini
+        # merge call for the same property. The host will see this flip to
+        # Merged/Conflict_Pending via realtime once it finishes.
+        return {
+            "status": status,
+            "has_conflicts": False,
+            "master_json": prop.get("master_json"),
+            "message": "Merge already in progress.",
+        }
+
     if status != "Ingested":
         raise HTTPException(
             status_code=422,
             detail=f"Cannot merge property with status '{status}'. Expected 'Ingested'.",
         )
 
-    scraped = prop.get("scraped_markdown") or ""
-    ingested = prop.get("ingested_markdown") or ""
-    if not scraped and not ingested:
+    if not has_mergeable_content(prop):
         raise HTTPException(
             status_code=422,
             detail="Both scraped_markdown and ingested_markdown are empty.",
         )
 
     try:
-        result = await gemini_merge_resolve.run_merger(
-            scraped, ingested, prop.get("name") or "", prop.get("curated_photos")
-        )
+        return await run_merge_and_save(property_id, prop)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-
-    has_conflicts = result.get("_conflicts_summary", {}).get("_has_conflicts", False)
-    new_status = "Conflict_Pending" if has_conflicts else "Merged"
-    new_conflict_status = "pending" if has_conflicts else "none"
-
-    await asyncio.to_thread(
-        supabase_client.save_merge_result,
-        property_id, result, new_status, new_conflict_status,
-    )
-
-    return {
-        "status": new_status,
-        "has_conflicts": has_conflicts,
-        "master_json": result,
-    }
 
 
 @router.post("/resolve/{property_id}")

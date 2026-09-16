@@ -6,6 +6,17 @@ import 'conversation_pill.dart';
 import 'glass_panel.dart';
 import 'walkthrough_tip_panel.dart';
 
+// Matches ingest_worker.py's STALE_HEARTBEAT_S (Phase 2, 2026-09-16) — same
+// threshold the backend watchdog uses to decide a run is genuinely stuck,
+// not just slow, so the dashboard and the automatic recovery agree.
+bool _isHeartbeatStale(String? heartbeatIso) {
+  if (heartbeatIso == null) return true;
+  final ts = DateTime.tryParse(heartbeatIso);
+  if (ts == null) return true;
+  return DateTime.now().toUtc().difference(ts.toUtc()) >
+      const Duration(seconds: 90);
+}
+
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
   final void Function(String bookingId) onOpenChat;
@@ -472,6 +483,7 @@ class _PropertyCardState extends State<_PropertyCard> {
     // that isn't actually ready to view yet.
     final isProcessing = status == 'Ingesting' ||
         status == 'Training' ||
+        status == 'Merging' ||
         (status == 'Ingested' && !wasTrainedBefore);
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
@@ -482,6 +494,38 @@ class _PropertyCardState extends State<_PropertyCard> {
         (wasTrainedBefore && status == 'Ingested');
 
     if (isProcessing) {
+      // Phase 2 (2026-09-16): this card used to show a bare "Processing…"
+      // spinner with nothing clickable for however long a run actually took
+      // — a genuinely stalled run (the background worker gone quiet) left
+      // the host with zero way back in from the dashboard (confirmed live:
+      // a property stuck here had status correctly "Ingested" but merge had
+      // silently never fired, and there was no path to notice or fix it
+      // short of finding the row by hand). Reuses onOpenSettings — the same
+      // action "Settings" already uses — since that's where the real Resume
+      // action lives (property_detail_drawer -> edit_property_screen).
+      final heartbeatIso = widget.property['ingest_heartbeat_at'] as String?;
+      final stalled = _isHeartbeatStale(heartbeatIso);
+      if (stalled) {
+        return Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            borderRadius: BorderRadius.circular(6),
+            child: Row(children: [
+              Icon(Icons.refresh_rounded, size: 15, color: palette.warning),
+              const SizedBox(width: 6),
+              Text(
+                'Resume training',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: palette.warning,
+                ),
+              ),
+            ]),
+          ),
+        );
+      }
       return Row(children: [
         SizedBox(
           width: 14,
@@ -815,7 +859,7 @@ class _StatusBadge extends StatelessWidget {
       // as its own word — non-dev auto-merges straight through it, and dev
       // still has to click Merge manually, but either way "Processing" reads
       // correctly. Previously showed the raw backend enum verbatim here.
-      'Ingesting' || 'Training' || 'Ingested' => (
+      'Ingesting' || 'Training' || 'Ingested' || 'Merging' => (
           'Processing',
           p.accentContainer,
           p.accent,

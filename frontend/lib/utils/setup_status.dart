@@ -22,16 +22,37 @@ class SetupStep {
 // _wtReadyStatuses in property_detail_drawer.dart.
 const _trainedStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
 
+// Statuses where the background ingest worker is genuinely still supposed to
+// be running (Phase 2, 2026-09-16) — used both to render a plain "still
+// working" step and, when the row's heartbeat has gone stale, the "Resume
+// Training" step below instead.
+const _liveStatuses = {'Ingesting', 'Training', 'Ingested', 'Merging'};
+
 SetupStep? nextStepFor(
   String status, {
   bool hasIngestedFiles = false,
   bool hasMasterJson = false,
   bool hasQueuedFiles = false,
+  // True when ingest_heartbeat_at is older than the staleness threshold
+  // while status is still one of _liveStatuses — the background worker has
+  // gone quiet (Cloud Run instance recycled, an unrecoverable crash, etc.)
+  // and the host has a real action to take instead of an indefinite spinner.
+  bool isStalled = false,
   // Non-dev hosts must only ever see "Train"/"Retrain"/"Resolve" — never the
   // raw internal pipeline words (Ingest/Merge). Dev keeps the literal stage
   // names since those map directly to the separate manual buttons it shows.
   bool isDev = false,
 }) {
+  if (isStalled && _liveStatuses.contains(status)) {
+    return SetupStep(
+      headline: 'Taking longer than usual',
+      subtext: "Alfred's still working on this, but it's running longer "
+          'than expected. You can resume it now instead of waiting.',
+      actionLabel: 'Resume Training',
+      icon: Icons.refresh_rounded,
+      accent: (ctx) => ctx.palette.warning,
+    );
+  }
   // A file dropped into an already-trained property's "Add New Files" only
   // uploads to storage — nothing else in this switch below covers a
   // post-training status, so without this branch the file sat at "Queued"
@@ -84,6 +105,20 @@ SetupStep? nextStepFor(
         actionLabel: 'Merge Now',
         icon: Icons.merge_rounded,
         accent: (ctx) => Theme.of(ctx).colorScheme.primary,
+      );
+    // Added 2026-09-16 (Phase 2): merge now runs as a background worker step
+    // triggered automatically once ingest completes (no longer a manual
+    // client-side call), for both Dev and non-Dev — 'Merging' is the visible
+    // in-flight state for that, same "just wait" treatment as 'Ingested' got
+    // before merge became server-driven.
+    case 'Merging':
+      return SetupStep(
+        headline: 'Building the master profile…',
+        subtext: 'Merging your data into one profile. This can take a moment.',
+        actionLabel: '',
+        icon: Icons.hourglass_top_rounded,
+        accent: (ctx) => Theme.of(ctx).colorScheme.secondary,
+        isProcessing: true,
       );
     case 'Ingest_Error':
       return SetupStep(

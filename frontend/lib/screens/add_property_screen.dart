@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/aurora_background.dart';
@@ -45,11 +44,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   bool _isIngesting = false;
   bool _isMerging = false;
   StreamSubscription<List<Map<String, dynamic>>>? _propertySub;
-  // Guards the auto-merge-on-Ingested trigger below so a realtime row update
-  // (which can fire more than once) doesn't queue a second merge call.
-  bool _autoMergeTriggered = false;
   // Same guard for the dev-mode "Files Ingested" dialog.
   bool _ingestedDialogShown = false;
+  // True once ingest_heartbeat_at has gone stale while status is still one
+  // of the "live" set (Ingesting/Ingested/Merging) — the background worker
+  // (Phase 2, 2026-09-16) has genuinely gone quiet, not just slow. Drives the
+  // Resume Training affordance instead of an indefinite spinner.
+  bool _isStalled = false;
+  bool _resuming = false;
   // Signals when the whole non-dev ingest+merge chain has concluded, one way
   // or another — merge now fires from _subscribeToProperty's listener rather
   // than being awaited inline in _startIngest, so this is what lets
@@ -103,15 +105,16 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     super.dispose();
   }
 
-  // The screen previously only knew a run had finished when its own in-flight
-  // HTTP call resolved — if that connection dropped or stalled past its own
-  // read timeout, the screen was stuck showing "Ingesting" forever, every
-  // file read as failed, and (for non-dev) the auto-chained merge never even
-  // ran, even though the backend kept working and finished for real.
-  // Watching the row directly means the UI, the per-file labels, and the
-  // non-dev auto-merge chain all follow the real backend state regardless of
-  // what happens to any single request. Mirrors edit_property_screen.dart's
-  // _subscribeToProperty, confirmed live 2026-09-15 on a real retrain.
+  // Phase 2 (2026-09-16): file/scrape/merge processing all runs in background
+  // Cloud Tasks workers now (routers/ingest_worker.py), not inside the
+  // /api/ingest request — so this realtime listener on the property row is
+  // the ONLY source of truth for progress, not a fallback for a dropped SSE
+  // connection. ingest_files (jsonb, per-file state/attempts/error) replaces
+  // the old file_fingerprints-presence heuristic: failures are recorded
+  // directly by the backend now instead of being inferred from absence once
+  // the batch looked concluded. Merge also fires automatically server-side
+  // once ingest completes (routers/ingest_worker.run_merge_step) — this
+  // screen no longer calls /api/merge itself for the Train Now chain.
   void _subscribeToProperty(String propertyId) {
     _propertySub?.cancel();
     _propertySub = Supabase.instance.client
@@ -122,40 +125,21 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       if (!mounted || rows.isEmpty) return;
       final row = rows.first;
       final status = row['status'] as String?;
-      final fingerprints =
-          row['file_fingerprints'] as Map<String, dynamic>? ?? {};
+      final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
+      final heartbeat = row['ingest_heartbeat_at'] as String?;
       final ingested = row['ingested_markdown'] as String?;
       final scraped = row['scraped_markdown'] as String?;
-      final batchConcluded = status != 'Ingesting' && status != 'Training';
+      const liveStatuses = {'Ingesting', 'Ingested', 'Merging'};
+      final stillLive = liveStatuses.contains(status);
+      final stalled = stillLive && _heartbeatStale(heartbeat);
       setState(() {
         _propertyStatus = status;
         _ingestedMarkdown = ingested ?? _ingestedMarkdown;
         _masterJson =
             (row['master_json'] as Map<String, dynamic>?) ?? _masterJson;
-        // A file can still succeed on a later backend-side retry after this
-        // browser's own connection stopped watching — file_fingerprints is
-        // the authoritative record of what actually made it in. Never show a
-        // failure word for a file that isn't actually confirmed failed yet:
-        // while the batch is still running, an unresolved file just stays
-        // "Processing…"; only once the run has genuinely concluded and it's
-        // still missing do we call it failed — one, final verdict per file.
-        for (var i = 0; i < _filesToIngest.length; i++) {
-          final f = _filesToIngest[i];
-          final succeededFile = fingerprints.containsKey(f['file']);
-          if (succeededFile && f['status'] != 'done') {
-            _filesToIngest[i] = {'file': f['file']!, 'status': 'done', 'message': ''};
-          } else if (!succeededFile &&
-              batchConcluded &&
-              (f['status'] == 'queued' || f['status'] == 'processing')) {
-            _filesToIngest[i] = {
-              'file': f['file']!,
-              'status': 'error',
-              'message': "Couldn't be processed — try again",
-            };
-          }
-        }
-        if (batchConcluded) _isIngesting = false;
-        if (status != 'Ingested') _isMerging = false;
+        _isStalled = stalled;
+        _applyIngestFiles(ingestFiles);
+        if (!stillLive) _isIngesting = false;
       });
       if (_officialPropertyName == null && scraped != null) {
         final name = _parseOfficialName(scraped);
@@ -175,23 +159,90 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               _officialPropertyName ?? _nicknameController.text.trim());
         }
         if (status != 'Ingested') _ingestedDialogShown = false;
-        return;
       }
-      // Train Now (User mode): no manual "run Merge next" step — chain
-      // straight into it, same eligibility the Dev-mode Merge button uses.
-      if (status == 'Ingested' && !_autoMergeTriggered && !_isMerging) {
-        _autoMergeTriggered = true;
-        _runMerge();
-      } else if (status == 'Ingest_Error' &&
-          _flowCompleter != null &&
-          !_flowCompleter!.isCompleted) {
-        // Nothing usable came out of ingest — no merge will ever fire to
-        // complete the chain, so signal done here, or _startIngest's wait
-        // for it would just sit until the 4-minute safety timeout.
+      // The wait dialog spans the whole ingest+merge chain regardless of
+      // dev/non-dev now (both auto-chain server-side) — complete the
+      // Completer, and therefore close the dialog, once the run reaches a
+      // real terminal state OR is confirmed stalled. Stalling used to be
+      // detected by a fixed 6-minute client-side timer; this is the real
+      // backend signal instead, so it can fire earlier (a genuine hang) or
+      // never (a run that's just slow but still alive).
+      const terminalStatuses = {
+        'Merged', 'Conflict_Pending', 'Trained', 'Fully_Trained', 'Ingest_Error',
+      };
+      if (_flowCompleter != null &&
+          !_flowCompleter!.isCompleted &&
+          (terminalStatuses.contains(status) || stalled)) {
         _flowCompleter!.complete();
       }
-      if (status != 'Ingested') _autoMergeTriggered = false;
     });
+  }
+
+  // Replaces each _filesToIngest entry with its authoritative state from the
+  // backend's ingest_files map. Entries not yet present in ingest_files
+  // (e.g. still mid-upload, Train Now not clicked yet) are left untouched.
+  void _applyIngestFiles(Map<String, dynamic> ingestFiles) {
+    for (final entry in ingestFiles.entries) {
+      final name = entry.key;
+      final info = entry.value as Map<String, dynamic>? ?? {};
+      final state = info['state'] as String? ?? 'pending';
+      final attempts = info['attempts'] as int? ?? 1;
+      final error = info['error'] as String?;
+      final status = switch (state) {
+        'pending' => 'queued',
+        'running' => 'processing',
+        'done' => 'done',
+        'skipped' => 'already_in_db',
+        'failed' => 'error',
+        _ => 'queued',
+      };
+      final message = switch (state) {
+        'failed' => error ?? "Couldn't be processed — try again",
+        'running' when attempts > 1 => 'Retrying (attempt $attempts)…',
+        _ => '',
+      };
+      final idx = _filesToIngest.indexWhere((f) => f['file'] == name);
+      final row = {'file': name, 'status': status, 'message': message};
+      if (idx >= 0) {
+        _filesToIngest[idx] = row;
+      } else {
+        _filesToIngest.add(row);
+      }
+    }
+  }
+
+  bool _heartbeatStale(String? heartbeatIso) {
+    if (heartbeatIso == null) return true;
+    final ts = DateTime.tryParse(heartbeatIso);
+    if (ts == null) return true;
+    // Matches ingest_worker.py's STALE_HEARTBEAT_S — same threshold the
+    // backend watchdog uses, so the UI and the automatic recovery agree on
+    // when a run is genuinely stuck vs. just slow.
+    return DateTime.now().toUtc().difference(ts.toUtc()) >
+        const Duration(seconds: 90);
+  }
+
+  Future<void> _resumeTraining() async {
+    if (_resuming) return;
+    setState(() => _resuming = true);
+    final id = _resolvedPropertyId ?? _propertyId;
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      await ApiClient.postJson(
+        '/api/ingest/$id/resume',
+        const {},
+        bearer: session?.accessToken,
+      );
+      // No local state update here on purpose — _subscribeToProperty's
+      // listener picks up the resumed run's progress the moment the backend
+      // writes it, same as every other state change on this screen.
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
+    } catch (e) {
+      _showError('Resume failed: $e');
+    } finally {
+      if (mounted) setState(() => _resuming = false);
+    }
   }
 
   GlobalKey _keyFor(WalkthroughScreen screen) => switch (screen) {
@@ -279,6 +330,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
     setState(() {
       _isIngesting = true;
+      _isStalled = false;
       _waitDialogDismissed = false;
       _resolvedPropertyId = null;
       _ingestedMarkdown = null;
@@ -286,22 +338,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _heroImageUrl = null;
       _propertyStatus = null;
       _masterJson = null;
-      _autoMergeTriggered = false;
       _ingestedDialogShown = false;
     });
 
     // Start watching the row immediately, using the ID this client already
-    // generated (initState), rather than waiting for the backend to echo it
-    // back via the '(system)'/'property_id' SSE event below. If the
-    // connection drops or never delivers even that first event -- the exact
-    // scenario this whole realtime backstop exists for -- waiting for the
-    // echo meant the backstop never activated at all (confirmed live
-    // 2026-09-15: browser lost the stream before any event arrived, screen
-    // had zero way to learn the backend kept working). The backend resolves
-    // the canonical property_id (a rename onto an existing same-named
-    // property) before it inserts the row or emits anything, so _propertyId
-    // is already correct for the common case; _handleSseEvent below still
-    // re-subscribes if the resolved ID ever differs (the rename case).
+    // generated (initState) — the dispatcher resolves the canonical
+    // property_id (a rename onto an existing same-named property) before it
+    // even mints a run, so _propertyId is already correct for the common
+    // case; the POST response below still re-subscribes if the resolved ID
+    // ever differs (the rename case).
     _flowCompleter = Completer<void>();
     _subscribeToProperty(_propertyId);
 
@@ -321,171 +366,50 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       );
     }
 
-    final String backendUrl;
+    // Phase 2 (2026-09-16): POST /api/ingest is now a bounded, sub-second
+    // dispatcher — it mints a background run and returns immediately. All
+    // actual file/scrape/merge processing happens in Cloud Tasks workers and
+    // is observed entirely through _subscribeToProperty's realtime listener
+    // (started above), not through this request's own response. This
+    // replaces the old SSE-stream read plus its three separate client-side
+    // timeouts (20s connect / 90s stream / 6min completer) with one plain
+    // POST whose only job is confirming the dispatch itself succeeded.
     try {
-      backendUrl = ApiClient.backendUrl;
-    } on ConfigurationException catch (e) {
-      _showError(e.userMessage);
-      if (showWaitDialog && mounted && !_waitDialogDismissed) {
-        Navigator.of(context, rootNavigator: true).pop();
+      final session = Supabase.instance.client.auth.currentSession;
+      final data = await ApiClient.postJson(
+        '/api/ingest',
+        {
+          'property_id': _propertyId,
+          'property_name': _nicknameController.text.trim(),
+          'airbnb_url': url,
+        },
+        bearer: session?.accessToken,
+        timeout: const Duration(seconds: 20),
+      );
+      final resolvedId = data['property_id'] as String?;
+      if (resolvedId != null && resolvedId != _propertyId) {
+        setState(() => _resolvedPropertyId = resolvedId);
+        _subscribeToProperty(resolvedId);
       }
-      setState(() => _isIngesting = false);
-      return;
-    }
-    // Attach the auth token so backend stamps owner_id on the property row.
-    final session = Supabase.instance.client.auth.currentSession;
-    final token = session?.accessToken;
-
-    final client = http.Client();
-    try {
-      final request = http.Request('POST', Uri.parse('$backendUrl/api/ingest'))
-        ..headers['Content-Type'] = 'application/json';
-      if (token != null) request.headers['Authorization'] = 'Bearer $token';
-      request.body = jsonEncode({
-        'property_id': _propertyId,
-        'property_name': _nicknameController.text.trim(),
-        'airbnb_url': url,
-      });
-
-      // Connection-level timeout — without it, a backend that never responds
-      // at all (vs. streaming slowly) left "Ingesting…" hanging forever: only
-      // the stream-of-chunks below had a timeout, and that timer never starts
-      // until a response begins.
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 20));
-      await for (final chunk in response.stream
-          .transform(utf8.decoder)
-          .timeout(const Duration(seconds: 90),
-              onTimeout: (sink) => sink.close())) {
-        for (final line in chunk.split('\n')) {
-          if (line.startsWith('data: ')) {
-            final raw = line.substring(6).trim();
-            if (raw.isEmpty) continue;
-            try {
-              _handleSseEvent(jsonDecode(raw) as Map<String, dynamic>);
-            } catch (_) {}
-          }
-        }
-      }
-      // Any file still 'queued'/'processing' here means this browser's own
-      // connection ended before hearing back — not that the file failed. The
-      // backend keeps working regardless; _subscribeToProperty's listener
-      // (started above, as soon as the resolved property_id arrived) resolves
-      // each file to its real final state once the property row updates.
-
-      final effectiveId = _resolvedPropertyId ?? _propertyId;
-      final result = await Supabase.instance.client
-          .from('properties')
-          .select('ingested_markdown, status')
-          .eq('id', effectiveId)
-          .maybeSingle();
-
-      // Everything else (ingested markdown/status/master_json, per-file
-      // done/error labels, hero image + official name, the dev "ingested"
-      // dialog, and non-dev's auto-chained merge) is driven by
-      // _subscribeToProperty's realtime listener instead of here, so it all
-      // still happens even if this specific request never makes it back
-      // (dropped connection, this browser's own read timeout, etc). This
-      // read only decides whether to surface an immediate error toast.
-      final resultStatus = result?['status'] as String?;
-      final resultIngested = result?['ingested_markdown'] as String?;
-      final succeeded = resultIngested != null && resultIngested.isNotEmpty;
-      final stillRunning =
-          resultStatus == 'Ingesting' || resultStatus == 'Training';
-
-      if (!succeeded && !stillRunning) {
-        // Surface a visible error if the ingest didn't succeed. Picks the
-        // most recent backend error event when one was emitted (e.g.
-        // "(setup)" / "(unhandled)" / "(scrape)" / per-file errors). Falls
-        // back to a generic message if the stream closed without emitting
-        // any error.
-        final errorEvents =
-            _filesToIngest.where((s) => s['status'] == 'error').toList();
-        if (errorEvents.isNotEmpty) {
-          final last = errorEvents.last;
-          final where = last['file'] ?? '';
-          final msg = last['message'] ?? '';
-          _showError(
-            where.toString().isNotEmpty
-                ? 'Ingest failed at $where: $msg'
-                : 'Ingest failed: $msg',
-          );
-        } else {
-          _showError(
-              'Ingest could not complete. Please try again, or contact support if it persists.');
-        }
-      }
-
-      // The training-wait dialog is meant to span the whole ingest+merge
-      // chain (TrainingWaitDialog's own doc comment), not just this request's
-      // own SSE read — merge now fires from _subscribeToProperty's listener
-      // once the row shows 'Ingested', not from an inline await here, so
-      // wait for it to actually signal done before falling through to the
-      // dialog-hide in `finally`. Skip the wait if the row was never even
-      // created (this request never reached the backend at all) — nothing
-      // will ever complete it.
-      //
-      // Capped so a genuinely stuck backend can't trap the dialog open
-      // forever -- but the cap firing must never look like the dialog just
-      // vanished for no reason (confirmed live 2026-09-15: a real backend
-      // hang left the row silent for 14+ minutes with no error, and the
-      // first version of this cap closed the dialog with zero explanation,
-      // which read as exactly the kind of silent failure this whole fix
-      // exists to prevent). So: tell the host explicitly when the cap fires,
-      // same as if they'd tapped "Continue in background" themselves.
-      if (!widget.isDev && result != null) {
-        var timedOut = false;
-        await _flowCompleter?.future.timeout(
-          const Duration(minutes: 6),
-          onTimeout: () => timedOut = true,
-        );
-        if (timedOut) {
-          _showInfo(
-              "This is taking longer than usual. Alfred is still working -- check back on the dashboard for progress.");
-        }
-      }
-    } on TimeoutException {
-      _showError("Couldn't reach Alfred. Check your connection and try again.");
+      // Wait for the real end of the chain — a genuine terminal status, or a
+      // confirmed-stale heartbeat (_subscribeToProperty completes this in
+      // both cases; see its own comment). No client-side cap needed: the
+      // backend's own watchdog is what used to be a blind 6-minute timer.
+      await _flowCompleter?.future;
     } on ApiException catch (e) {
       _showError(e.userMessage);
     } catch (e) {
-      final errStr = e.toString();
-      if (errStr.contains('Failed to fetch') || errStr.contains('ClientException')) {
-        await Future.delayed(const Duration(milliseconds: 400));
-        _showError("Couldn't reach Alfred. Check your connection and try again.");
-      } else {
-        _showError('Ingest failed: $e');
-      }
+      _showError("Couldn't reach Alfred. Check your connection and try again.");
     } finally {
-      client.close();
       if (showWaitDialog && mounted && !_waitDialogDismissed) {
         Navigator.of(context, rootNavigator: true).pop();
       }
+      if (_isStalled && mounted) {
+        _showInfo(
+            "This is taking longer than usual. Alfred is still working -- you can resume it from this screen or check back on the dashboard.");
+      }
       setState(() => _isIngesting = false);
     }
-  }
-
-  void _handleSseEvent(Map<String, dynamic> event) {
-    final file = event['file'] as String? ?? '';
-    final status = event['status'] as String? ?? '';
-    final message = event['message'] as String? ?? '';
-
-    if (status == 'heartbeat' || status == 'stream_closed') return;
-
-    if (file == '(system)' && status == 'property_id') {
-      setState(() => _resolvedPropertyId = message);
-      _subscribeToProperty(message);
-      return;
-    }
-
-    setState(() {
-      final idx = _filesToIngest.indexWhere((s) => s['file'] == file);
-      if (idx >= 0) {
-        _filesToIngest[idx] = {'file': file, 'status': status, 'message': message};
-      } else {
-        _filesToIngest.add({'file': file, 'status': status, 'message': message});
-      }
-    });
   }
 
   String? _parseOfficialName(String? markdown) {
@@ -901,6 +825,91 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     );
   }
 
+  // Item 3 (recovery for a genuinely stuck backend) + item 1 (partial-failure
+  // summary), Phase 2, 2026-09-16. Two independent conditions, both resolved
+  // via the same /resume endpoint: a stalled run (heartbeat gone quiet) needs
+  // a way to un-stick it; a finished run with some files failed needs a
+  // visible summary plus a real retry, not a silent gap the host only
+  // notices later. Returns an empty box when neither applies.
+  Widget _buildRecoveryBanner(BuildContext context) {
+    final failedCount =
+        _filesToIngest.where((f) => f['status'] == 'error').length;
+    if (!_isStalled && failedCount == 0) return const SizedBox.shrink();
+
+    final palette = context.palette;
+    final String headline;
+    final String subtext;
+    if (_isStalled) {
+      headline = 'Taking longer than usual';
+      subtext = "Alfred's still working on this, but it's been quiet longer "
+          'than expected. You can resume it now instead of waiting.';
+    } else {
+      final total = _filesToIngest.length;
+      headline = failedCount == 1
+          ? "1 of $total file couldn't be processed"
+          : '$failedCount of $total files couldn\'t be processed';
+      subtext = 'Alfred retried automatically before giving up on these. '
+          'You can try again.';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: palette.warningContainer,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: palette.warning.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.warning_amber_rounded, size: 18, color: palette.warning),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(headline,
+                      style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: palette.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(subtext,
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: palette.textSecondary)),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 32,
+                    child: OutlinedButton(
+                      onPressed: _resuming ? null : _resumeTraining,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: palette.warning,
+                        side: BorderSide(color: palette.warning),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      child: _resuming
+                          ? SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: palette.warning),
+                            )
+                          : Text(_isStalled ? 'Resume Training' : 'Retry',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusBadge(String status) {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
@@ -1208,6 +1217,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                             setState(() => _filesToIngest.removeAt(index)),
                   ),
                 ],
+                _buildRecoveryBanner(context),
                 const SizedBox(height: 28),
                 _walkthroughHighlight(
                   screen: WalkthroughScreen.train,

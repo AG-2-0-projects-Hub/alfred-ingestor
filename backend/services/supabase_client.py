@@ -169,6 +169,124 @@ def update_file_fingerprints(property_id: str, fingerprints: dict) -> None:
     ).eq("id", property_id).execute()
 
 
+# ── Ingest worker (Cloud Tasks background jobs) ─────────────────────────────
+# Added 2026-09-16, Phase 2 of Train Now reliability. See
+# migrations/2026-09-16_ingest_background_worker.sql for the three RPC
+# functions wrapped below — they exist because concurrent per-file workers
+# need an atomic read-modify-write on the ingest_files jsonb column; a plain
+# postgrest UPDATE can't express that the way it can a single conditional
+# field (see claim_merge, which doesn't need an RPC for that reason).
+
+def begin_ingest_run(property_id: str, run_id: str, file_states: dict[str, str]) -> None:
+    """Mint a fresh run: status -> Ingesting, set the fencing token (any
+    in-flight task carrying the OLD run_id becomes a no-op the moment it next
+    calls an RPC), seed ingest_files with each file's starting state
+    ('pending' or 'skipped' — computed by the caller via hash_guard before
+    this call), stamp a heartbeat so it doesn't read as stale immediately."""
+    client = get_client()
+    files = {name: {"state": state} for name, state in file_states.items()}
+    client.table("properties").update({
+        "status": "Ingesting",
+        "ingest_run_id": run_id,
+        "ingest_files": files,
+        "ingest_stage": "processing",
+        "ingest_heartbeat_at": _now(),
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
+
+
+def get_ingest_run(property_id: str) -> dict | None:
+    """Everything a worker task or the /resume endpoint needs to act on a run."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select(
+            "id, owner_id, name, status, airbnb_url, ingest_run_id, ingest_files, "
+            "ingest_heartbeat_at, ingest_stage, file_fingerprints, scraped_markdown, "
+            "ingested_markdown, master_json"
+        )
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def touch_ingest_heartbeat(property_id: str, run_id: str, stage: str | None = None) -> None:
+    """Cheap liveness signal for a step that isn't a per-file claim (e.g. mid-
+    scrape, before any file work has started) — keeps the watchdog from
+    mistaking a slow-but-alive step for a dead one."""
+    client = get_client()
+    row: dict = {"ingest_heartbeat_at": _now()}
+    if stage:
+        row["ingest_stage"] = stage
+    client.table("properties").update(row) \
+        .eq("id", property_id).eq("ingest_run_id", run_id).execute()
+
+
+def claim_ingest_file(property_id: str, run_id: str, filename: str) -> bool:
+    """Atomically mark one file 'running' + bump its attempt count. False means
+    this task's run_id no longer matches the row — a zombie task from a run
+    that Resume/watchdog already superseded. The caller must then do nothing."""
+    client = get_client()
+    result = client.rpc("ingest_claim_file", {
+        "p_property_id": property_id, "p_run_id": run_id, "p_filename": filename,
+    }).execute()
+    return bool(result.data)
+
+
+def record_ingest_file_result(
+    property_id: str, run_id: str, filename: str, state: str,
+    markdown: str | None = None, fingerprint_size: int | None = None,
+    error: str | None = None,
+) -> bool:
+    """Atomically persist one file's TERMINAL outcome ('done' or 'failed') —
+    markdown concat + fingerprint write + per-file state, one statement, so
+    concurrent file workers can't lose-update each other the way the old
+    sequential-only append_ingested_markdown/update_file_fingerprints could.
+    Only call this on a terminal result; a transient failure that Cloud Tasks
+    will retry should NOT write here (see ingest_worker.py) — the next claim's
+    bumped attempt count is what the UI's "Retrying (n)" reads."""
+    if state not in ("done", "failed"):
+        raise ValueError(f"record_ingest_file_result: invalid state {state!r}")
+    client = get_client()
+    result = client.rpc("ingest_record_file_result", {
+        "p_property_id": property_id, "p_run_id": run_id, "p_filename": filename,
+        "p_state": state, "p_markdown": markdown,
+        "p_fingerprint_size": fingerprint_size, "p_error": error,
+    }).execute()
+    return bool(result.data)
+
+
+def maybe_complete_ingest(property_id: str, run_id: str) -> str | None:
+    """Atomically flip status Ingesting -> Ingested/Ingest_Error once every
+    entry in ingest_files is terminal. Every file-worker calls this after its
+    own file finishes; the DB-side WHERE-guarded UPDATE means only the one
+    that actually observes zero remaining pending/running files gets a
+    non-None return — that's the signal to enqueue the merge task, so exactly
+    one merge gets enqueued no matter how many workers finish at once."""
+    client = get_client()
+    result = client.rpc("ingest_maybe_complete", {
+        "p_property_id": property_id, "p_run_id": run_id,
+    }).execute()
+    return result.data
+
+
+def claim_merge(property_id: str) -> bool:
+    """Atomically flip Ingested -> Merging. No RPC needed — a single
+    conditional field UPDATE is already atomic under Postgres's own row lock,
+    unlike the jsonb read-modify-write functions above. A retried/duplicate
+    merge task loses this race and does nothing; True means THIS call won it."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .update({"status": "Merging", "updated_at": _now()})
+        .eq("id", property_id).eq("status", "Ingested")
+        .execute()
+    )
+    return bool(result.data)
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 
 def list_upload_files(property_id: str) -> list[dict]:
