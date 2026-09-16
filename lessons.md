@@ -3,6 +3,30 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-16 — `/usr/local/bin/flutter` symlink is dangling; the working install is the snap one
+
+**Context:** Verifying a frontend fix with `flutter analyze` (mandatory before calling frontend work
+done). Plain `flutter analyze` failed with "command not found" — `wsl bash -c` runs a non-login
+shell here with an empty `$PATH`, so nothing on PATH resolves without `bash -lc` or an absolute path.
+
+**Discovery:** Falling back to the absolute path `/usr/local/bin/flutter` also failed ("No such file
+or directory") even though `ls -la` shows the symlink exists — it points to
+`/home/santoskoy/flutter/bin/flutter`, which no longer exists on disk (stale, likely left over from
+before a Flutter SDK reinstall/upgrade). The only working install now is the **snap** one,
+`/snap/bin/flutter` (confirmed via `which flutter` under a login shell). This is the same binary the
+existing XDG workaround ([[feedback_verify_before_push]]) was already written for — that memory
+covers *why* the XDG env vars are needed for the snap build, but didn't record that the
+non-snap symlink had gone stale.
+
+**Impact:** Use `wsl bash -lc "... /snap/bin/flutter analyze ..."` (login shell, explicit snap path,
+XDG vars set) going forward for this project — not `/usr/local/bin/flutter`, and not bare `flutter`
+under a plain `bash -c`. **Global Candidate: No** — specific to this machine's current install
+state, would just go stale again differently on a future reinstall; the general "use an absolute
+path, don't trust PATH under `wsl bash -c`" principle is already covered by
+[[reference_gcloud_wsl_invocation]].
+
+---
+
 ## 2026-09-16 — The Bash tool (Git Bash) can silently lose its ability to invoke `wsl` after `cd`-ing across a Windows-path/WSL-UNC boundary
 
 **Context:** Mid-session, testing the new Phase 2 background-worker backend locally. Ran `cd /tmp`

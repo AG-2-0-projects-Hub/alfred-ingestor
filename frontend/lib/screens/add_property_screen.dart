@@ -166,6 +166,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
   void _applyPropertyRow(Map<String, dynamic> row) {
     if (!mounted) return;
+    final prevStatus = _propertyStatus;
     final status = row['status'] as String?;
     final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
     final heartbeat = row['ingest_heartbeat_at'] as String?;
@@ -202,6 +203,23 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
             _officialPropertyName ?? _nicknameController.text.trim());
       }
       if (status != 'Ingested') _ingestedDialogShown = false;
+    }
+    // Phase 2 (2026-09-16) made merge auto-fire server-side once ingest
+    // completes, so the common case never touches _runMerge()/_onResolved()
+    // below anymore -- this is now the only place a fresh merge outcome is
+    // ever observed for most runs. Both result dialogs used to fire only
+    // from those two now-mostly-bypassed call sites, so a clean no-conflict
+    // auto-merge silently never showed anything. Guarded on the actual
+    // transition (not just "status is currently X") so a later poll/realtime
+    // tick while already in the same terminal status doesn't re-show it.
+    if (prevStatus != status) {
+      if (status == 'Conflict_Pending') {
+        final report =
+            (_masterJson?['conflict_report'] as List<dynamic>?) ?? [];
+        _showConflictDialog(report.length);
+      } else {
+        _maybeShowTrainedDialog(prevStatus, status);
+      }
     }
     // The wait dialog spans the whole ingest+merge chain regardless of
     // dev/non-dev now (both auto-chain server-side) — complete the
@@ -968,7 +986,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   Widget _buildStatusBadge(String status) {
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
-      'Merged' => 'Merged',
+      // Backend keeps 'Merged' distinct from 'Trained' internally (it's the
+      // no-conflict merge path vs. the conflict-resolved path), but the host
+      // must never see the raw enum -- both mean the same thing to them.
+      'Merged' => 'Trained',
       'Conflict_Pending' => _resolutionsSubmitted
           ? 'Conflicts Resolved — Pending Update'
           : 'Conflicts Pending Review',
