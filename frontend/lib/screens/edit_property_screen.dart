@@ -58,6 +58,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   String? _propertyStatus;
   Map<String, dynamic>? _masterJson;
   StreamSubscription<List<Map<String, dynamic>>>? _propertySub;
+  // Polling backstop alongside _propertySub — see _subscribeToProperty.
+  Timer? _pollTimer;
   // Spans the whole ingest+merge chain for the wait dialog (Phase 2,
   // 2026-09-16 — merge now fires server-side automatically, so this screen
   // no longer needs its old two-separate-dialogs-per-phase handling).
@@ -91,6 +93,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   void dispose() {
     _nicknameController.dispose();
     _propertySub?.cancel();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -110,34 +113,66 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         .stream(primaryKey: ['id'])
         .eq('id', _propertyId)
         .listen((rows) {
-      if (!mounted || rows.isEmpty) return;
-      final row = rows.first;
-      final status = row['status'] as String?;
-      final raw = row['file_fingerprints'] as Map<String, dynamic>? ?? {};
-      final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
-      final heartbeat = row['ingest_heartbeat_at'] as String?;
-      const liveStatuses = {'Ingesting', 'Ingested', 'Merging'};
-      final stillLive = liveStatuses.contains(status);
-      final stalled = stillLive && _heartbeatStale(heartbeat);
-      setState(() {
-        _propertyStatus = status;
-        _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
-        _masterJson = row['master_json'] as Map<String, dynamic>?;
-        _ingestedMarkdown = row['ingested_markdown'] as String? ?? _ingestedMarkdown;
-        _isStalled = stalled;
-        _applyIngestFiles(ingestFiles);
-        if (!stillLive) _isIngesting = false;
-        if (status != 'Ingested') _isMerging = false;
-      });
-      const terminalStatuses = {
-        'Merged', 'Conflict_Pending', 'Trained', 'Fully_Trained', 'Ingest_Error',
-      };
-      if (_flowCompleter != null &&
-          !_flowCompleter!.isCompleted &&
-          (terminalStatuses.contains(status) || stalled)) {
-        _flowCompleter!.complete();
+      if (rows.isEmpty) return;
+      _applyPropertyRow(rows.first);
+    });
+  }
+
+  // Polling backstop, added 2026-09-16 after a real live run on
+  // add_property_screen.dart: a realtime subscription can silently never
+  // deliver a single event for a run's whole duration, with zero
+  // client-visible error — confirmed live (backend finished completely and
+  // correctly; the screen watching it sat frozen the entire time). Started
+  // alongside _startIngest, stopped once the run concludes — see
+  // add_property_screen.dart's _subscribeToProperty for the full writeup.
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!mounted || !_isIngesting) {
+        _pollTimer?.cancel();
+        return;
+      }
+      try {
+        final row = await Supabase.instance.client
+            .from('properties')
+            .select()
+            .eq('id', _propertyId)
+            .maybeSingle();
+        if (row != null) _applyPropertyRow(row);
+      } catch (_) {
+        // Best-effort backstop only — the next tick retries.
       }
     });
+  }
+
+  void _applyPropertyRow(Map<String, dynamic> row) {
+    if (!mounted) return;
+    final status = row['status'] as String?;
+    final raw = row['file_fingerprints'] as Map<String, dynamic>? ?? {};
+    final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
+    final heartbeat = row['ingest_heartbeat_at'] as String?;
+    const liveStatuses = {'Ingesting', 'Ingested', 'Merging'};
+    final stillLive = liveStatuses.contains(status);
+    final stalled = stillLive && _heartbeatStale(heartbeat);
+    setState(() {
+      _propertyStatus = status;
+      _existingFiles = raw.map((k, v) => MapEntry(k, v.toString()));
+      _masterJson = row['master_json'] as Map<String, dynamic>?;
+      _ingestedMarkdown = row['ingested_markdown'] as String? ?? _ingestedMarkdown;
+      _isStalled = stalled;
+      _applyIngestFiles(ingestFiles);
+      if (!stillLive) _isIngesting = false;
+      if (status != 'Ingested') _isMerging = false;
+    });
+    const terminalStatuses = {
+      'Merged', 'Conflict_Pending', 'Trained', 'Fully_Trained', 'Ingest_Error',
+    };
+    if (_flowCompleter != null &&
+        !_flowCompleter!.isCompleted &&
+        (terminalStatuses.contains(status) || stalled)) {
+      _flowCompleter!.complete();
+      _pollTimer?.cancel();
+    }
   }
 
   // Replaces each _filesToIngest entry with its authoritative state from the
@@ -317,6 +352,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     // automatically — see _subscribeToProperty) rather than each phase
     // showing/hiding its own dialog.
     _flowCompleter = Completer<void>();
+    _startPolling();
     _showTrainingWaitDialog();
 
     // Phase 2 (2026-09-16): POST /api/ingest is now a bounded, sub-second

@@ -44,6 +44,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   bool _isIngesting = false;
   bool _isMerging = false;
   StreamSubscription<List<Map<String, dynamic>>>? _propertySub;
+  // Polling backstop alongside _propertySub — see _subscribeToProperty.
+  Timer? _pollTimer;
   // Same guard for the dev-mode "Files Ingested" dialog.
   bool _ingestedDialogShown = false;
   // True once ingest_heartbeat_at has gone stale while status is still one
@@ -102,6 +104,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     _urlController.dispose();
     _scrollController.dispose();
     _propertySub?.cancel();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -122,60 +125,100 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         .stream(primaryKey: ['id'])
         .eq('id', propertyId)
         .listen((rows) {
-      if (!mounted || rows.isEmpty) return;
-      final row = rows.first;
-      final status = row['status'] as String?;
-      final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
-      final heartbeat = row['ingest_heartbeat_at'] as String?;
-      final ingested = row['ingested_markdown'] as String?;
-      final scraped = row['scraped_markdown'] as String?;
-      const liveStatuses = {'Ingesting', 'Ingested', 'Merging'};
-      final stillLive = liveStatuses.contains(status);
-      final stalled = stillLive && _heartbeatStale(heartbeat);
-      setState(() {
-        _propertyStatus = status;
-        _ingestedMarkdown = ingested ?? _ingestedMarkdown;
-        _masterJson =
-            (row['master_json'] as Map<String, dynamic>?) ?? _masterJson;
-        _isStalled = stalled;
-        _applyIngestFiles(ingestFiles);
-        if (!stillLive) _isIngesting = false;
-      });
-      if (_officialPropertyName == null && scraped != null) {
-        final name = _parseOfficialName(scraped);
-        if (name != null) {
-          setState(() => _officialPropertyName = name);
-          _getHeroImageUrl(propertyId).then((url) {
-            if (mounted) setState(() => _heroImageUrl = url);
-          });
-        }
+      if (rows.isEmpty) return;
+      _applyPropertyRow(rows.first);
+    });
+    // Polling backstop, added 2026-09-16 after a real live run: a tab that
+    // calls _subscribeToProperty for a property_id BEFORE the row exists
+    // (the common case — Train Now generates the id client-side, the row is
+    // inserted moments later by the dispatcher) can end up with a realtime
+    // channel that never delivers a single subsequent event, with zero
+    // client-visible error — confirmed live: the run finished completely
+    // and correctly server-side (all files done, merge ran, landed on
+    // Conflict_Pending) while this exact screen sat showing "Queued" and
+    // the wait dialog forever, because realtime alone was the only thing
+    // driving this screen's state. The OLD SSE-based code had a second,
+    // independent path (the stream itself) that masked this same class of
+    // gap; Phase 2 removed that redundancy along with SSE. This timer is
+    // the replacement redundancy — cheap, and it makes a dropped/never-
+    // established realtime subscription self-heal within one tick instead
+    // of stranding the tab for the rest of the run.
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!mounted || !_isIngesting) {
+        _pollTimer?.cancel();
+        return;
       }
-      if (widget.isDev) {
-        if (status == 'Ingested' &&
-            !_ingestedDialogShown &&
-            (ingested?.isNotEmpty ?? false)) {
-          _ingestedDialogShown = true;
-          _showIngestedDialog(
-              _officialPropertyName ?? _nicknameController.text.trim());
-        }
-        if (status != 'Ingested') _ingestedDialogShown = false;
-      }
-      // The wait dialog spans the whole ingest+merge chain regardless of
-      // dev/non-dev now (both auto-chain server-side) — complete the
-      // Completer, and therefore close the dialog, once the run reaches a
-      // real terminal state OR is confirmed stalled. Stalling used to be
-      // detected by a fixed 6-minute client-side timer; this is the real
-      // backend signal instead, so it can fire earlier (a genuine hang) or
-      // never (a run that's just slow but still alive).
-      const terminalStatuses = {
-        'Merged', 'Conflict_Pending', 'Trained', 'Fully_Trained', 'Ingest_Error',
-      };
-      if (_flowCompleter != null &&
-          !_flowCompleter!.isCompleted &&
-          (terminalStatuses.contains(status) || stalled)) {
-        _flowCompleter!.complete();
+      try {
+        final row = await Supabase.instance.client
+            .from('properties')
+            .select()
+            .eq('id', propertyId)
+            .maybeSingle();
+        if (row != null) _applyPropertyRow(row);
+      } catch (_) {
+        // Best-effort backstop only — realtime remains the primary path,
+        // and a single failed poll isn't worth surfacing; the next tick
+        // retries.
       }
     });
+  }
+
+  void _applyPropertyRow(Map<String, dynamic> row) {
+    if (!mounted) return;
+    final status = row['status'] as String?;
+    final ingestFiles = row['ingest_files'] as Map<String, dynamic>? ?? {};
+    final heartbeat = row['ingest_heartbeat_at'] as String?;
+    final ingested = row['ingested_markdown'] as String?;
+    final scraped = row['scraped_markdown'] as String?;
+    const liveStatuses = {'Ingesting', 'Ingested', 'Merging'};
+    final stillLive = liveStatuses.contains(status);
+    final stalled = stillLive && _heartbeatStale(heartbeat);
+    setState(() {
+      _propertyStatus = status;
+      _ingestedMarkdown = ingested ?? _ingestedMarkdown;
+      _masterJson =
+          (row['master_json'] as Map<String, dynamic>?) ?? _masterJson;
+      _isStalled = stalled;
+      _applyIngestFiles(ingestFiles);
+      if (!stillLive) _isIngesting = false;
+    });
+    if (_officialPropertyName == null && scraped != null) {
+      final name = _parseOfficialName(scraped);
+      if (name != null) {
+        final propertyId = row['id'] as String? ?? _resolvedPropertyId ?? _propertyId;
+        setState(() => _officialPropertyName = name);
+        _getHeroImageUrl(propertyId).then((url) {
+          if (mounted) setState(() => _heroImageUrl = url);
+        });
+      }
+    }
+    if (widget.isDev) {
+      if (status == 'Ingested' &&
+          !_ingestedDialogShown &&
+          (ingested?.isNotEmpty ?? false)) {
+        _ingestedDialogShown = true;
+        _showIngestedDialog(
+            _officialPropertyName ?? _nicknameController.text.trim());
+      }
+      if (status != 'Ingested') _ingestedDialogShown = false;
+    }
+    // The wait dialog spans the whole ingest+merge chain regardless of
+    // dev/non-dev now (both auto-chain server-side) — complete the
+    // Completer, and therefore close the dialog, once the run reaches a
+    // real terminal state OR is confirmed stalled. Stalling used to be
+    // detected by a fixed 6-minute client-side timer; this is the real
+    // backend signal instead, so it can fire earlier (a genuine hang) or
+    // never (a run that's just slow but still alive).
+    const terminalStatuses = {
+      'Merged', 'Conflict_Pending', 'Trained', 'Fully_Trained', 'Ingest_Error',
+    };
+    if (_flowCompleter != null &&
+        !_flowCompleter!.isCompleted &&
+        (terminalStatuses.contains(status) || stalled)) {
+      _flowCompleter!.complete();
+      _pollTimer?.cancel();
+    }
   }
 
   // Replaces each _filesToIngest entry with its authoritative state from the
