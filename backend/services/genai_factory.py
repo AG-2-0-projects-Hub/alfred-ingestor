@@ -40,7 +40,12 @@ def is_rate_limited(exc: Exception) -> bool:
 
 
 async def generate_with_retry(
-    client: genai.Client, *, label: str = "gemini", call_timeout: float | None = None, **kwargs
+    client: genai.Client,
+    *,
+    label: str = "gemini",
+    call_timeout: float | None = None,
+    attempts: int | None = None,
+    **kwargs,
 ):
     """`client.aio.models.generate_content(**kwargs)`, retrying on 429 and,
     when `call_timeout` is given, on a stalled call too.
@@ -56,6 +61,11 @@ async def generate_with_retry(
     confirmed live 2026-09-09 on two host-uploaded photos. Pass it from a
     caller that has its own outer deadline to retry into, not just wait it out.
 
+    `attempts` defaults to `_RETRY_ATTEMPTS` (4). Override it down when a
+    caller sets a generous `call_timeout` and needs the worst case
+    (attempts x call_timeout + backoff) to still fit under its own outer
+    deadline — e.g. ingest's 90s per-file watchdog (2026-09-16).
+
     Emits one WARNING per retried attempt (naming the caller via `label` and
     the back-off it is about to wait) plus an INFO whenever a call only lands
     after retrying. Without this the retry loop was silent, so a request that
@@ -68,8 +78,9 @@ async def generate_with_retry(
     the main way a cold-start burst of 429s stacked past the 45s chat ceiling;
     the jitter keeps concurrent guests from retrying in lockstep.
     """
+    max_attempts = attempts if attempts is not None else _RETRY_ATTEMPTS
     started = time.monotonic()
-    for attempt in range(_RETRY_ATTEMPTS):
+    for attempt in range(max_attempts):
         call = client.aio.models.generate_content(**kwargs)
         stalled = False
         try:
@@ -77,7 +88,7 @@ async def generate_with_retry(
             if attempt:
                 log.info(
                     "%s: succeeded on attempt %d/%d after %.1fs total",
-                    label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started,
+                    label, attempt + 1, max_attempts, time.monotonic() - started,
                 )
             return response
         except asyncio.TimeoutError as exc:
@@ -90,18 +101,18 @@ async def generate_with_retry(
             reason = f"rate-limited (429): {str(exc)[:200]}"
             last_exc = exc
 
-        if attempt == _RETRY_ATTEMPTS - 1:
+        if attempt == max_attempts - 1:
             log.warning(
                 "%s: giving up on final attempt %d/%d after %.1fs — %s",
-                label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, reason,
+                label, attempt + 1, max_attempts, time.monotonic() - started, reason,
             )
             if stalled:
-                raise TimeoutError(f"No response after {_RETRY_ATTEMPTS} attempts — try again")
+                raise TimeoutError(f"No response after {max_attempts} attempts — try again")
             raise last_exc
         backoff = 0.5 * (2 ** attempt) * random.uniform(0.85, 1.15)  # ~0.5s, 1s, 2s
         log.warning(
             "%s: retrying (attempt %d/%d) after %.1fs — %s; backing off %.1fs",
-            label, attempt + 1, _RETRY_ATTEMPTS, time.monotonic() - started, reason, backoff,
+            label, attempt + 1, max_attempts, time.monotonic() - started, reason, backoff,
         )
         await asyncio.sleep(backoff)
 
