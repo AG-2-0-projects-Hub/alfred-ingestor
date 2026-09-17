@@ -15,6 +15,7 @@ import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
+import 'training_wait_dialog.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 
@@ -1121,8 +1122,16 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           // Trained/Merged underneath, but a real unresolved issue (an
           // unreadable Airbnb link) exists -- this row must not read as
           // "all done" while that's true, same reasoning as the dashboard
-          // card's badge override.
-          _infoRow('Status', _scrapeLinkNeedsAttention ? 'Needs Attention' : status),
+          // card's badge override. _scrapeLinkRetrying takes priority since
+          // there's nothing to flag while Alfred is already re-checking.
+          _infoRow(
+            'Status',
+            _scrapeLinkRetrying
+                ? 'Processing'
+                : _scrapeLinkNeedsAttention
+                    ? 'Needs Attention'
+                    : status,
+          ),
           if (airbnbUrl.isNotEmpty)
             _airbnbUrlRow(airbnbUrl),
           if (createdAt.isNotEmpty)
@@ -1304,6 +1313,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     return retry != null && retry['attempts'] != null && retry['next_retry_at'] == null;
   }
 
+  bool get _scrapeLinkRetrying =>
+      (_property['scrape_retry'] as Map<String, dynamic>?)?['retrying'] == true;
+
   // 'unreachable' (the fetch itself failed) vs 'low_completeness' (the page
   // loaded but was empty/wrong) read differently to a host — the former
   // reads as "this link is broken", the latter as "loaded but incomplete".
@@ -1316,6 +1328,23 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   }
 
   Future<void> _retryScrapeLink(String newUrl) async {
+    // Founder feedback, live-tested: submitting a fix previously gave zero
+    // feedback beyond a brief message, then the screen just sat there with
+    // no signal anything was happening. Same wait-dialog experience as the
+    // original Train Now flow, reused rather than duplicated — this only
+    // spans the dispatch call itself (a sub-second POST); the dashboard's
+    // "Processing" badge (driven by scrape_retry.retrying) carries the
+    // actual in-flight signal after this closes.
+    if (mounted) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const TrainingWaitDialog(
+          headline: 'Alfred is retraining with your new link',
+          subtext: 'This only takes a moment. Check the dashboard for the result.',
+        ),
+      );
+    }
     final session = Supabase.instance.client.auth.currentSession;
     try {
       await ApiClient.postJson(
@@ -1324,17 +1353,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         bearer: session?.accessToken,
       );
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Retrying — Alfred will check the listing again shortly.")),
         );
       }
     } on ApiException catch (e) {
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.userMessage)));
       }
     } catch (e) {
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not retry. Please try again.')),
         );
@@ -1443,7 +1475,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                     size: 12,
                     color: Theme.of(context).colorScheme.primary,
                   ),
-                  if (_scrapeLinkNeedsAttention) ...[
+                  if (_scrapeLinkNeedsAttention && !_scrapeLinkRetrying) ...[
                     const SizedBox(width: 8),
                     Tooltip(
                       message: '$_scrapeLinkIssueMessage Tap to fix it.',

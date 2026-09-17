@@ -31,8 +31,17 @@ const List<String> trainingWaitFacts = [
 /// not this dialog is still open to see it.
 class TrainingWaitDialog extends StatefulWidget {
   final VoidCallback? onRunInBackground;
+  // Lets other flows (e.g. the scrape-link retry) reuse this same wait
+  // experience with their own copy instead of duplicating the widget.
+  final String headline;
+  final String subtext;
 
-  const TrainingWaitDialog({super.key, this.onRunInBackground});
+  const TrainingWaitDialog({
+    super.key,
+    this.onRunInBackground,
+    this.headline = 'Alfred is learning your property',
+    this.subtext = 'This can take a couple of minutes for larger properties.',
+  });
 
   @override
   State<TrainingWaitDialog> createState() => _TrainingWaitDialogState();
@@ -87,7 +96,7 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Alfred is learning your property',
+                widget.headline,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 17,
@@ -97,7 +106,7 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
               ),
               const SizedBox(height: 4),
               Text(
-                'This can take a couple of minutes for larger properties.',
+                widget.subtext,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(fontSize: 12, color: palette.textMuted),
               ),

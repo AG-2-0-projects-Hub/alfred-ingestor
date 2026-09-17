@@ -244,7 +244,7 @@ def get_ingest_run(property_id: str) -> dict | None:
         .select(
             "id, owner_id, name, status, airbnb_url, ingest_run_id, ingest_files, "
             "ingest_heartbeat_at, ingest_stage, file_fingerprints, scraped_markdown, "
-            "ingested_markdown, master_json"
+            "ingested_markdown, master_json, scrape_retry"
         )
         .eq("id", property_id)
         .maybe_single()

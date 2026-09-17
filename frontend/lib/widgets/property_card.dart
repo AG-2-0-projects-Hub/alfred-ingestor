@@ -293,6 +293,11 @@ class _PropertyCardState extends State<_PropertyCard> {
     final scrapeRetry = widget.property['scrape_retry'] as Map<String, dynamic>?;
     final scrapeLinkNeedsAttention =
         scrapeRetry != null && scrapeRetry['attempts'] != null && scrapeRetry['next_retry_at'] == null;
+    // True for the few seconds/minutes between the host submitting a fix and
+    // it resolving -- without this, nothing on the card signals the retry is
+    // actually in flight (founder confirmed live: badge stayed "Ready" the
+    // whole time with no feedback).
+    final scrapeLinkRetrying = scrapeRetry?['retrying'] == true;
     final name = widget.property['name'] as String? ?? 'Unnamed';
     final propertyId = widget.property['id'] as String;
     // Airbnb CDN thumbnail from Master JSON — used as a fallback when the
@@ -397,6 +402,7 @@ class _PropertyCardState extends State<_PropertyCard> {
                                 child: _StatusBadge(
                                   status: status,
                                   needsAttention: scrapeLinkNeedsAttention,
+                                  retrying: scrapeLinkRetrying,
                                 ),
                               ),
                               if (widget.activeChatCount > 0)
@@ -861,7 +867,12 @@ class _StatusBadge extends StatelessWidget {
   // status below: the property may genuinely be Trained/Merged, but "Ready"
   // would mislead the host into thinking nothing needs their attention.
   final bool needsAttention;
-  const _StatusBadge({required this.status, this.needsAttention = false});
+  // True while a host-triggered link retry is actually in flight — takes
+  // priority over needsAttention (there's nothing to flag while Alfred is
+  // already re-checking) and reuses the exact same "Processing" treatment
+  // Ingesting/Merging already use, rather than inventing a new visual state.
+  final bool retrying;
+  const _StatusBadge({required this.status, this.needsAttention = false, this.retrying = false});
 
   @override
   Widget build(BuildContext context) {
@@ -869,7 +880,9 @@ class _StatusBadge extends StatelessWidget {
     // Status → (label, bg, fg, glowAlpha). glowAlpha == 0 means no glow.
     // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
     // bioluminescent mint; emergencies/errors get warm red glow.
-    final (label, bg, fg, glowAlpha) = needsAttention
+    final (label, bg, fg, glowAlpha) = retrying
+        ? ('Processing', p.accentContainer, p.accent, 0.25)
+        : needsAttention
         ? ('Needs Attention', p.warningContainer, p.warning, 0.35)
         : switch (status) {
       // 'Ingested' is a mid-chain state, not a milestone the host should see

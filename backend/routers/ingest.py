@@ -227,6 +227,17 @@ async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Reque
     if not run_id:
         raise HTTPException(status_code=409, detail="No ingest run on record for this property.")
 
+    # Status doesn't change during a scrape-only retry (unlike the resume_run
+    # branch above, which already flips to "Ingesting" and gets the existing
+    # Processing badge for free) -- without this, nothing signals the retry
+    # is in flight and the host sees no feedback between submitting and it
+    # resolving. Cleared by run_retry_scrape on its way out either way
+    # (success clears scrape_retry entirely, failure re-sets the give-up
+    # shape without this key).
+    current_retry = dict(prop.get("scrape_retry") or {})
+    current_retry["retrying"] = True
+    await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, current_retry)
+
     ingest_worker.dispatch_task(
         "/api/ingest/worker/retry-scrape",
         {"property_id": property_id, "run_id": run_id},

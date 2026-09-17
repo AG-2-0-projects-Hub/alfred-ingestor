@@ -119,7 +119,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       final data = await Supabase.instance.client
           .from('properties')
           .select(
-              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status, ingest_heartbeat_at')
+              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status, ingest_heartbeat_at, scrape_retry')
           .isFilter('deleted_at', null)
           .order('created_at', ascending: false);
 
