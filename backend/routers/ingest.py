@@ -190,14 +190,25 @@ class RetryScrapeRequest(BaseModel):
     airbnb_url: str = ""
 
 
+_ALREADY_TRAINED = {"Merged", "Trained", "Fully_Trained", "Conflict_Pending"}
+
+
 @router.post("/ingest/{property_id}/retry-scrape")
 async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Request):
     """Host-triggered manual retry after the scrape-quality failsafe gave up
-    (see migrations/2026-09-17_scrape_retry.sql) — the property trained fine
-    on the uploaded files, but Alfred couldn't read the Airbnb listing after
-    two tries. Optionally updates the URL first (the host fixing a stale/
-    private/removed link), then dispatches the same worker the background
-    retry uses, immediately instead of on a delay."""
+    (see migrations/2026-09-17_scrape_retry.sql), covering two distinct
+    situations that share the same give-up UI (warning icon + fix-link
+    dialog on the property's Overview tab):
+      - reason='low_completeness': the property already trained fine on the
+        uploaded files, Alfred just couldn't read the listing. A scrape-only
+        retry is enough — dispatches the same worker the background retry
+        uses, immediately instead of on a delay.
+      - reason='unreachable' (or any other non-terminal status): the scrape
+        failed hard and ingest never ran at all (REQ-28 aborts on that).
+        A scrape-only retry isn't enough here — routes through the existing
+        resume_run recovery instead, which reprocesses files + merge too.
+    Optionally updates the URL first (the host fixing a stale/private/
+    removed link)."""
     await _require_owner_id(request)
 
     prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
@@ -207,6 +218,10 @@ async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Reque
     new_url = req.airbnb_url.strip()
     if new_url:
         await asyncio.to_thread(supabase_client.update_airbnb_url, property_id, new_url)
+
+    if prop.get("status") not in _ALREADY_TRAINED:
+        await ingest_worker.resume_run(property_id)
+        return {"status": "retrying", "mode": "resume"}
 
     run_id = prop.get("ingest_run_id")
     if not run_id:

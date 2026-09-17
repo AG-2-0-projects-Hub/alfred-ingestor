@@ -1306,6 +1306,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Airbnb URL *',
                           hintText: 'https://www.airbnb.com/rooms/...',
+                          helperText: 'Make sure this is a real, working Airbnb listing link.',
+                          helperMaxLines: 2,
                           border: OutlineInputBorder(),
                         ),
                         keyboardType: TextInputType.url,

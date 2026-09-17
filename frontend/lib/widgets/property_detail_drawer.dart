@@ -1299,6 +1299,17 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     return retry != null && retry['attempts'] != null && retry['next_retry_at'] == null;
   }
 
+  // 'unreachable' (the fetch itself failed) vs 'low_completeness' (the page
+  // loaded but was empty/wrong) read differently to a host — the former
+  // reads as "this link is broken", the latter as "loaded but incomplete".
+  String get _scrapeLinkIssueMessage {
+    final retry = _property['scrape_retry'] as Map<String, dynamic>?;
+    final reason = retry?['reason'] as String?;
+    return reason == 'unreachable'
+        ? "This link doesn't seem to work. Please verify the new link loads before pasting it below to retry."
+        : "Alfred couldn't fully read this listing after a couple of tries. Please verify the new link loads before pasting it below to retry.";
+  }
+
   Future<void> _retryScrapeLink(String newUrl) async {
     final session = Supabase.instance.client.auth.currentSession;
     try {
@@ -1349,9 +1360,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               Text('Current link: $currentUrl',
                   style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 8),
-              const Text(
-                'Tip: open the link yourself first to confirm it loads before pasting it here.',
-                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+              Text(
+                _scrapeLinkIssueMessage,
+                style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1426,7 +1437,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   if (_scrapeLinkNeedsAttention) ...[
                     const SizedBox(width: 8),
                     Tooltip(
-                      message: "Alfred couldn't confirm this listing after a couple of tries — tap to check the link and retry.",
+                      message: '$_scrapeLinkIssueMessage Tap to fix it.',
                       child: InkWell(
                         onTap: () => _showFixLinkDialog(url),
                         child: Icon(

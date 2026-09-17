@@ -218,6 +218,15 @@ async def run_start(property_id: str, run_id: str) -> None:
         except Exception as exc:
             print(f"ingest_worker.run_start: scrape failed for {property_id}: {exc}")
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
+            # Same give-up shape the Low-completeness path below uses (reason
+            # differs) -- reuses the existing warning-icon/fix-link UI on the
+            # property's Overview tab instead of leaving this a dead end with
+            # no host-facing recovery beyond a blind "Retry" of the same URL.
+            await asyncio.to_thread(
+                supabase_client.set_scrape_retry,
+                property_id,
+                {"attempts": 2, "next_retry_at": None, "reason": "unreachable"},
+            )
             return  # REQ-28: abort — do not process files
         scraped_markdown = scrape_data.get("data", "")
 
@@ -241,6 +250,13 @@ async def run_start(property_id: str, run_id: str) -> None:
                 name=task_queue.sanitize_task_name(f"ing-scraperetry-{property_id}-{run_id}"),
                 delay_seconds=_SCRAPE_RETRY_DELAY_S,
             )
+        else:
+            # Clears any stale give-up/pending state from an earlier failed
+            # run on this same property (e.g. the host fixed an unreachable
+            # or low-completeness link and resume_run/retry-scrape re-ran
+            # this from scratch) -- without this a clean success here would
+            # leave the warning icon showing on the Overview tab forever.
+            await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, {})
 
     await asyncio.to_thread(supabase_client.touch_ingest_heartbeat, property_id, run_id, "processing")
 
