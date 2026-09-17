@@ -1117,7 +1117,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             ),
           ),
           const SizedBox(height: 16),
-          _infoRow('Status', status),
+          // Scrape-quality failsafe (2026-09-17): status may genuinely be
+          // Trained/Merged underneath, but a real unresolved issue (an
+          // unreadable Airbnb link) exists -- this row must not read as
+          // "all done" while that's true, same reasoning as the dashboard
+          // card's badge override.
+          _infoRow('Status', _scrapeLinkNeedsAttention ? 'Needs Attention' : status),
           if (airbnbUrl.isNotEmpty)
             _airbnbUrlRow(airbnbUrl),
           if (createdAt.isNotEmpty)
@@ -1306,8 +1311,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final retry = _property['scrape_retry'] as Map<String, dynamic>?;
     final reason = retry?['reason'] as String?;
     return reason == 'unreachable'
-        ? "This link doesn't seem to work. Please verify the new link loads before pasting it below to retry."
-        : "Alfred couldn't fully read this listing after a couple of tries. Please verify the new link loads before pasting it below to retry.";
+        ? "This link doesn't seem to work. Verify it loads correctly in your browser, then paste it below."
+        : "Alfred couldn't fully read this listing after a couple of tries. Verify it loads correctly in your browser, then paste it below.";
   }
 
   Future<void> _retryScrapeLink(String newUrl) async {
@@ -1352,7 +1357,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Check Airbnb listing link'),
+          title: const Text('Submit a working Airbnb link'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1382,9 +1387,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: controller.text.trim().isEmpty
-                  ? null
-                  : () => Navigator.of(ctx).pop(controller.text.trim()),
+              // Same format guard as the Add Property URL field — without it,
+              // gibberish input still enabled Retry and burned a real
+              // resume/re-scrape cycle on something that was never going to
+              // work (confirmed live: typing "eewfaf" enabled Retry).
+              onPressed: controller.text.trim().toLowerCase().contains('airbnb.')
+                  ? () => Navigator.of(ctx).pop(controller.text.trim())
+                  : null,
               child: const Text('Retry'),
             ),
           ],
@@ -1442,7 +1451,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                         onTap: () => _showFixLinkDialog(url),
                         child: Icon(
                           Icons.error_outline_rounded,
-                          size: 15,
+                          size: 24,
                           color: context.palette.warning,
                         ),
                       ),

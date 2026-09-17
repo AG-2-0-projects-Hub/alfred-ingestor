@@ -286,6 +286,13 @@ class _PropertyCardState extends State<_PropertyCard> {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final status = widget.property['status'] as String? ?? '';
+    // Scrape-quality failsafe (2026-09-17): status may genuinely be
+    // Trained/Merged underneath, but a real unresolved issue (an unreadable
+    // Airbnb link) exists -- the badge must not read "Ready" while that's
+    // true, or the host has no reason to ever open the fix-link dialog.
+    final scrapeRetry = widget.property['scrape_retry'] as Map<String, dynamic>?;
+    final scrapeLinkNeedsAttention =
+        scrapeRetry != null && scrapeRetry['attempts'] != null && scrapeRetry['next_retry_at'] == null;
     final name = widget.property['name'] as String? ?? 'Unnamed';
     final propertyId = widget.property['id'] as String;
     // Airbnb CDN thumbnail from Master JSON — used as a fallback when the
@@ -387,7 +394,10 @@ class _PropertyCardState extends State<_PropertyCard> {
                               Positioned(
                                 top: 10,
                                 right: 10,
-                                child: _StatusBadge(status: status),
+                                child: _StatusBadge(
+                                  status: status,
+                                  needsAttention: scrapeLinkNeedsAttention,
+                                ),
                               ),
                               if (widget.activeChatCount > 0)
                                 Positioned(
@@ -846,7 +856,12 @@ class _TinyIconBtn extends StatelessWidget {
 // ── Status badge ──────────────────────────────────────────────────────────
 class _StatusBadge extends StatelessWidget {
   final String status;
-  const _StatusBadge({required this.status});
+  // Scrape-quality failsafe (2026-09-17) — true once the give-up state is
+  // active (see migrations/2026-09-17_scrape_retry.sql). Overrides every
+  // status below: the property may genuinely be Trained/Merged, but "Ready"
+  // would mislead the host into thinking nothing needs their attention.
+  final bool needsAttention;
+  const _StatusBadge({required this.status, this.needsAttention = false});
 
   @override
   Widget build(BuildContext context) {
@@ -854,7 +869,9 @@ class _StatusBadge extends StatelessWidget {
     // Status → (label, bg, fg, glowAlpha). glowAlpha == 0 means no glow.
     // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
     // bioluminescent mint; emergencies/errors get warm red glow.
-    final (label, bg, fg, glowAlpha) = switch (status) {
+    final (label, bg, fg, glowAlpha) = needsAttention
+        ? ('Needs Attention', p.warningContainer, p.warning, 0.35)
+        : switch (status) {
       // 'Ingested' is a mid-chain state, not a milestone the host should see
       // as its own word — non-dev auto-merges straight through it, and dev
       // still has to click Merge manually, but either way "Processing" reads

@@ -1051,6 +1051,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   }
 
   Widget _buildStatusBadge(String status) {
+    // Scrape-quality failsafe (2026-09-17): overrides everything below when
+    // active. Alfred may genuinely be Trained/Merged underneath, but a real
+    // unresolved issue (an unreadable Airbnb link) exists — the badge must
+    // not read as "all done" while that's true, or the host has no reason to
+    // ever open the fix-link dialog.
+    if (_scrapeLinkNeedsAttention) {
+      return _statusBadgeRow('Needs Attention', context.palette.warningContainer, context.palette.warning);
+    }
     final label = switch (status) {
       'Ingested' => 'Ingested — Ready to Merge',
       // Backend keeps 'Merged' distinct from 'Trained' internally (it's the
@@ -1081,6 +1089,13 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         (context.palette.dangerContainer, context.palette.danger),
       _ => (context.palette.surfaceAlt, context.palette.textSecondary),
     };
+    return _statusBadgeRow(label, bg, fg);
+  }
+
+  bool get _scrapeLinkNeedsAttention =>
+      _scrapeRetry['attempts'] != null && _scrapeRetry['next_retry_at'] == null;
+
+  Widget _statusBadgeRow(String label, Color bg, Color fg) {
     return Row(
       children: [
         Text('Status:',
@@ -1307,6 +1322,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                           labelText: 'Airbnb URL *',
                           hintText: 'https://www.airbnb.com/rooms/...',
                           helperText: 'Make sure this is a real, working Airbnb listing link.',
+                          helperStyle: TextStyle(fontStyle: FontStyle.italic),
                           helperMaxLines: 2,
                           border: OutlineInputBorder(),
                         ),
