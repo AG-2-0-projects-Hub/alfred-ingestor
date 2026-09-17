@@ -125,6 +125,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
     _loadHeroUrl();
     _subscribeProperty();
+    // Guaranteed fresh fetch on open, independent of realtime's connection
+    // timing -- see the comment on _refreshProperty itself for why this was
+    // added 2026-09-17.
+    _refreshProperty();
     _maybeStartWalkthrough();
     _loadReplayPending();
   }
@@ -397,14 +401,32 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     if (mounted) setState(() => _heroLoaded = true);
   }
 
+  // Was dead code (flutter analyze: unused_element) until 2026-09-17 --
+  // wired into initState below. Root cause of a real live-found bug: this
+  // drawer only ever trusted whatever snapshot the dashboard happened to
+  // hand it in widget.property, self-correcting only once _subscribeProperty
+  // below's realtime channel delivered its first event -- a real timing gap
+  // (dashboard's own async refresh after returning from EditPropertyScreen,
+  // or the realtime channel's own connection handshake) that let a
+  // freshly-reopened drawer briefly show a fully-resolved property as still
+  // "Conflict_Pending" with the stale Resolve banner/tab still active.
   Future<void> _refreshProperty() async {
     try {
       final data = await Supabase.instance.client
           .from('properties')
-          .select('id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
+          .select(
+              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status, scrape_retry')
           .eq('id', _property['id'] as String)
           .single();
-      if (mounted) setState(() => _property = data);
+      if (mounted) {
+        setState(() {
+          // Merge, not replace -- this select is a narrow column list, and
+          // _property holds other fields (ingest_heartbeat_at, curated_photos,
+          // etc.) that a wholesale replace would silently drop.
+          _property = <String, dynamic>{..._property, ...data};
+          _syncTabControllerForConflict(_property['Conflict_status'] == 'pending');
+        });
+      }
       widget.onRefresh();
     } catch (_) {}
   }
