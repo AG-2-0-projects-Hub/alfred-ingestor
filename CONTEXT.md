@@ -11,11 +11,10 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 TOP: Train Now's post-completion UI signal is still unreliable on staging (wait dialog often
-  never closes even though the backend finished correctly) — self-contained handoff doc, read
-  first, at `_Context/HANDOFF_training-complete-signal_2026-09-16.md`. Phase 2's own 9-item plan
-  (`_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`) is otherwise DONE (Phases
-  0-3 shipped + live-verified except this one gap).
+- 🟡 Scrape-quality failsafe (2026-09-17: pending/give-up caveat text, dashboard "fully trained"
+  toast, warning-icon fix-link dialog, and the unreachable-link extension) is implemented and
+  code-verified but NOT live-tested — forcing a real Firecrawl cache flake or a genuinely dead link
+  on demand isn't practical. See `_tests/scenarios.md` pending-intake rows dated 2026-09-17.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
@@ -24,7 +23,54 @@ session-continuity state only: in-flight investigations and handoffs that don't 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-16 (**Continued Train Now reliability work: live-tested Phase 2 for
+**Last Session:** 2026-09-16→17 (**Closed out the Train Now completion-signal handoff from the prior
+session — root-caused it to a genuine dialog/Navigator race (not the async architecture) and
+live-verified the fix. Then, testing that fix, the founder hit a completely different real bug
+(wrong property name, missing hero image, no conflicts detected) that was live-investigated down to
+Firecrawl serving a stale, incomplete cached scrape of the Airbnb page — fixed at the source, plus a
+failsafe layer built collaboratively with the founder for any other cause of the same signal.** —
+`staging`, 4 commits (`9b9dbeb`..`31c65e4`); Cloud Run `alfred-scraper-staging` + `alfred-backend-
+staging` redeployed (backend twice); migration `2026-09-17_scrape_retry.sql` applied to staging.
+> **✅ Training-wait dialog bug, root-caused and fixed for real.** Two prior sessions' fixes (polling
+> backstop, wiring dialogs to the auto-merge path) both turned out correct but insufficient — the
+> actual bug: `_applyPropertyRow` pushed the conflict/trained popup as fire-and-forget `showDialog`,
+> which stacks the route synchronously; `_startIngest`'s `finally` block then did a blind
+> `Navigator.pop()` once the flow completer resolved, which always removes whatever is topmost — the
+> just-pushed result dialog, not the wait dialog underneath it. Fixed by deferring the result dialog
+> until the wait dialog is actually popped. Also fixed in the same pass: Train Now staying clickable
+> after training finished, and a raw `"Status: Ingesting"` leak to non-dev users. Live-verified by
+> the founder on staging: "finally!"
+> **✅ Real bug found retesting the fix, root-caused with hard evidence, not guessed.** The retest
+> landed on a wrong placeholder property name, no hero image, and zero conflicts detected — on the
+> SAME Airbnb URL that had worked cleanly ~10 times before. Reproduced the exact failure with a
+> standalone Firecrawl call bypassing all app code: the default (cached) fetch returned only Airbnb
+> nav chrome; the identical call with `maxAge:0` returned the full real listing. Firecrawl had cached
+> an incomplete pre-hydration snapshot and kept serving it indefinitely — confirmed on a second,
+> unrelated property (Bungalow) hitting the identical symptom the same day, ruling out a one-URL
+> fluke. Fixed at the source (`scraper/main.py` now always passes `max_age=0`, plus one inline retry
+> on Low completeness) and **live-verified twice**: a direct call to the redeployed scraper on the
+> previously-failing URL came back High completeness with real photos; a full real Train Now retest
+> landed `Trained` with the correct name and 7 real photos merged into `master_json.media.gallery`.
+> **✅ Built a failsafe layer collaboratively, then extended it after founder pushback.** For any
+> *other* cause of a degraded scrape (not just the cache bug above): one inline retry, then a
+> 5-minute background re-scrape + re-merge (new `scrape_retry` field, never Conflict_Pending to avoid
+> clobbering a host's in-progress conflict review), a dashboard "fully trained" toast on success (no
+> push channel exists — reuses the existing realtime pattern), and a give-up state after 2 attempts
+> that surfaces a warning icon + fix-and-retry dialog on the previously-display-only Airbnb URL row.
+> The founder then asked what happens with a link that's unreachable from the start — that case
+> wasn't covered (it hit the older `Ingest_Error` status with no fix-UI at all) — extended the same
+> give-up machinery to cover it too, routing through the existing `resume_run` recovery instead of a
+> scrape-only retry since ingest never actually ran. Caught and fixed one real bug in review before
+> shipping: a successful retry never cleared a stale give-up flag from an earlier failed run.
+> **Process note:** the founder explicitly corrected a premature "here's the fix" without live
+> verification mid-session — response was to actually reproduce bugs with real evidence (direct
+> Firecrawl calls, DB queries, live redeploys + re-tests) before claiming anything fixed, and to keep
+> proposing/confirming wording and UX details (dialog pre-fill, retry-button gating, exact copy)
+> rather than shipping a first draft. Also revised the wait-dialog fix wording three rounds on the
+> exact caveat text shown to hosts, each round concrete/specific about what was wrong.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-16 (**Continued Train Now reliability work: live-tested Phase 2 for
 real, found and fixed 2 live bugs (a Gemini audio-transcription hallucination on silent input, and
 a realtime-subscription gap that left the wait dialog stuck), designed a real QA-curation
 protocol together, rewrote `CLAUDE.md`/`QUICKSTART.md` to be fully current — then found the

@@ -285,3 +285,61 @@ corrected to `https://gcxxilzfhwlsjcvtpsvj.supabase.co`.
 **Fix:** Built `_scripts/gen_mcp_json.py` to compile `.mcp.json`/`settings.json` per project from the same `_mcp_profiles/` source data `ag-switch` already used. the-ingestor now has its own gitignored `.mcp.json` (context7, github, supabase-the-ingestor, flutter, firecrawl-mcp) and committed `.claude/settings.json` with tool-level deny rules. Also closed a real gap this surfaced: `supabase-the-ingestor` had no tool-level gating at all in `global.json` — added the same branch/edge-function deny list `supabase-reflip` already had, since this project's backend is Cloud Run, not Supabase Edge Functions. Confirmed (not a bug): `supabase-scraper` intentionally shares the same project-ref/DB as `supabase-the-ingestor`. Gemini's `mcp_config.json` wiped clean at user's request — no longer feeds Claude Code either way.
 **Impact:** the-ingestor's MCP/tool scoping is now fully automatic and isolated — opening this project folder always loads exactly its own MCPs, no manual switch step, no risk of another project's session leaving stale state behind.
 **Global Candidate:** Yes — already promoted, see `_global_lessons/lessons.md` 2026-08-24 entry.
+
+---
+
+## 2026-09-17 — `showDialog` + a later `Navigator.pop()` race: the pop always removes whatever's topmost, not "the dialog you meant"
+
+**Context:** Train Now's wait dialog kept getting stuck open even after two prior sessions' fixes
+(a polling backstop, wiring the result dialogs to the real completion path) — both were correct but
+insufficient, and the bug survived a hard refresh and a fresh incognito window.
+
+**Discovery:** `_applyPropertyRow` fired the conflict/trained result dialog as fire-and-forget
+`showDialog(...)` the moment a terminal status arrived. `showDialog` pushes its `DialogRoute`
+synchronously as part of the call itself (before hitting its own internal `await`), even though the
+function wrapping it is `async`. Separately, `_startIngest`'s `finally` block did
+`Navigator.of(context, rootNavigator: true).pop()` once a `Completer` resolved — but `Completer`
+resolution only *schedules* the awaiting code as a microtask, which runs strictly after the current
+synchronous call stack finishes. Net effect: the result dialog's route was already on top of the
+stack by the time the "close the wait dialog" pop ran, so the pop silently removed the *new* dialog
+instead, leaving the original one stuck forever with zero visible error. Reproduced and confirmed via
+manual code trace (Navigator push/pop ordering + Dart's microtask semantics), not guessed.
+
+**Fix:** Never let two independent code paths both target "whatever is on top of the Navigator" when
+their timing isn't strictly ordered. Deferred the result dialog into a stored callback, fired only
+*after* the wait-dialog pop actually runs — so there's never a moment where the wrong route is on top.
+
+**Impact:** `frontend/lib/screens/add_property_screen.dart`, live-verified by the founder on staging.
+**Global Candidate:** Yes — any Flutter code that does `showDialog(...)` (not awaited) alongside a
+separately-triggered blind `Navigator.pop()` elsewhere has this exact race, regardless of project.
+
+---
+
+## 2026-09-17 — Firecrawl can cache an incomplete pre-hydration snapshot of a page and keep serving it indefinitely; `max_age=0` is the fix for anything JS-rendered and important
+
+**Context:** A property retrained with a wrong placeholder name, no hero image, and zero conflicts
+detected — on an Airbnb URL that had scraped cleanly ~10 times before. Founder asked directly
+whether this could be from a same-session frontend fix; needed to rule that out with real evidence,
+not just reasoning about the diff.
+
+**Discovery:** Reproduced the exact failure with a standalone `firecrawl_scrape` MCP call, zero app
+code involved: the default call (implicit cache) returned only page nav chrome ("Skip to content",
+"Anywhere", "Add guests") — real HTML, just a pre-JS-hydration snapshot. The identical call with
+`maxAge: 0` returned the full real listing (photos, reviews, host bio). `cacheState: "hit"` in the
+first response's metadata was the tell. The scraper's own code (`fc.scrape(url, formats=["markdown"])`)
+never set a cache-freshness param, so it had always been willing to accept a cached page — this bug
+has existed since day one, it just took an unlucky crawl (one that happened to catch the page mid-
+render) getting cached to actually manifest. Confirmed on a second, unrelated listing hitting the
+identical symptom same-day, ruling out a one-URL fluke.
+
+**Fix:** `scraper/main.py` now always passes `max_age=0` on every Firecrawl `scrape()` call, plus one
+inline retry if Gemini's own structuring still flags `data_completeness: Low`. A failsafe layer on
+top (5-min background re-scrape+re-merge, give-up state with host-facing messaging) covers any other
+cause of the same signal — but the cache bug itself needed the direct fix, not just a retry loop,
+since a naive retry without `max_age=0` would just hit the same stale cache again.
+
+**Impact:** `scraper/main.py`, live-verified twice (direct scraper call + full Train Now retest).
+**Global Candidate:** Yes — any project using Firecrawl (or likely similar scrape-as-a-service tools)
+against JS-heavy/frequently-changing pages should default to a fresh fetch, not the library default,
+whenever data freshness/completeness actually matters — the cache reuse window is undocumented and
+varies by domain per Firecrawl's own tool description.
