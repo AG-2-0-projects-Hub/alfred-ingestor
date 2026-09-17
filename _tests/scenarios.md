@@ -396,6 +396,16 @@ unautomated ones manually before a `staging → main` merge.
 - **last_tested:** 2026-09-14 (automated Playwright, session-injected auth — PASS, live on staging: exact title/subtitle/icon/empty-state copy confirmed via screenshot, zero page errors)
 - **status:** passing
 
+### B15. Drawer does not reappear after Edit Property back-arrow
+- **id:** property-drawer-nav-01
+- **touches:** `frontend/lib/widgets/property_detail_drawer.dart`
+- **layer:** 2
+- **setup:** a property in `Conflict_Pending` status (isolated QA fixture, DB write — not a real merge)
+- **action:** open the drawer from the card's "Resolve conflicts" banner, click the drawer's "Resolve" action (goes to Edit Property), then click the in-app back arrow
+- **host_expected:** lands on the plain dashboard — no drawer/side-panel visible. Regression guard: the drawer's three "go to Edit Property" buttons did `Navigator.pop()` then `Navigator.push()` as two separate steps; live-found (2026-09-17) that the drawer's own route could survive underneath Edit Property and reappear, stale, on back-navigation, while the dashboard behind it was already correctly updated. Fixed with a single atomic `Navigator.pushReplacement()` at all three call sites.
+- **last_tested:** 2026-09-17 (automated Playwright — PASS, live on staging against the isolated QA property)
+- **status:** passing
+
 ---
 
 ## C. Chat lifecycle (host + guest perspectives)

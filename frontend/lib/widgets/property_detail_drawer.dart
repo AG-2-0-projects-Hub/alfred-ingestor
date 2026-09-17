@@ -1116,8 +1116,11 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               onAction: () {
                 final nav = Navigator.of(context);
                 final refresh = widget.onRefresh;
-                nav.pop();
-                nav.push(MaterialPageRoute(
+                // pushReplacement, not pop()+push(): closing the drawer's own
+                // dialog route and opening EditPropertyScreen must be one
+                // atomic swap, or the drawer route can survive underneath and
+                // reappear (stale) when EditPropertyScreen is later popped.
+                nav.pushReplacement(MaterialPageRoute(
                   builder: (_) => EditPropertyScreen(
                     property: _property,
                     isDev: widget.isDev,
@@ -1218,8 +1221,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               onPressed: () {
                 final nav = Navigator.of(context);
                 final refresh = widget.onRefresh;
-                nav.pop();
-                nav.push(MaterialPageRoute(
+                // pushReplacement, not pop()+push() -- see the matching
+                // comment on the SetupStatusBanner action above.
+                nav.pushReplacement(MaterialPageRoute(
                   builder: (_) => EditPropertyScreen(
                     property: _property,
                     isDev: widget.isDev,
@@ -1550,8 +1554,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             onPressed: () {
               final nav = Navigator.of(context);
               final refresh = widget.onRefresh;
-              nav.pop();
-              nav.push(MaterialPageRoute(
+              // pushReplacement, not pop()+push() -- see the matching
+              // comment on the SetupStatusBanner action in _buildOverviewTab.
+              nav.pushReplacement(MaterialPageRoute(
                 builder: (_) => EditPropertyScreen(
                   property: _property,
                   isDev: widget.isDev,

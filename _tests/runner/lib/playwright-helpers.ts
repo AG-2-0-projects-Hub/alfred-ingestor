@@ -28,6 +28,13 @@ export const DASHBOARD = {
   addPropertyY:  0.58,
 } as const;
 
+// Standard Material AppBar back-arrow (top-left leading icon) -- same
+// position on every screen that uses a plain AppBar(leading: BackButton()).
+export const APPBAR = {
+  backX: 0.0194,
+  backY: 0.0311,
+} as const;
+
 // Add-property screen — single-column centred form (maxWidth 760px)
 export const ADD_PROPERTY = {
   x:          0.5,

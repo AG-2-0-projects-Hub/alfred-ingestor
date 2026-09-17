@@ -10,6 +10,7 @@ import { runA3 } from './scenarios/a3.ts';
 import { runA4 } from './scenarios/a4.ts';
 import { runB6 } from './scenarios/b6.ts';
 import { runB7 } from './scenarios/b7.ts';
+import { runB15 } from './scenarios/b15.ts';
 
 export type ScenarioResult = {
   id: string;
@@ -88,6 +89,7 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     // Layer 2 — ingest error paths
     runB6,
     runB7,
+    runB15,
   ];
 }
 
