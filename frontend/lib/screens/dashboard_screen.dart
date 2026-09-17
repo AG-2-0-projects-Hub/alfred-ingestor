@@ -9,6 +9,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
+import '../widgets/training_result_dialogs.dart';
 import '../widgets/property_expanded_view.dart';
 import '../widgets/archived_chats_dialog.dart';
 import '../widgets/chat_live_dialog.dart';
@@ -64,6 +65,22 @@ class _DashboardScreenState extends State<DashboardScreen>
   // fires here rather than on whichever screen happened to be open 5 minutes
   // ago when the retry was scheduled.
   final Map<String, bool> _prevScrapeRetryPending = {};
+  // Centralized "training just finished" popup (2026-09-17) — see
+  // _checkTrainingCompletion below. This dashboard is the one screen
+  // guaranteed to stay alive for as long as the app is open, even while the
+  // property drawer or EditPropertyScreen is open on top of it (both are
+  // pushed as additional routes, never replacing this one) — so it's the
+  // single owner of this popup for every flow that can finish a training/
+  // merge cycle, not just first-time property creation (which already
+  // handles its own popup locally, since it can't be navigated away from
+  // mid-run). Tracks each property's last-known status so a transition can
+  // be detected regardless of which action caused it.
+  final Map<String, String?> _prevPropertyStatus = {};
+  static const _dialogBSuccessStatuses = {'Trained', 'Merged', 'Fully_Trained'};
+  // Serializes result popups so two properties finishing close together show
+  // one at a time instead of stacking two barrierDismissible:false dialogs.
+  final List<Future<void> Function()> _resultDialogQueue = [];
+  bool _resultDialogShowing = false;
   String _notifPermission = 'default';
   bool _showNotifChip = true;
 
@@ -288,7 +305,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       final id = row['id'] as String?;
       if (id == null) continue;
       final retry = row['scrape_retry'] as Map<String, dynamic>?;
-      final current = retry != null && retry['attempts'] != null && retry['next_retry_at'] != null;
+      // retrying==true added 2026-09-17 -- without it, a host-submitted link
+      // fix (which sets retrying on top of a prior give-up shape, so
+      // next_retry_at stays null) was never seen as "pending" here, so its
+      // clean-success case could never fire this toast either — only the
+      // fully-automatic background retry (which always sets a real future
+      // next_retry_at) could.
+      final current = retry != null &&
+          (retry['retrying'] == true ||
+              (retry['attempts'] != null && retry['next_retry_at'] != null));
       final hadPrev = _prevScrapeRetryPending.containsKey(id);
       final previous = _prevScrapeRetryPending[id] ?? false;
       _prevScrapeRetryPending[id] = current;
@@ -303,6 +328,85 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  // Centralized "training just finished" popup (2026-09-17) — see the field
+  // comment on _prevPropertyStatus for why this lives here and not on the
+  // screen that triggered the run. Fires the same "fully trained" or
+  // "conflicts to resolve" popup add_property_screen.dart already shows for
+  // first-time training, for every OTHER flow that can also finish one:
+  // retraining with new files, resolving conflicts, fixing a broken Airbnb
+  // link, or resuming a stalled property.
+  void _checkTrainingCompletion(List<Map<String, dynamic>> rows) {
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      if (id == null) continue;
+      final status = row['status'] as String?;
+      final hadPrev = _prevPropertyStatus.containsKey(id);
+      final previous = _prevPropertyStatus[id];
+      _prevPropertyStatus[id] = status;
+
+      // Seeding pass -- this property's first row since the dashboard
+      // subscribed (e.g. app just opened, or navigated back after this
+      // property was created elsewhere). Don't treat "already Trained
+      // before we ever looked" as "just finished".
+      if (!hadPrev) continue;
+      if (previous == status) continue; // no transition
+
+      final name = row['name'] as String? ?? '';
+      if (status == 'Conflict_Pending') {
+        _enqueueResultDialog(() => showConflictResultDialog(
+              context,
+              _conflictCountFor(row),
+              onResolve: () => _openDrawer(row),
+            ));
+      } else if (_dialogBSuccessStatuses.contains(status) &&
+          !_dialogBSuccessStatuses.contains(previous)) {
+        // Treats Trained/Merged/Fully_Trained as one "already done" group --
+        // otherwise a background auto-remerge of an already-Trained property
+        // (safe per _SAFE_TO_AUTO_REMERGE on the backend) would flip it to
+        // "Merged" and re-fire this popup for a background action the host
+        // never asked for.
+        _enqueueResultDialog(() => showTrainedResultDialog(
+              context,
+              name,
+              caveat: _scrapeRetryCaveatFor(row['scrape_retry']),
+            ));
+      }
+    }
+  }
+
+  int _conflictCountFor(Map<String, dynamic> row) {
+    final report = (row['master_json']
+        as Map<String, dynamic>?)?['conflict_report'] as List<dynamic>?;
+    return report?.length ?? 0;
+  }
+
+  // Mirrors add_property_screen.dart's _scrapeRetryCaveat exactly, so the
+  // caveat text is identical no matter which screen shows this popup.
+  String? _scrapeRetryCaveatFor(dynamic retryField) {
+    final retry = retryField as Map<String, dynamic>?;
+    if (retry == null || retry['attempts'] == null) return null;
+    final gaveUp = retry['next_retry_at'] == null;
+    return gaveUp
+        ? "Alfred couldn't fully read your Airbnb listing after a couple of tries — the link may be outdated or private. Check it from the property's Overview tab."
+        : "Alfred couldn't fully read your Airbnb listing this time. We'll try again automatically shortly.";
+  }
+
+  void _enqueueResultDialog(Future<void> Function() show) {
+    _resultDialogQueue.add(show);
+    _drainResultDialogQueue();
+  }
+
+  Future<void> _drainResultDialogQueue() async {
+    if (_resultDialogShowing) return;
+    _resultDialogShowing = true;
+    while (_resultDialogQueue.isNotEmpty) {
+      if (!mounted) break;
+      final show = _resultDialogQueue.removeAt(0);
+      await show();
+    }
+    _resultDialogShowing = false;
+  }
+
   void _subscribeRealtime() {
     final ids = _properties.map((p) => p['id'] as String).toList();
     if (ids.isEmpty) return;
@@ -314,6 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         .listen((rows) {
           if (!mounted) return;
           _checkScrapeRetryResolved(rows);
+          _checkTrainingCompletion(rows);
           final byId = {for (final p in rows) p['id'] as String: p};
           final updated = _properties
               .map((p) {

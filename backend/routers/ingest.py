@@ -141,7 +141,7 @@ async def ingest(req: IngestRequest, request: Request):
     run_id = str(uuid.uuid4())
     await asyncio.to_thread(supabase_client.begin_ingest_run, property_id, run_id, {})
     ingest_worker.dispatch_task(
-        "/api/ingest/worker/start",
+        "/api/ingest-worker/start",
         {"property_id": property_id, "run_id": run_id},
         name=task_queue.sanitize_task_name(f"ing-start-{property_id}-{run_id}"),
     )
@@ -174,7 +174,7 @@ async def resume_ingest(property_id: str, request: Request):
 
     if status == "Ingested" and not prop.get("master_json"):
         ingest_worker.dispatch_task(
-            "/api/ingest/worker/merge-step",
+            "/api/ingest-worker/merge-step",
             {"property_id": property_id},
             name=task_queue.sanitize_task_name(
                 f"ing-merge-{property_id}-{prop.get('ingest_run_id') or 'resume'}"
@@ -239,7 +239,7 @@ async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Reque
     await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, current_retry)
 
     ingest_worker.dispatch_task(
-        "/api/ingest/worker/retry-scrape",
+        "/api/ingest-worker/retry-scrape",
         {"property_id": property_id, "run_id": run_id},
         name=task_queue.sanitize_task_name(f"ing-scraperetry-manual-{property_id}-{uuid.uuid4()}"),
     )

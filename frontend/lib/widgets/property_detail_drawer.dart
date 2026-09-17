@@ -1327,6 +1327,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         : "Alfred couldn't fully read this listing after a couple of tries. Verify it loads correctly in your browser, then paste it below.";
   }
 
+  // The specific route the wait dialog below is pushed as -- closed via
+  // popTrainingWaitDialog (removeRoute), not a blind Navigator.pop(), since
+  // dashboard_screen.dart can independently push its own result dialog on
+  // the same root navigator; a blind pop() here could close that one instead
+  // and strand this one on screen.
+  Route<void>? _retryWaitDialogRoute;
+
   Future<void> _retryScrapeLink(String newUrl) async {
     // Founder feedback, live-tested: submitting a fix previously gave zero
     // feedback beyond a brief message, then the screen just sat there with
@@ -1336,9 +1343,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     // "Processing" badge (driven by scrape_retry.retrying) carries the
     // actual in-flight signal after this closes.
     if (mounted) {
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
+      _retryWaitDialogRoute = pushTrainingWaitDialog(
+        context,
         builder: (_) => const TrainingWaitDialog(
           headline: 'Alfred is retraining with your new link',
           subtext: 'This only takes a moment. Check the dashboard for the result.',
@@ -1353,20 +1359,30 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         bearer: session?.accessToken,
       );
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
+        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Retrying — Alfred will check the listing again shortly.")),
         );
+        // Founder feedback, 2026-09-17: return straight to the dashboard on
+        // a successful dispatch instead of leaving the host sitting on this
+        // drawer — the dashboard's own card/badge and (once training
+        // actually finishes) the trained/conflict popup are what carry the
+        // rest of the signal from here. Only on success: an error leaves the
+        // host in place so they can see the message and retry.
+        Navigator.of(context, rootNavigator: true).pop();
       }
     } on ApiException catch (e) {
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
+        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.userMessage)));
       }
     } catch (e) {
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
+        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not retry. Please try again.')),
         );

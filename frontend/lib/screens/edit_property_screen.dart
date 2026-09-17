@@ -50,6 +50,12 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   // outer finally runs). Without this, _hideTrainingWaitDialog's pop() could
   // fire with no dialog left to pop, closing the whole screen instead.
   bool _waitDialogOpen = false;
+  // The specific route this screen's own wait dialog was pushed as — closed
+  // via popTrainingWaitDialog (removeRoute), not a blind Navigator.pop(),
+  // since dashboard_screen.dart can now independently push its own result
+  // dialog on the same root navigator while this dialog is still open; a
+  // blind pop() here could close that one instead and strand this one.
+  Route<void>? _waitDialogRoute;
   // Single list, tracked from upload through ingestion completion — status
   // updates in place (queued → processing → done/error) rather than a second
   // "Files Ingested" list appearing below a frozen first one.
@@ -128,7 +134,9 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
   void _startPolling() {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
-      if (!mounted || !_isIngesting) {
+      // _resuming added 2026-09-17 -- _resumeTraining reuses this same
+      // backstop now that it also waits on _flowCompleter.
+      if (!mounted || !(_isIngesting || _resuming)) {
         _pollTimer?.cancel();
         return;
       }
@@ -217,9 +225,22 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         const Duration(seconds: 90);
   }
 
+  // Founder feedback, 2026-09-17: this used to fire silently -- tap it and
+  // nothing visible happened while the backend actually re-dispatched work
+  // in the background, indistinguishable from the button doing nothing at
+  // all. Now mirrors _startIngest's wait-dialog + completer pattern so
+  // there's always a visible "Alfred is working on it" signal, closing only
+  // once the real outcome (a genuine terminal status, or a fresh stall) is
+  // known -- never immediately after the dispatch call returns.
   Future<void> _resumeTraining() async {
     if (_resuming) return;
-    setState(() => _resuming = true);
+    setState(() {
+      _resuming = true;
+      _isStalled = false;
+    });
+    _flowCompleter = Completer<void>();
+    _startPolling();
+    _showTrainingWaitDialog();
     try {
       final session = Supabase.instance.client.auth.currentSession;
       await ApiClient.postJson(
@@ -227,11 +248,17 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
         const {},
         bearer: session?.accessToken,
       );
+      await _flowCompleter?.future;
     } on ApiException catch (e) {
       _showError(e.userMessage, onRetry: e.retry ? _resumeTraining : null);
     } catch (e) {
       _showError('Resume failed: $e', onRetry: _resumeTraining);
     } finally {
+      _hideTrainingWaitDialog();
+      if (_isStalled && mounted) {
+        _showInfo(
+            "This is taking longer than usual. Alfred is still working -- you can resume it below or check back later.");
+      }
       if (mounted) setState(() => _resuming = false);
     }
   }
@@ -320,9 +347,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     if (widget.isDev || !mounted) return;
     _waitDialogDismissed = false;
     _waitDialogOpen = true;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
+    _waitDialogRoute = pushTrainingWaitDialog(
+      context,
       barrierColor: AppTheme.trainingBarrierColor,
       builder: (_) => TrainingWaitDialog(
         onRunInBackground: () => _waitDialogDismissed = true,
@@ -335,7 +361,8 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       return;
     }
     _waitDialogOpen = false;
-    Navigator.of(context, rootNavigator: true).pop();
+    popTrainingWaitDialog(context, _waitDialogRoute);
+    _waitDialogRoute = null;
   }
 
   Future<void> _startIngest() async {

@@ -130,11 +130,11 @@ def dispatch_task(path: str, payload: dict, *, name: str | None = None, delay_se
         task_queue.enqueue(path, payload, name=name, delay_seconds=delay_seconds, queue=_queue_name())
         return
     handlers = {
-        "/api/ingest/worker/start": run_start,
-        "/api/ingest/worker/process-file": run_process_file,
-        "/api/ingest/worker/merge-step": run_merge_step,
-        "/api/ingest/worker/watchdog": run_watchdog,
-        "/api/ingest/worker/retry-scrape": run_retry_scrape,
+        "/api/ingest-worker/start": run_start,
+        "/api/ingest-worker/process-file": run_process_file,
+        "/api/ingest-worker/merge-step": run_merge_step,
+        "/api/ingest-worker/watchdog": run_watchdog,
+        "/api/ingest-worker/retry-scrape": run_retry_scrape,
     }
     task = asyncio.create_task(handlers[path](**payload))
     _local_dev_tasks.add(task)
@@ -245,7 +245,7 @@ async def run_start(property_id: str, run_id: str) -> None:
                 {"attempts": 1, "next_retry_at": next_retry_at, "reason": "low_completeness"},
             )
             dispatch_task(
-                "/api/ingest/worker/retry-scrape",
+                "/api/ingest-worker/retry-scrape",
                 {"property_id": property_id, "run_id": run_id},
                 name=task_queue.sanitize_task_name(f"ing-scraperetry-{property_id}-{run_id}"),
                 delay_seconds=_SCRAPE_RETRY_DELAY_S,
@@ -289,13 +289,13 @@ async def run_start(property_id: str, run_id: str) -> None:
 
     for name in to_process:
         dispatch_task(
-            "/api/ingest/worker/process-file",
+            "/api/ingest-worker/process-file",
             {"property_id": property_id, "run_id": run_id, "filename": name},
             name=task_queue.sanitize_task_name(f"ing-{property_id}-{run_id}-{name}"),
         )
 
     dispatch_task(
-        "/api/ingest/worker/watchdog",
+        "/api/ingest-worker/watchdog",
         {"property_id": property_id, "run_id": run_id, "seq": 0},
         name=task_queue.sanitize_task_name(f"ing-wd-{property_id}-{run_id}-0"),
         delay_seconds=_WATCHDOG_INTERVAL_S,
@@ -355,7 +355,7 @@ async def _finish_ordispatch_task_merge(property_id: str, run_id: str) -> None:
     new_status = await asyncio.to_thread(supabase_client.maybe_complete_ingest, property_id, run_id)
     if new_status == "Ingested":
         dispatch_task(
-            "/api/ingest/worker/merge-step",
+            "/api/ingest-worker/merge-step",
             {"property_id": property_id},
             name=task_queue.sanitize_task_name(f"ing-merge-{property_id}-{run_id}"),
         )
@@ -422,8 +422,15 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
         )
         return
 
-    await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, {})
-
+    # Scrape succeeded. Do NOT clear the "Processing" signal yet if a
+    # re-merge is about to run below -- a conflict the re-merge discovers
+    # must land atomically with the signal going away, not after a window
+    # where the property already looks "Ready" (2026-09-17 sequencing bug:
+    # this used to clear scrape_retry here unconditionally, then re-merge --
+    # a conflict produced by that re-merge only surfaced after the Processing
+    # badge had already disappeared, a confusing "Ready" then "Conflicts need
+    # review" flash, confirmed live).
+    #
     # Only Merged/Trained are safe to silently re-merge — see
     # _SAFE_TO_AUTO_REMERGE's comment above. Conflict_Pending means the host
     # may already be reviewing (or have submitted) conflict resolutions;
@@ -431,11 +438,20 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
     # retrain, but re-merging now could clobber real work.
     fresh = await asyncio.to_thread(supabase_client.get_property_for_merge, property_id)
     if fresh is None or fresh.get("status") not in _SAFE_TO_AUTO_REMERGE:
+        # Nothing further will change status on this run -- safe to resolve now.
+        await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, {})
         return
     try:
         await run_merge_and_save(property_id, {**fresh, "name": prop.get("name") or ""})
     except ValueError as exc:
         print(f"ingest_worker.run_retry_scrape: re-merge failed for {property_id}: {exc}")
+    finally:
+        # Whatever happened above (clean merge, a new conflict, or a
+        # swallowed re-merge failure that left status unchanged) is already
+        # committed to status/master_json by now -- only clear here, so the
+        # dashboard never observes "resolved" before the real outcome is
+        # visible on the same row.
+        await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, {})
 
 
 # ── watchdog: self-reschedules; auto-recovers a stale run, bounded ─────────
@@ -450,7 +466,7 @@ async def run_watchdog(property_id: str, run_id: str, seq: int = 0) -> None:
 
     if not _is_stale(prop.get("ingest_heartbeat_at")):
         dispatch_task(
-            "/api/ingest/worker/watchdog",
+            "/api/ingest-worker/watchdog",
             {"property_id": property_id, "run_id": run_id, "seq": seq},
             name=task_queue.sanitize_task_name(f"ing-wd-{property_id}-{run_id}-{seq + 1}"),
             delay_seconds=_WATCHDOG_INTERVAL_S,
@@ -475,7 +491,7 @@ async def resume_run(property_id: str) -> None:
     await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
     await asyncio.to_thread(supabase_client.begin_ingest_run, property_id, new_run_id, {})
     dispatch_task(
-        "/api/ingest/worker/start",
+        "/api/ingest-worker/start",
         {"property_id": property_id, "run_id": new_run_id},
         name=task_queue.sanitize_task_name(f"ing-start-{property_id}-{new_run_id}"),
     )
@@ -483,14 +499,14 @@ async def resume_run(property_id: str) -> None:
 
 # ── HTTP wrappers — Cloud Tasks calls these ─────────────────────────────────
 
-@router.post("/ingest/worker/start")
+@router.post("/ingest-worker/start")
 async def worker_start(body: _StartBody, request: Request):
     _check_secret(request)
     await run_start(body.property_id, body.run_id)
     return {"ok": True}
 
 
-@router.post("/ingest/worker/process-file")
+@router.post("/ingest-worker/process-file")
 async def worker_process_file(body: _FileBody, request: Request):
     _check_secret(request)
     retry_count = int(request.headers.get("X-CloudTasks-TaskRetryCount", "0") or "0")
@@ -500,21 +516,21 @@ async def worker_process_file(body: _FileBody, request: Request):
     return {"ok": True}
 
 
-@router.post("/ingest/worker/merge-step")
+@router.post("/ingest-worker/merge-step")
 async def worker_merge_step(body: _MergeBody, request: Request):
     _check_secret(request)
     await run_merge_step(body.property_id)
     return {"ok": True}
 
 
-@router.post("/ingest/worker/watchdog")
+@router.post("/ingest-worker/watchdog")
 async def worker_watchdog(body: _WatchdogBody, request: Request):
     _check_secret(request)
     await run_watchdog(body.property_id, body.run_id, body.seq)
     return {"ok": True}
 
 
-@router.post("/ingest/worker/retry-scrape")
+@router.post("/ingest-worker/retry-scrape")
 async def worker_retry_scrape(body: _RetryScrapeBody, request: Request):
     _check_secret(request)
     await run_retry_scrape(body.property_id, body.run_id)

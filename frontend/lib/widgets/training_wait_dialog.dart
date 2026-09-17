@@ -171,3 +171,36 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
     );
   }
 }
+
+// Route-based push/pop for this dialog (2026-09-17) -- a plain
+// Navigator.pop() closes whatever route is currently on top, which stopped
+// being safe once dashboard_screen.dart can independently push its own
+// result dialog (training_result_dialogs.dart) on the same root navigator
+// while this one is still open: a screen closing "its" wait dialog via a
+// blind pop() could actually close the dashboard's dialog instead, stranding
+// this one on screen. removeRoute closes exactly the route it was given,
+// regardless of what else was pushed on top of it in the meantime.
+Route<void> pushTrainingWaitDialog(
+  BuildContext context, {
+  required WidgetBuilder builder,
+  bool barrierDismissible = false,
+  Color? barrierColor,
+}) {
+  final route = DialogRoute<void>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierColor: barrierColor,
+    builder: builder,
+  );
+  Navigator.of(context, rootNavigator: true).push(route);
+  return route;
+}
+
+// No-op if [route] is null or already gone (e.g. dismissed via "Continue in
+// background", or already closed by an earlier call) -- safe to call
+// unconditionally in a finally/catch block.
+void popTrainingWaitDialog(BuildContext context, Route<void>? route) {
+  if (route != null && route.isActive) {
+    Navigator.of(context, rootNavigator: true).removeRoute(route);
+  }
+}
