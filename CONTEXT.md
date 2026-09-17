@@ -11,10 +11,14 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🟡 Scrape-quality failsafe (2026-09-17: pending/give-up caveat text, dashboard "fully trained"
-  toast, warning-icon fix-link dialog, and the unreachable-link extension) is implemented and
-  code-verified but NOT live-tested — forcing a real Firecrawl cache flake or a genuinely dead link
-  on demand isn't practical. See `_tests/scenarios.md` pending-intake rows dated 2026-09-17.
+- 🔴 TOP: the scrape-retry give-up/retrying UI has 3 confirmed real bugs from live testing (dashboard
+  card flashing Ready/Needs-Attention, the retry wait-popup never appearing, `scrape_retry.retrying`
+  stuck `true` 6+ min with no resolution on property `44bc37b6-ce29-4588-895c-dcb3cb881ea8`, kept
+  live on staging as the repro). None root-caused yet — self-contained handoff, read first, at
+  `_Context/HANDOFF_scrape-retry-ui-state-bugs_2026-09-17.md`. Do a full FMEA across
+  state × surface × data-delivery-path before patching again, per the founder's explicit direction.
+  The underlying root-cause fix (`scraper/main.py`'s `max_age=0`) is solid and live-verified twice —
+  only this UI layer on top is broken.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
@@ -23,7 +27,35 @@ session-continuity state only: in-flight investigations and handoffs that don't 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-16→17 (**Closed out the Train Now completion-signal handoff from the prior
+**Last Session:** 2026-09-17 (**Founder hit a rough stretch of live-testing today — real bugs found
+and fixed, but process discipline (FMEA before code, verifying before claiming "fixed") eroded
+enough across sessions that the founder had to chase it prompt by prompt. Rather than another
+promise, built a mechanically-enforced protocol: `FIX_VERIFY_PROTOCOL.md`. Scoped narrowly —
+this session did NOT touch the scrape-retry bug investigation itself (a separate, possibly
+parallel-session-owned uncommitted change to `property_detail_drawer.dart` was found in the
+working tree, explicitly left alone — not this session's work, not verified, not committed).**
+— `staging`, docs/tooling only, no deploy.
+> **✅ Root-caused why the standing QA rules keep eroding, not just apologized for it.** They live
+> as prose in `CLAUDE.md` — nothing structurally stops a session from skipping FMEA or claiming a
+> fix works without proof, unlike e.g. `git push`, which is blocked by an actual tool-permission
+> rule. Long context makes the erosion worse (already known from a prior session), but the root
+> issue is that "remember to do it" was never backed by a mechanical check.
+> **✅ Built `FIX_VERIFY_PROTOCOL.md`** — opt-in (founder says "fix X with FIX_VERIFY_PROTOCOL.md"),
+> not a silent default. Sequence: real FMEA (state × surface × data-delivery-path, including
+> whether automated coverage exists) → propose → explicit approval → implement → verify for real
+> (frontend changes require *creating* a real Playwright scenario under `_tests/runner/scenarios/`,
+> not just reusing one if it happens to exist; backend-only changes need a real DB/API/log check) →
+> commit message must carry a `Protocol: FIX_VERIFY` + `Verified:` trailer → only then say "fixed."
+> **✅ Made it mechanically enforced, not just documented** — new `_scripts/wrap_up.sh` check: any
+> commit carrying the `Protocol: FIX_VERIFY` trailer fails the session if it lacks a real
+> `Verified:` line, or if it touched `frontend/lib/**` without a matching new/changed scenario file
+> in the same commit. Live-tested all 3 reachable states via throwaway empty commits (no-opt-in
+> PASS, missing-`Verified:` FAIL correctly naming the commit, present-`Verified:` PASS), cleanly
+> reverted — the 4th branch (frontend-without-scenario) verified by code inspection only, reusing
+> the same `git diff-tree` pattern the existing QA gate already uses successfully.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-16→17 (**Closed out the Train Now completion-signal handoff from the prior
 session — root-caused it to a genuine dialog/Navigator race (not the async architecture) and
 live-verified the fix. Then, testing that fix, the founder hit a completely different real bug
 (wrong property name, missing hero image, no conflicts detected) that was live-investigated down to

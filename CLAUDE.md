@@ -274,6 +274,16 @@ only, no cron yet. The real `staging → main` merge gate is the smaller Critica
 `_tests/scenarios.md` (picked by blast radius, not by what's already automated) — see the
 Promotion rule below.
 
+### FIX-VERIFY Protocol (opt-in, mechanically enforced)
+When the founder says "fix X with FIX_VERIFY_PROTOCOL.md" (or names the protocol), follow
+`FIX_VERIFY_PROTOCOL.md` at the project root exactly — real FMEA, explicit approval, implement,
+then verify for real (create a Playwright scenario for any frontend change, not just reuse one
+if it exists; a real check for backend-only changes), with a mandatory `Protocol: FIX_VERIFY` +
+`Verified:` trailer in the commit message. `_scripts/wrap_up.sh` fails the session if that
+trailer is present without a real `Verified:` line or, for a frontend change, a matching new/
+changed file under `_tests/runner/scenarios/`. Optional, not the silent default for every fix —
+read the file itself for the full sequence and why it exists.
+
 ### Promotion rule — run before every `staging → main` merge
 0. Before starting: proactively ask whether to run the Critical Path check first — don't wait to
    be asked for it by name.

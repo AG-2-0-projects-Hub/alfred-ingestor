@@ -3,6 +3,37 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-17 — Prose-only process rules erode under long context; the fix is a mechanical check, not a better-worded reminder
+
+**Context:** The founder had been live-testing scrape-retry UI fixes since 8am and hit a genuinely
+exhausting loop — real bugs found and fixed, but the founder had to explicitly re-demand FMEA and
+verification on nearly every prompt, despite both already being standing rules in `CLAUDE.md`'s
+QA Workflow (written and refined across the last several sessions). The founder's own framing:
+"I like protocols, they're deterministic, not subject to interpretation."
+
+**Discovery:** A rule written as prose in `CLAUDE.md` — no matter how clearly worded, no matter
+how many times it's reinforced across sessions — has no structural enforcement. `git push` is
+reliably followed because an actual tool-permission boundary blocks it without approval;
+"state a failure-mode table before code" and "verify before saying fixed" have no equivalent —
+they depend entirely on a session remembering to apply them on every single turn, and that erodes
+under long context (already independently observed and logged in an earlier session) or under
+task pressure. Writing the rule better, or repeating it, does not fix this class of failure —
+only a mechanical check does.
+
+**Impact:** Built `FIX_VERIFY_PROTOCOL.md` (project root) + a new `_scripts/wrap_up.sh` gate: any
+commit that opts in with a `Protocol: FIX_VERIFY` trailer must also carry a real `Verified:` line,
+and if it touched `frontend/lib/**` it must include a new/changed Playwright scenario in the same
+commit — the script fails the session otherwise. This converts "did I actually verify this" from
+a private mental step a session can skip into a structural artifact that can't be skipped
+silently. Deliberately made opt-in (invoked by name, "fix X with FIX_VERIFY_PROTOCOL.md") rather
+than a blanket default, since the founder explicitly wants a fast path for smaller fixes too.
+**Global Candidate: Yes** — the underlying principle (prose-only rules erode; convert anything
+that matters into a mechanically-checked artifact, e.g. a commit trailer + a script gate, not
+just a better-worded rule) applies to any project's process discipline, not just this one's QA
+workflow. Worth a root `CLAUDE.md` operational-principle entry if this pattern proves out here.
+
+---
+
 ## 2026-09-16 — Supabase `edge_logs` (via `query_logs`) is the fastest way to prove/disprove a "did the request even happen" theory
 
 **Context:** A real live bug (Train Now's wait dialog not closing on its own even though the

@@ -74,4 +74,39 @@ index_rows=$(grep -c '^| [0-9]' lessons_index.md 2>/dev/null || echo 0)
 [ "$lessons_entries" -eq "$index_rows" ]
 check $? "lessons_index.md row count ($index_rows) matches lessons.md entry count ($lessons_entries)"
 
+# FIX-VERIFY protocol gate (added 2026-09-17, see FIX_VERIFY_PROTOCOL.md): opt-in, not applied
+# to every commit -- only commits that carry a "Protocol: FIX_VERIFY" trailer are checked. Each
+# one must state how it was verified, and if it touched frontend/lib/ it must also have a
+# new/changed file under _tests/runner/scenarios/ in the SAME commit -- reusing an existing
+# scenario doesn't count, the whole point is building coverage that didn't exist before.
+fv_commits=""
+if [ -n "$upstream" ]; then
+  fv_commits=$(git log --format='%H' "$upstream..HEAD" 2>/dev/null | while read -r sha; do
+    git log -1 --format='%B' "$sha" | grep -qi '^Protocol: FIX_VERIFY$' && echo "$sha"
+  done)
+fi
+
+fv_fail=0
+fv_detail=""
+for sha in $fv_commits; do
+  msg=$(git log -1 --format='%B' "$sha")
+  if ! printf '%s\n' "$msg" | grep -qi '^Verified:'; then
+    fv_fail=1
+    fv_detail="$fv_detail; ${sha:0:7} missing a 'Verified:' line"
+    continue
+  fi
+  files=$(git diff-tree --no-commit-id --name-only -r "$sha")
+  if printf '%s\n' "$files" | grep -q '^frontend/lib/' && \
+     ! printf '%s\n' "$files" | grep -q '^_tests/runner/scenarios/'; then
+    fv_fail=1
+    fv_detail="$fv_detail; ${sha:0:7} touches frontend/lib/ with no new/changed _tests/runner/scenarios/ file"
+  fi
+done
+
+if [ -n "$fv_commits" ]; then
+  check $fv_fail "FIX-VERIFY protocol commits have Verified: + a real scenario for any frontend change${fv_detail}"
+else
+  check 0 "FIX-VERIFY protocol gate (no commits opted in this session)"
+fi
+
 exit $fail
