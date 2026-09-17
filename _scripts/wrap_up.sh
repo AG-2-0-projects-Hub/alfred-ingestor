@@ -76,9 +76,10 @@ check $? "lessons_index.md row count ($index_rows) matches lessons.md entry coun
 
 # FIX-VERIFY protocol gate (added 2026-09-17, see FIX_VERIFY_PROTOCOL.md): opt-in, not applied
 # to every commit -- only commits that carry a "Protocol: FIX_VERIFY" trailer are checked. Each
-# one must state how it was verified, and if it touched frontend/lib/ it must also have a
-# new/changed file under _tests/runner/scenarios/ in the SAME commit -- reusing an existing
-# scenario doesn't count, the whole point is building coverage that didn't exist before.
+# one must state how it was verified, and if it touched frontend/lib/ it must also add/change a
+# _tests/runner/scenarios/ file AND wire it into run.ts in the SAME commit -- reusing an existing
+# scenario doesn't count (the whole point is building coverage that didn't exist before), and an
+# unwired scenario file never actually runs again, so it doesn't count either.
 fv_commits=""
 if [ -n "$upstream" ]; then
   fv_commits=$(git log --format='%H' "$upstream..HEAD" 2>/dev/null | while read -r sha; do
@@ -96,10 +97,14 @@ for sha in $fv_commits; do
     continue
   fi
   files=$(git diff-tree --no-commit-id --name-only -r "$sha")
-  if printf '%s\n' "$files" | grep -q '^frontend/lib/' && \
-     ! printf '%s\n' "$files" | grep -q '^_tests/runner/scenarios/'; then
-    fv_fail=1
-    fv_detail="$fv_detail; ${sha:0:7} touches frontend/lib/ with no new/changed _tests/runner/scenarios/ file"
+  if printf '%s\n' "$files" | grep -q '^frontend/lib/'; then
+    if ! printf '%s\n' "$files" | grep -q '^_tests/runner/scenarios/'; then
+      fv_fail=1
+      fv_detail="$fv_detail; ${sha:0:7} touches frontend/lib/ with no new/changed _tests/runner/scenarios/ file"
+    elif ! printf '%s\n' "$files" | grep -Fxq '_tests/runner/run.ts'; then
+      fv_fail=1
+      fv_detail="$fv_detail; ${sha:0:7} added/changed a scenario file but didn't wire it into run.ts"
+    fi
   fi
 done
 
