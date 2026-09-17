@@ -88,6 +88,12 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   // True once the host submitted conflict resolutions but hasn't yet clicked
   // "Update Knowledge" — used to retitle the status badge.
   bool _resolutionsSubmitted = false;
+  // Scrape-quality failsafe (2026-09-17): {} normally; {"attempts":1,
+  // "next_retry_at":<iso>,...} while a background re-scrape is pending;
+  // {"attempts":2,"next_retry_at":null,...} once that retry also came back
+  // degraded and Alfred has given up auto-retrying. See
+  // migrations/2026-09-17_scrape_retry.sql.
+  Map<String, dynamic> _scrapeRetry = {};
 
   static const _postMergeStatuses = {
     'Merged',
@@ -189,6 +195,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       _masterJson =
           (row['master_json'] as Map<String, dynamic>?) ?? _masterJson;
       _isStalled = stalled;
+      _scrapeRetry = (row['scrape_retry'] as Map<String, dynamic>?) ?? {};
       _applyIngestFiles(ingestFiles);
       if (!stillLive) _isIngesting = false;
     });
@@ -581,7 +588,20 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     if (prevStatus == newStatus) return;
     final name =
         _officialPropertyName ?? _nicknameController.text.trim();
-    await _showTrainedDialog(name);
+    await _showTrainedDialog(name, caveat: _scrapeRetryCaveat);
+  }
+
+  // Scrape-quality failsafe (2026-09-17) — null when nothing's wrong. While a
+  // background re-scrape is pending, Alfred is genuinely trained (on the
+  // uploaded files) but shouldn't be presented as fully verified against the
+  // listing; once retries are exhausted, tell the host outright rather than
+  // silently keep looking "done".
+  String? get _scrapeRetryCaveat {
+    if (_scrapeRetry['attempts'] == null) return null;
+    final gaveUp = _scrapeRetry['next_retry_at'] == null;
+    return gaveUp
+        ? "Alfred couldn't fully read your Airbnb listing after a couple of tries — the link may be outdated or private. Check it from the property's Overview tab."
+        : "Alfred couldn't fully read your Airbnb listing this time. We'll try again automatically shortly.";
   }
 
   // Phase 3 (2026-09-16) — item 2's "request never reaches the backend"
@@ -786,7 +806,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     );
   }
 
-  Future<void> _showTrainedDialog(String propertyName) async {
+  Future<void> _showTrainedDialog(String propertyName, {String? caveat}) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -863,6 +883,24 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       height: 1.5),
                   textAlign: TextAlign.center,
                 ),
+                if (caveat != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.palette.warningContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      caveat,
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: context.palette.warning,
+                          height: 1.5),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Center(
                   child: FilledButton(

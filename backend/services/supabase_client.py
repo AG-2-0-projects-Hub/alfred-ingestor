@@ -129,6 +129,47 @@ def save_photo_triage(
     ).eq("id", property_id).execute()
 
 
+# ── Scrape-quality retry (failsafe) ─────────────────────────────────────────
+# Added 2026-09-17 after a real incident (Firecrawl cache serving an
+# incomplete Airbnb page indefinitely — root-caused and fixed directly in
+# scraper/main.py). This is the failsafe layer for whatever *other* cause
+# might one day produce the same "Low completeness" signal. See
+# migrations/2026-09-17_scrape_retry.sql for the column's shape.
+
+def set_scrape_retry(property_id: str, data: dict) -> None:
+    """Write the scrape_retry bookkeeping dict wholesale — callers always
+    pass the complete intended shape (schedule a retry, or record a give-up),
+    never a partial patch, so there's no read-modify-write race to guard."""
+    client = get_client()
+    client.table("properties").update(
+        {"scrape_retry": data, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
+def get_property_for_scrape_retry(property_id: str) -> dict | None:
+    """Fetch fields needed by the background/manual scrape-retry worker."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select(
+            "name, status, airbnb_url, ingest_run_id, scraped_markdown, "
+            "ingested_markdown, curated_photos, master_json"
+        )
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def update_airbnb_url(property_id: str, airbnb_url: str) -> None:
+    """Host-triggered fix for a link the give-up state flagged as unreadable."""
+    client = get_client()
+    client.table("properties").update(
+        {"airbnb_url": airbnb_url, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
 def append_ingested_markdown(property_id: str, new_markdown: str) -> None:
     """Fetch existing ingested_markdown, append new_markdown, and save back."""
     client = get_client()

@@ -186,6 +186,40 @@ async def resume_ingest(property_id: str, request: Request):
     return {"status": "Ingesting", "message": "Resumed — re-dispatched remaining work."}
 
 
+class RetryScrapeRequest(BaseModel):
+    airbnb_url: str = ""
+
+
+@router.post("/ingest/{property_id}/retry-scrape")
+async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Request):
+    """Host-triggered manual retry after the scrape-quality failsafe gave up
+    (see migrations/2026-09-17_scrape_retry.sql) — the property trained fine
+    on the uploaded files, but Alfred couldn't read the Airbnb listing after
+    two tries. Optionally updates the URL first (the host fixing a stale/
+    private/removed link), then dispatches the same worker the background
+    retry uses, immediately instead of on a delay."""
+    await _require_owner_id(request)
+
+    prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found.")
+
+    new_url = req.airbnb_url.strip()
+    if new_url:
+        await asyncio.to_thread(supabase_client.update_airbnb_url, property_id, new_url)
+
+    run_id = prop.get("ingest_run_id")
+    if not run_id:
+        raise HTTPException(status_code=409, detail="No ingest run on record for this property.")
+
+    ingest_worker.dispatch_task(
+        "/api/ingest/worker/retry-scrape",
+        {"property_id": property_id, "run_id": run_id},
+        name=task_queue.sanitize_task_name(f"ing-scraperetry-manual-{property_id}-{uuid.uuid4()}"),
+    )
+    return {"status": "retrying"}
+
+
 # ── Add Knowledge ─────────────────────────────────────────────────────────────
 
 class AddKnowledgeRequest(BaseModel):

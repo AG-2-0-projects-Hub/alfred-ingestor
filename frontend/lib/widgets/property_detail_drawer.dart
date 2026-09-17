@@ -1289,6 +1289,102 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
   }
 
+  // Scrape-quality failsafe (2026-09-17) — true once the background retry has
+  // exhausted itself (see migrations/2026-09-17_scrape_retry.sql). Alfred
+  // trained fine on the uploaded files, but couldn't confirm the Airbnb
+  // listing after two tries; the host needs a way to fix/re-check the link,
+  // which the URL row otherwise has no edit affordance for at all.
+  bool get _scrapeLinkNeedsAttention {
+    final retry = _property['scrape_retry'] as Map<String, dynamic>?;
+    return retry != null && retry['attempts'] != null && retry['next_retry_at'] == null;
+  }
+
+  Future<void> _retryScrapeLink(String newUrl) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    try {
+      await ApiClient.postJson(
+        '/api/ingest/${_property['id']}/retry-scrape',
+        {'airbnb_url': newUrl},
+        bearer: session?.accessToken,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Retrying — Alfred will check the listing again shortly.")),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.userMessage)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not retry. Please try again.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showFixLinkDialog(String currentUrl) async {
+    // Deliberately opens empty, not pre-filled with the URL that just
+    // failed — pre-filling it invites a blind Retry tap without the host
+    // actually checking/fixing anything. The current (possibly broken) URL
+    // is shown as a hint instead, for reference only.
+    final controller = TextEditingController();
+    // Retry is only enabled once the host has actually typed/pasted
+    // something — even re-pasting the exact same URL is a deliberate act
+    // that means "I checked it, try again", unlike a blank submit which
+    // would silently reuse the old (possibly still-broken) link with no
+    // signal the host looked at it at all.
+    final newUrl = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Check Airbnb listing link'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Current link: $currentUrl',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              const Text(
+                'Tip: open the link yourself first to confirm it loads before pasting it here.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Airbnb URL',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+                onChanged: (_) => setDialogState(() {}),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: controller.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.of(ctx).pop(controller.text.trim()),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (newUrl != null && newUrl.isNotEmpty) {
+      await _retryScrapeLink(newUrl);
+    }
+  }
+
   Widget _airbnbUrlRow(String url) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1327,6 +1423,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                     size: 12,
                     color: Theme.of(context).colorScheme.primary,
                   ),
+                  if (_scrapeLinkNeedsAttention) ...[
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: "Alfred couldn't confirm this listing after a couple of tries — tap to check the link and retry.",
+                      child: InkWell(
+                        onTap: () => _showFixLinkDialog(url),
+                        child: Icon(
+                          Icons.error_outline_rounded,
+                          size: 15,
+                          color: context.palette.warning,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

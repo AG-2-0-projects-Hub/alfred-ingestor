@@ -57,6 +57,13 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // Push-notification edge detection
   final Map<String, bool> _prevRequiresAttention = {};
+  // Scrape-quality failsafe (2026-09-17) edge detection — true while a
+  // background re-scrape is pending for that property. No push/email channel
+  // exists for hosts; this dashboard's own realtime subscription (below) is
+  // the only place a host reliably learns the retry resolved, so the toast
+  // fires here rather than on whichever screen happened to be open 5 minutes
+  // ago when the retry was scheduled.
+  final Map<String, bool> _prevScrapeRetryPending = {};
   String _notifPermission = 'default';
   bool _showNotifChip = true;
 
@@ -268,6 +275,34 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  // Scrape-quality failsafe (2026-09-17) — fires the "fully trained" toast
+  // the moment a background re-scrape resolves cleanly (pending -> cleared)
+  // for a property that's still in a healthy trained state. Skips the
+  // give-up case (attempts>=2, next_retry_at null) on purpose: that's a
+  // "please check your link" situation, not a success notification, and is
+  // already surfaced persistently on the property's own Overview tab rather
+  // than as a one-off toast that could be missed.
+  void _checkScrapeRetryResolved(List<Map<String, dynamic>> rows) {
+    const healthyStatuses = {'Merged', 'Trained', 'Fully_Trained'};
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      if (id == null) continue;
+      final retry = row['scrape_retry'] as Map<String, dynamic>?;
+      final current = retry != null && retry['attempts'] != null && retry['next_retry_at'] != null;
+      final hadPrev = _prevScrapeRetryPending.containsKey(id);
+      final previous = _prevScrapeRetryPending[id] ?? false;
+      _prevScrapeRetryPending[id] = current;
+
+      if (!hadPrev || current || !previous) continue; // only a confirmed true->false edge
+      if (!healthyStatuses.contains(row['status'])) continue;
+
+      final name = row['name'] as String? ?? 'Your property';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Alfred finished training "$name" — all set!')),
+      );
+    }
+  }
+
   void _subscribeRealtime() {
     final ids = _properties.map((p) => p['id'] as String).toList();
     if (ids.isEmpty) return;
@@ -278,6 +313,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         .inFilter('id', ids)
         .listen((rows) {
           if (!mounted) return;
+          _checkScrapeRetryResolved(rows);
           final byId = {for (final p in rows) p['id'] as String: p};
           final updated = _properties
               .map((p) {

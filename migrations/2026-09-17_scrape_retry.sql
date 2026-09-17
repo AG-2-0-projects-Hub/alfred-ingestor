@@ -1,0 +1,55 @@
+-- 2026-09-17 — Scrape-quality retry/failsafe tracking
+--
+-- STATUS
+--   staging (gcxxilzfhwlsjcvtpsvj) : APPLIED via MCP 2026-09-17
+--   prod    (ylaooctefesedrecshic) : NOT YET APPLIED — run alongside the eventual staging→main merge
+--
+-- Every migration must be applied to BOTH projects (post-split rule, CONTEXT.md).
+--
+-- WHY
+--   Real incident 2026-09-17: Firecrawl cached an incomplete pre-hydration
+--   snapshot of an Airbnb listing page and served that same stale, near-empty
+--   page on every subsequent scrape — wrong property name, no hero image, no
+--   real conflicts detected (nothing to compare uploaded files against). Root
+--   cause fixed directly in scraper/main.py (max_age=0, never trust the
+--   cache) plus one inline retry on Low completeness within the same
+--   request. This migration adds the failsafe layer on top, for whatever
+--   *other* cause might one day produce the same Low-completeness signal
+--   (a genuine Firecrawl outage, a real Airbnb-side error, anything
+--   unforeseen) — a scrape that's still Low after the inline retry no longer
+--   silently ships bad data as if training fully succeeded.
+--
+--   New column on `properties`:
+--     scrape_retry — jsonb, default '{}'. Internal/backend bookkeeping only,
+--                    never rendered to the User directly (Dev can inspect it
+--                    via the JSON debug view on request). Shape:
+--                      {"attempts": 1, "next_retry_at": "<iso ts>", "reason": "low_completeness"}
+--                    attempts=1, next_retry_at set  -> one background retry
+--                      scheduled (~5 min out); merge already ran on the
+--                      degraded scrape + uploaded files in the meantime, so
+--                      the host isn't blocked.
+--                    attempts=2, next_retry_at=null -> gave up after the one
+--                      background retry also came back Low; host-facing
+--                      messaging shifts to "check your listing link", and
+--                      the Airbnb URL becomes editable again so they can fix
+--                      it and manually retry.
+--                    '{}' (empty)                   -> nothing pending, or a
+--                      retry already resolved cleanly (cleared on success).
+--
+-- REVERSIBILITY
+--   Fully additive — one new nullable-by-default jsonb column. Nothing
+--   existing is altered or dropped. Safe to apply without a data backfill;
+--   existing rows simply have scrape_retry='{}' until they next hit this path.
+
+alter table public.properties
+  add column if not exists scrape_retry jsonb not null default '{}'::jsonb;
+
+
+-- ── VERIFY — run this SEPARATELY, after the DDL above has been executed ──────
+-- Read-only: no transaction, nothing to roll back.
+--
+-- select 'column' as check,
+--        case when count(*) = 1 then 'PASS' else 'FAIL' end as result
+--   from information_schema.columns
+--  where table_schema = 'public' and table_name = 'properties'
+--    and column_name = 'scrape_retry';

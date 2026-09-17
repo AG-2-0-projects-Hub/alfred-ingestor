@@ -30,7 +30,7 @@ import asyncio
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -60,6 +60,21 @@ STALE_HEARTBEAT_S = 90
 _WATCHDOG_INTERVAL_S = 120
 _WATCHDOG_MAX_AUTO_RECOVERIES = 2
 
+# Scrape-quality failsafe (2026-09-17) — see supabase_client's "Scrape-quality
+# retry" section and migrations/2026-09-17_scrape_retry.sql. Root cause of the
+# 2026-09-17 incident (a Firecrawl cache serving an incomplete page forever)
+# is fixed directly in scraper/main.py; this is the backstop for any other
+# cause of the same Low-completeness signal.
+_SCRAPE_RETRY_DELAY_S = 5 * 60
+_TERMINAL_STATUSES = {"Merged", "Conflict_Pending", "Trained", "Fully_Trained"}
+# Only these are safe to silently re-merge once better scrape data arrives —
+# Conflict_Pending means the host may already be reviewing (or have already
+# submitted) conflict resolutions, and overwriting master_json underneath
+# that would clobber real work. For that case the retry still refreshes the
+# raw scraped data (useful on the next retrain) but leaves status/master_json
+# alone.
+_SAFE_TO_AUTO_REMERGE = {"Merged", "Trained"}
+
 
 class _StartBody(BaseModel):
     property_id: str
@@ -80,6 +95,11 @@ class _WatchdogBody(BaseModel):
     property_id: str
     run_id: str
     seq: int = 0
+
+
+class _RetryScrapeBody(BaseModel):
+    property_id: str
+    run_id: str
 
 
 def _check_secret(request: Request) -> None:
@@ -114,6 +134,7 @@ def dispatch_task(path: str, payload: dict, *, name: str | None = None, delay_se
         "/api/ingest/worker/process-file": run_process_file,
         "/api/ingest/worker/merge-step": run_merge_step,
         "/api/ingest/worker/watchdog": run_watchdog,
+        "/api/ingest/worker/retry-scrape": run_retry_scrape,
     }
     task = asyncio.create_task(handlers[path](**payload))
     _local_dev_tasks.add(task)
@@ -135,6 +156,51 @@ def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+async def _call_scraper(airbnb_url: str) -> dict:
+    """Raises on a hard failure (bad response, network error, no SCRAPER_URL).
+    Returns the scraper's parsed JSON body on success."""
+    scraper_url = os.environ.get("SCRAPER_URL", "").rstrip("/")
+    if not scraper_url:
+        raise RuntimeError("SCRAPER_URL not configured")
+    import httpx
+    async with httpx.AsyncClient(timeout=120.0) as http:
+        resp = await http.post(f"{scraper_url}/scrape", json={"url": airbnb_url})
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
+    """Calls the scraper, persists whatever it returns (markdown, photos,
+    hero image — each non-fatal on its own), and returns the raw scrape_data
+    dict (including data_completeness) so the caller decides what to do about
+    a degraded result. Raises only on the scraper call itself failing."""
+    scrape_data = await _call_scraper(airbnb_url)
+    scraped_markdown = scrape_data.get("data", "")
+    curated_photos = scrape_data.get("curated_photos") or []
+    rejected_photos = scrape_data.get("rejected_photos") or []
+
+    if scraped_markdown:
+        try:
+            await asyncio.to_thread(supabase_client.save_scraped_markdown, property_id, scraped_markdown)
+        except Exception as exc:
+            print(f"save_scraped_markdown failed (non-fatal): {exc}")
+    if curated_photos or rejected_photos:
+        try:
+            await asyncio.to_thread(
+                supabase_client.save_photo_triage, property_id, curated_photos, rejected_photos
+            )
+        except Exception as exc:
+            print(f"save_photo_triage failed (non-fatal): {exc}")
+    thumbnail_url = _parse_thumbnail_url(scraped_markdown)
+    if thumbnail_url:
+        try:
+            await asyncio.to_thread(supabase_client.upload_hero_image, property_id, thumbnail_url)
+        except Exception as exc:
+            print(f"Hero image upload failed (non-fatal): {exc}")
+
+    return scrape_data
+
+
 # ── start: scrape (if needed) + seed the run + fan out per-file tasks ───────
 
 async def run_start(property_id: str, run_id: str) -> None:
@@ -144,48 +210,37 @@ async def run_start(property_id: str, run_id: str) -> None:
 
     airbnb_url = (prop.get("airbnb_url") or "").strip()
     scraped_markdown = prop.get("scraped_markdown") or ""
-    curated_photos: list[dict] = []
-    rejected_photos: list[dict] = []
 
     if airbnb_url and not scraped_markdown:
         await asyncio.to_thread(supabase_client.touch_ingest_heartbeat, property_id, run_id, "scraping")
-        scraper_url = os.environ.get("SCRAPER_URL", "").rstrip("/")
-        if not scraper_url:
-            print(f"ingest_worker.run_start: SCRAPER_URL not configured, aborting {property_id}")
-            await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
-            return
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=120.0) as http:
-                resp = await http.post(f"{scraper_url}/scrape", json={"url": airbnb_url})
-                resp.raise_for_status()
-                scrape_data = resp.json()
-                scraped_markdown = scrape_data.get("data", "")
-                curated_photos = scrape_data.get("curated_photos") or []
-                rejected_photos = scrape_data.get("rejected_photos") or []
+            scrape_data = await _scrape_and_save(property_id, airbnb_url)
         except Exception as exc:
             print(f"ingest_worker.run_start: scrape failed for {property_id}: {exc}")
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
             return  # REQ-28: abort — do not process files
+        scraped_markdown = scrape_data.get("data", "")
 
-        if scraped_markdown:
-            try:
-                await asyncio.to_thread(supabase_client.save_scraped_markdown, property_id, scraped_markdown)
-            except Exception as exc:
-                print(f"save_scraped_markdown failed (non-fatal): {exc}")
-        if curated_photos or rejected_photos:
-            try:
-                await asyncio.to_thread(
-                    supabase_client.save_photo_triage, property_id, curated_photos, rejected_photos
-                )
-            except Exception as exc:
-                print(f"save_photo_triage failed (non-fatal): {exc}")
-        thumbnail_url = _parse_thumbnail_url(scraped_markdown)
-        if thumbnail_url:
-            try:
-                await asyncio.to_thread(supabase_client.upload_hero_image, property_id, thumbnail_url)
-            except Exception as exc:
-                print(f"Hero image upload failed (non-fatal): {exc}")
+        # Scrape-quality failsafe (2026-09-17) — scraper already retried once
+        # internally; still Low means schedule a longer-horizon background
+        # retry instead of silently shipping degraded data as if training
+        # fully succeeded. Ingest/merge still proceed below on whatever we
+        # got — the host isn't blocked waiting on this.
+        if scrape_data.get("data_completeness") == "Low":
+            next_retry_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=_SCRAPE_RETRY_DELAY_S)
+            ).isoformat()
+            await asyncio.to_thread(
+                supabase_client.set_scrape_retry,
+                property_id,
+                {"attempts": 1, "next_retry_at": next_retry_at, "reason": "low_completeness"},
+            )
+            dispatch_task(
+                "/api/ingest/worker/retry-scrape",
+                {"property_id": property_id, "run_id": run_id},
+                name=task_queue.sanitize_task_name(f"ing-scraperetry-{property_id}-{run_id}"),
+                delay_seconds=_SCRAPE_RETRY_DELAY_S,
+            )
 
     await asyncio.to_thread(supabase_client.touch_ingest_heartbeat, property_id, run_id, "processing")
 
@@ -314,6 +369,59 @@ async def run_merge_step(property_id: str) -> None:
         await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
 
 
+# ── retry-scrape: scrape-quality failsafe (2026-09-17) ─────────────────────
+# Fired once, ~5 min after a scrape came back Low completeness (see
+# run_start above) — a background second attempt for whatever *other* cause
+# might produce that signal (the 2026-09-17 incident's own root cause, a
+# stale Firecrawl cache, is fixed directly in scraper/main.py and won't reach
+# here at all). Also invoked immediately (delay_seconds=0) by the host-
+# triggered manual retry in routers/ingest.py, after the give-up state.
+
+async def run_retry_scrape(property_id: str, run_id: str) -> None:
+    prop = await asyncio.to_thread(supabase_client.get_property_for_scrape_retry, property_id)
+    if prop is None or prop.get("ingest_run_id") != run_id:
+        return  # fenced — a newer Train Now run superseded this one
+
+    airbnb_url = (prop.get("airbnb_url") or "").strip()
+    if not airbnb_url:
+        return  # nothing to retry — shouldn't happen, scrape_retry is only set when a scrape ran
+
+    try:
+        scrape_data = await _scrape_and_save(property_id, airbnb_url)
+    except Exception as exc:
+        print(f"ingest_worker.run_retry_scrape: scrape failed for {property_id}: {exc}")
+        await asyncio.to_thread(
+            supabase_client.set_scrape_retry,
+            property_id,
+            {"attempts": 2, "next_retry_at": None, "reason": "scrape_error"},
+        )
+        return
+
+    if scrape_data.get("data_completeness") == "Low":
+        print(f"ingest_worker.run_retry_scrape: {property_id} still Low after retry, giving up")
+        await asyncio.to_thread(
+            supabase_client.set_scrape_retry,
+            property_id,
+            {"attempts": 2, "next_retry_at": None, "reason": "low_completeness"},
+        )
+        return
+
+    await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, {})
+
+    # Only Merged/Trained are safe to silently re-merge — see
+    # _SAFE_TO_AUTO_REMERGE's comment above. Conflict_Pending means the host
+    # may already be reviewing (or have submitted) conflict resolutions;
+    # refreshing scraped_markdown above is still useful for their next
+    # retrain, but re-merging now could clobber real work.
+    fresh = await asyncio.to_thread(supabase_client.get_property_for_merge, property_id)
+    if fresh is None or fresh.get("status") not in _SAFE_TO_AUTO_REMERGE:
+        return
+    try:
+        await run_merge_and_save(property_id, {**fresh, "name": prop.get("name") or ""})
+    except ValueError as exc:
+        print(f"ingest_worker.run_retry_scrape: re-merge failed for {property_id}: {exc}")
+
+
 # ── watchdog: self-reschedules; auto-recovers a stale run, bounded ─────────
 
 async def run_watchdog(property_id: str, run_id: str, seq: int = 0) -> None:
@@ -387,4 +495,11 @@ async def worker_merge_step(body: _MergeBody, request: Request):
 async def worker_watchdog(body: _WatchdogBody, request: Request):
     _check_secret(request)
     await run_watchdog(body.property_id, body.run_id, body.seq)
+    return {"ok": True}
+
+
+@router.post("/ingest/worker/retry-scrape")
+async def worker_retry_scrape(body: _RetryScrapeBody, request: Request):
+    _check_secret(request)
+    await run_retry_scrape(body.property_id, body.run_id)
     return {"ok": True}

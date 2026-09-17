@@ -441,52 +441,93 @@ async def _triage_photos(client, raw_markdown: str, property_context: str) -> tu
         return [], []
 
 
+_COMPLETENESS_RE = re.compile(r"data_completeness:\s*(\w+)", re.IGNORECASE)
+
+
+def _extract_completeness(structured_output: str) -> str | None:
+    match = _COMPLETENESS_RE.search(structured_output)
+    return match.group(1).strip().title() if match else None
+
+
+def _fetch_and_structure(client, url: str) -> tuple[str, str]:
+    """One full Firecrawl-fetch + Gemini-structure pass. Returns
+    (extracted_markdown, structured_output); raises on a hard failure.
+    `max_age=0` forces a live fetch on every call — 2026-09-17 incident:
+    Firecrawl cached an incomplete pre-hydration snapshot of an Airbnb
+    listing (only nav chrome, no real content) and kept serving that same
+    stale copy on every subsequent request indefinitely. Airbnb listing
+    pages change per-request anyway (pricing/availability/share tokens), so
+    there's no good reason to ever trust the cache here."""
+    fc = get_firecrawl_client()
+    scrape_result = fc.scrape(url, formats=["markdown"], max_age=0)
+    extracted_markdown = getattr(scrape_result, "markdown", "")
+    if not extracted_markdown:
+        raise RuntimeError("Firecrawl returned empty markdown content")
+
+    final_prompt = get_gemini_prompt(extracted_markdown)
+    response = _generate_with_retry(
+        client,
+        model="gemini-3.6-flash",
+        contents=final_prompt,
+        config=genai.types.GenerateContentConfig(
+            system_instruction=(
+                "You are an expert Data Architect for vacation rental systems. "
+                "You strictly follow instructions to output structured Markdown."
+            ),
+            temperature=0.0,
+        ),
+    )
+    return extracted_markdown, response.text
+
+
 @app.post("/scrape")
 async def scrape_airbnb(req: ScrapeRequest):
     """
-    1. Firecrawl scrapes the Airbnb listing → raw markdown.
+    1. Firecrawl scrapes the Airbnb listing → raw markdown (live, never cached).
     2. Gemini structures the markdown into the canonical format.
-    3. Upserts scraped_markdown to Ingestor Supabase directly (REQ-27).
-    4. Returns structured output to caller.
+    3. If Gemini itself flags the result Low completeness, retry the whole
+       fetch+structure pass once more before giving up on this request — a
+       genuine one-off render timing flake (distinct from the caching bug
+       above, which max_age=0 already rules out) can clear on a second try.
+    4. Upserts scraped_markdown to Ingestor Supabase directly (REQ-27).
+    5. Returns structured output to caller, including data_completeness so
+       the caller (ingest_worker) can decide whether to schedule its own
+       longer-horizon background retry.
     """
     url = req.url
     print(f"Starting scrape for URL: {url}")
 
-    # 1. Firecrawl extraction
-    try:
-        fc = get_firecrawl_client()
-        scrape_result = fc.scrape(url, formats=["markdown"])
-    except Exception as e:
-        # Surface the actual error in Render logs (HTTPException details
-        # don't end up in stdout — they only go in the response body).
-        print(f"ERROR: Firecrawl extraction failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Firecrawl extraction failed: {str(e)}")
-
-    extracted_markdown = getattr(scrape_result, "markdown", "")
-    if not extracted_markdown:
-        print("ERROR: Firecrawl returned empty markdown content")
-        raise HTTPException(status_code=500, detail="Firecrawl returned empty markdown content")
-
-    # 2. Gemini structuring
     try:
         client = get_gemini_client()
-        final_prompt = get_gemini_prompt(extracted_markdown)
-        response = _generate_with_retry(
-            client,
-            model="gemini-3.6-flash",
-            contents=final_prompt,
-            config=genai.types.GenerateContentConfig(
-                system_instruction=(
-                    "You are an expert Data Architect for vacation rental systems. "
-                    "You strictly follow instructions to output structured Markdown."
-                ),
-                temperature=0.0,
-            ),
-        )
-        structured_output = response.text
     except Exception as e:
-        print(f"ERROR: Gemini API processing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Gemini API processing failed: {str(e)}")
+        print(f"ERROR: Gemini client init failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Gemini client init failed: {str(e)}")
+
+    extracted_markdown = ""
+    structured_output = ""
+    completeness: str | None = None
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            extracted_markdown, structured_output = _fetch_and_structure(client, url)
+        except Exception as e:
+            # Surface the actual error in Cloud Run logs (HTTPException details
+            # don't end up in stdout — they only go in the response body).
+            # Deliberately does NOT discard a usable (if Low) result from a
+            # prior attempt — only the retry attempt failing, not the whole
+            # request, so a network blip on attempt 2 doesn't turn an
+            # already-good-enough attempt 1 into a hard 500.
+            print(f"ERROR: scrape/structure attempt {attempt + 1}/2 failed: {e}")
+            last_error = e
+            continue
+        last_error = None
+        completeness = _extract_completeness(structured_output)
+        if completeness != "Low":
+            break
+        print(f"Scrape attempt {attempt + 1}/2 came back Low completeness, {'retrying' if attempt == 0 else 'giving up'}")
+
+    if last_error is not None and not structured_output:
+        raise HTTPException(status_code=500, detail=f"Scrape failed: {last_error}")
 
     # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
     curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
@@ -502,6 +543,7 @@ async def scrape_airbnb(req: ScrapeRequest):
         "data": structured_output,
         "curated_photos": curated_photos,
         "rejected_photos": rejected_photos,
+        "data_completeness": completeness,
     }
 
 
