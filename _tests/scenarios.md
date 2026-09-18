@@ -406,6 +406,16 @@ unautomated ones manually before a `staging → main` merge.
 - **last_tested:** 2026-09-17 (automated Playwright — PASS, live on staging against the isolated QA property)
 - **status:** passing
 
+### B16. Trained popup fires after a clean link-retry, even if realtime drops the event
+- **id:** dashboard-completion-popup-01
+- **touches:** `frontend/lib/screens/dashboard_screen.dart`, `frontend/lib/widgets/training_wait_dialog.dart`
+- **layer:** 2
+- **setup:** isolated QA property, DB-driven `scrape_retry` transition (needs-attention -> retrying -> resolved) with the status label held constant throughout (the common case: no re-merge needed)
+- **action:** none from the host beyond waiting — this exercises the dashboard's own background completion detection, not a user click
+- **host_expected:** the "Alfred is now trained" popup appears with a "Back to Dashboard" button, and dismissing it lands on the plain dashboard (no drawer/side-panel left open). Two bugs found live and fixed together (2026-09-18): (1) the popup was only wired to a status-*label* transition, which this exact flow never satisfies since the label doesn't change — it used to show a small SnackBar instead, driven by the one signal that's actually correct here (`scrape_retry` pending -> resolved); that signal now drives the same big popup every other completion flow uses. (2) That signal only had one chance to fire: the realtime subscription. Confirmed live that Supabase's realtime can silently drop a given update — the dashboard already had a 10s polling fallback for the card's own data for exactly this documented reason, but nothing re-ran the completion checks against a polled fetch. Wired both check functions into that same poll.
+- **last_tested:** 2026-09-18 (automated Playwright — PASS, live on staging against the isolated QA property, after widening the intermediate "retrying" hold time to a realistic duration — an earlier attempt with a 3s hold produced a false negative because neither realtime nor a 10s poll cycle landed inside that window)
+- **status:** passing
+
 ---
 
 ## C. Chat lifecycle (host + guest perspectives)
