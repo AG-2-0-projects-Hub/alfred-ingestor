@@ -169,6 +169,22 @@ class _DashboardScreenState extends State<DashboardScreen>
         _processConversations(convRows, guestNames, hasEscalation, hasEmergency, previews);
       }
 
+      // 2026-09-18: run the same "did a job just finish" edge-detection here,
+      // not just from the realtime stream. Confirmed live (staging, isolated
+      // QA property): a plain status/scrape_retry write can arrive at the
+      // dashboard's realtime subscription anywhere from instantly to not at
+      // all -- Supabase's own free-tier realtime is already documented above
+      // as able to silently drop updates, which is exactly why this 10s poll
+      // exists for _properties in the first place. It was only ever wired to
+      // refresh the card data, leaving the completion popup as the one thing
+      // with no fallback -- a dropped realtime event meant it never fired at
+      // all, even though the card would go on to correct itself within 10s.
+      // Both check functions share their edge-detection state with the
+      // realtime path, so calling from both is safe: whichever source sees
+      // the transition first fires it, the other just finds nothing changed.
+      final announced = _checkScrapeRetryResolved(properties);
+      _checkTrainingCompletion(properties, skipIds: announced);
+
       if (mounted) {
         setState(() {
           _properties = properties;
