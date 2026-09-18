@@ -735,7 +735,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   // Conflict_Pending, so it needs no onResolve callback.
   Future<void> _showConflictDialog(int conflictCount) async {
     if (!mounted) return;
-    await showConflictResultDialog(context, conflictCount);
+    await showConflictResultDialog(context, conflictCount,
+        _officialPropertyName ?? _nicknameController.text.trim());
   }
 
   // Same extraction as above. onDismiss pops this screen back to the

@@ -713,12 +713,30 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                           isStalled: _isStalled,
                           isDev: widget.isDev,
                         );
-                  if (step == null) return const SizedBox.shrink();
+                  var displayStep = step;
+                  // The shared nextStepFor()'s 'Resolve' action is real in
+                  // the drawer (navigates here) but a confirmed no-op on this
+                  // screen itself, since _handleNextStepAction has nothing to
+                  // do for Conflict_Pending -- the conflicts panel is already
+                  // visible right below. Overridden here only (not in
+                  // nextStepFor) so the drawer's own working button is
+                  // untouched. Founder-specified copy, 2026-09-19.
+                  if (displayStep != null && _propertyStatus == 'Conflict_Pending') {
+                    displayStep = SetupStep(
+                      headline: displayStep.headline,
+                      subtext: 'A few items disagree between your files. '
+                          'Scroll down to review and resolve them.',
+                      actionLabel: '',
+                      icon: displayStep.icon,
+                      accent: displayStep.accent,
+                    );
+                  }
+                  if (displayStep == null) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 20),
                     child: SetupStatusBanner(
-                      step: step,
-                      onAction: () => _handleNextStepAction(step),
+                      step: displayStep,
+                      onAction: () => _handleNextStepAction(displayStep!),
                     ),
                   );
                 }),

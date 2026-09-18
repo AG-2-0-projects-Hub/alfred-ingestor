@@ -219,7 +219,18 @@ Route<void> pushTrainingWaitDialog(
 // instead of the instant cut removeRoute would otherwise produce (2026-09-18
 // founder feedback) -- still uses removeRoute, not a plain pop, so it closes
 // exactly this route regardless of what else was pushed on top meanwhile.
-void popTrainingWaitDialog(BuildContext context, Route<void>? route) {
+//
+// Returns a Future that only completes once the route is actually gone.
+// This route stays on the stack (mid-fade) for the ~200ms between setting
+// `closing.value = true` and the delayed removeRoute below -- a caller that
+// fires a blind Navigator.pop() immediately after calling this (not awaiting
+// it) pops whatever is CURRENTLY topmost, which is still this fading route,
+// not whatever the caller actually meant to close. Confirmed live
+// (2026-09-19): this is why the scrape-link retry's wait dialog cut off
+// abruptly instead of fading, AND why the drawer never closed after a
+// successful retry -- the drawer's own pop() was consumed by this route
+// instead. Callers that pop something else afterward must await this first.
+Future<void> popTrainingWaitDialog(BuildContext context, Route<void>? route) async {
   if (route == null || !route.isActive) return;
   final closing = _closingNotifiers.remove(route);
   if (closing == null) {
@@ -227,9 +238,8 @@ void popTrainingWaitDialog(BuildContext context, Route<void>? route) {
     return;
   }
   closing.value = true;
-  Future.delayed(_fadeOutDuration, () {
-    if (route.isActive) {
-      Navigator.of(context, rootNavigator: true).removeRoute(route);
-    }
-  });
+  await Future.delayed(_fadeOutDuration);
+  if (route.isActive) {
+    Navigator.of(context, rootNavigator: true).removeRoute(route);
+  }
 }

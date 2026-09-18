@@ -1345,12 +1345,14 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // 'unreachable' (the fetch itself failed) vs 'low_completeness' (the page
   // loaded but was empty/wrong) read differently to a host — the former
   // reads as "this link is broken", the latter as "loaded but incomplete".
-  String get _scrapeLinkIssueMessage {
+  // Founder-specified copy (2026-09-19): this leads the sentence that's
+  // followed by ": $currentUrl" in _showFixLinkDialog, not a standalone line.
+  String get _scrapeLinkIssueReason {
     final retry = _property['scrape_retry'] as Map<String, dynamic>?;
     final reason = retry?['reason'] as String?;
     return reason == 'unreachable'
-        ? "This link doesn't seem to work. Verify it loads correctly in your browser, then paste it below."
-        : "Alfred couldn't fully read this listing after a couple of tries. Verify it loads correctly in your browser, then paste it below.";
+        ? "The current link doesn't seem to work"
+        : "Alfred couldn't fully read this link";
   }
 
   // The specific route the wait dialog below is pushed as -- closed via
@@ -1385,8 +1387,15 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         bearer: session?.accessToken,
       );
       if (mounted) {
-        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        // Awaited -- popTrainingWaitDialog's route stays on the stack for a
+        // ~200ms fade before it's actually removed (see its own doc comment).
+        // Firing this drawer's own Navigator.pop() before that finishes made
+        // pop() close whatever's CURRENTLY topmost, which was still the
+        // fading wait dialog, not the drawer -- confirmed live (2026-09-19)
+        // as the cause of both the abrupt cut and the drawer never closing.
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
         _retryWaitDialogRoute = null;
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Retrying — Alfred will check the listing again shortly.")),
         );
@@ -1400,15 +1409,17 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       }
     } on ApiException catch (e) {
       if (mounted) {
-        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
         _retryWaitDialogRoute = null;
+        if (!mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.userMessage)));
       }
     } catch (e) {
       if (mounted) {
-        popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
         _retryWaitDialogRoute = null;
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not retry. Please try again.')),
         );
@@ -1436,12 +1447,15 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Current link: $currentUrl',
+              // Founder-specified copy (2026-09-19): the reason and the
+              // current link collapse into one sentence, not two separate
+              // lines as before.
+              Text('$_scrapeLinkIssueReason: $currentUrl',
                   style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 8),
-              Text(
-                _scrapeLinkIssueMessage,
-                style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+              const Text(
+                'Verify the new link loads correctly in your browser, then paste it below.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1520,7 +1534,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   if (_scrapeLinkNeedsAttention && !_scrapeLinkRetrying) ...[
                     const SizedBox(width: 8),
                     Tooltip(
-                      message: '$_scrapeLinkIssueMessage Tap to fix it.',
+                      message: '$_scrapeLinkIssueReason. Tap to fix it.',
                       child: InkWell(
                         onTap: () => _showFixLinkDialog(url),
                         child: Icon(

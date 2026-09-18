@@ -466,7 +466,8 @@ class _PropertyCardState extends State<_PropertyCard> {
                                   const SizedBox(height: 8),
                                 ] else
                                   const Spacer(),
-                                _buildActions(context, status, palette),
+                                _buildActions(context, status, palette,
+                                    scrapeLinkNeedsAttention),
                               ],
                             ),
                           ),
@@ -484,8 +485,8 @@ class _PropertyCardState extends State<_PropertyCard> {
     );
   }
 
-  Widget _buildActions(
-      BuildContext context, String status, AppPalette palette) {
+  Widget _buildActions(BuildContext context, String status, AppPalette palette,
+      bool needsAttention) {
     // A retrain on an already-live property legitimately passes back through
     // 'Ingested'/'Merged' (backend/routers/ingest.py) — those used to fall
     // through to a bare "Details" button, hiding +Guest/Settings for a
@@ -619,6 +620,7 @@ class _PropertyCardState extends State<_PropertyCard> {
         onCalendar: widget.onCalendar,
         highlightHint: widget.showStep0Hint,
         step0Link: widget.showStep0Hint ? _step0Link : null,
+        settingsNeedsAttention: needsAttention,
       );
     }
 
@@ -646,6 +648,12 @@ class _ReadyActions extends StatelessWidget {
   /// points at the space between those two buttons specifically.
   final LayerLink? step0Link;
 
+  /// True when the scrape-link failsafe has flagged this property (the
+  /// "Needs Attention" badge on the card thumbnail) -- glows the Settings
+  /// button since that's the actual path to the fix-link dialog, and the
+  /// badge alone gave no cue where to click.
+  final bool settingsNeedsAttention;
+
   const _ReadyActions({
     required this.onGuestLink,
     required this.onOpenSettings,
@@ -653,6 +661,7 @@ class _ReadyActions extends StatelessWidget {
     required this.onCalendar,
     this.highlightHint = false,
     this.step0Link,
+    this.settingsNeedsAttention = false,
   });
 
   @override
@@ -673,6 +682,7 @@ class _ReadyActions extends StatelessWidget {
           label: 'Settings',
           onTap: onOpenSettings,
           highlighted: highlightHint,
+          glow: settingsNeedsAttention,
         ),
       ],
     );
@@ -704,6 +714,12 @@ class _CardAction extends StatelessWidget {
   final VoidCallback onTap;
   final bool accent;
   final bool highlighted;
+  // Warning-color glow for "this needs your attention" (the scrape-link
+  // failsafe) -- same visual language as _StatusBadge's glowAlpha, not a new
+  // effect. Independent of `highlighted` (the Step 0 hint), which uses the
+  // primary color -- the two aren't expected to co-occur, but keeping them
+  // separate avoids one silently overriding the other if they ever did.
+  final bool glow;
 
   const _CardAction({
     required this.icon,
@@ -711,6 +727,7 @@ class _CardAction extends StatelessWidget {
     required this.onTap,
     this.accent = false,
     this.highlighted = false,
+    this.glow = false,
   });
 
   @override
@@ -727,7 +744,9 @@ class _CardAction extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: highlighted
               ? Border.all(color: palette.primary, width: 1.5)
-              : null,
+              : glow
+                  ? Border.all(color: palette.warning, width: 1.5)
+                  : null,
           boxShadow: highlighted
               ? [
                   BoxShadow(
@@ -736,7 +755,15 @@ class _CardAction extends StatelessWidget {
                     spreadRadius: 1,
                   ),
                 ]
-              : null,
+              : glow
+                  ? [
+                      BoxShadow(
+                        color: palette.warning.withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

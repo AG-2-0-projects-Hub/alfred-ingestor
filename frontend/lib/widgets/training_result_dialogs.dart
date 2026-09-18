@@ -130,7 +130,8 @@ Future<void> showTrainedResultDialog(
 
 Future<void> showConflictResultDialog(
   BuildContext context,
-  int conflictCount, {
+  int conflictCount,
+  String propertyName, {
   // Called after the dialog closes -- dashboard_screen.dart uses this to open
   // the property's drawer so the host lands straight on the resolution flow;
   // add_property_screen.dart already renders the questionnaire inline on the
@@ -183,12 +184,31 @@ Future<void> showConflictResultDialog(
               ),
               const SizedBox(height: 18),
               Text(
-                'Almost there — $conflictCount ${conflictCount == 1 ? 'conflict' : 'conflicts'} found',
+                propertyName.isNotEmpty ? propertyName : 'Property Ready',
                 style: GoogleFonts.plusJakartaSans(
                     fontSize: 20,
                     fontWeight: FontWeight.w300,
                     color: context.palette.textPrimary),
                 textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              // Design approved via artifact (2026-09-19): title becomes the
+              // property name, matching showTrainedResultDialog's format; the
+              // conflict count moves into this pill instead of crowding the
+              // title.
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                decoration: BoxDecoration(
+                  color: context.palette.warningContainer,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$conflictCount ${conflictCount == 1 ? 'conflict' : 'conflicts'} found',
+                  style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: context.palette.warning),
+                ),
               ),
               const SizedBox(height: 10),
               Text(

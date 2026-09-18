@@ -3,6 +3,44 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-19 — Coordinate-click a Flutter/CanvasKit dialog from a fresh screenshot, not an earlier one; use video capture, not screenshot polling, for sub-200ms transitions
+
+**Context:** The completion-popup-polish handoff required live-reproducing two unconfirmed bugs
+(scrape-link retry wait-dialog fading abruptly, drawer not auto-closing) before patching a
+hypothesis, per the handoff's own methodology. Built a throwaway Playwright investigation script
+against staging, on the isolated QA property.
+
+**Discovery:** Two dead ends before landing on what worked. First, `page.getByText('Retry', {exact:
+true})` found nothing at all — confirms this app renders via CanvasKit (a single `<canvas>`, no
+real DOM text nodes), so text=/role= locators are unusable here; coordinate clicking (already this
+project's convention per B15/B16) is genuinely the only option, not just a preference. Second, a
+Retry-button coordinate measured from one screenshot (the dialog's *empty*-field state) silently
+missed three separate runs once the field held a long URL — the click landed on blank barrier space
+and dismissed the dialog with zero error and no visible symptom, which looked identical to "nothing
+happened" until diagnostic checkpoint screenshots were inserted right before the click. The fix was
+mechanical, not a smarter guess: take the screenshot *immediately* before the click you're about to
+make and measure the target from that exact frame — generalizes the handoff's own rule 7 (dialog
+width shifts once a long URL is typed) beyond just "width," to any layout that differs between an
+empty and filled state. Separately: to see whether a ~200ms fade actually happened or was cut short,
+polling `page.screenshot()` in a tight loop only produced 1-8 frames over 2-3 seconds in this
+environment (each call took 150ms-1.2s — clipping the region and using JPEG didn't meaningfully
+help) — far too coarse to catch a sub-200ms transition. Switching to Playwright's `recordVideo`
+context option (continuous capture, decoupled from Node's per-screenshot overhead) plus `ffmpeg`
+frame extraction afterward (`ffprobe` for duration, `ffmpeg -ss <t> -vsync 0` for every native frame
+in a narrow window) gave real ~40ms-granularity frames and settled it conclusively: the transition
+took under one 40ms frame — genuinely instant, not a cut-off fade.
+
+**Impact:** For any future Flutter-web Playwright work in this project: don't try text=/role=
+locators first, go straight to coordinates; always screenshot-then-measure immediately before a
+click on any dialog that could have changed since an earlier screenshot; and reach for `recordVideo`
++ `ffmpeg` extraction the moment what's being verified is a sub-second animation or timing race,
+rather than a screenshot polling loop — it's both more accurate and, after the first recording,
+actually cheaper than several failed guess-and-check runs.
+**Global Candidate: Yes** — the CanvasKit-locator dead-end and the recordVideo+ffmpeg technique are
+both generic Playwright/Flutter-web facts, not specific to this app or test suite.
+
+---
+
 ## 2026-09-19 — A realtime-dependent UI signal needs the same polling fallback the data it's derived from already has
 
 **Context:** Chased a "training-finished popup sometimes just doesn't appear" bug across most of a

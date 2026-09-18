@@ -390,6 +390,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         _enqueueResultDialog(() => showConflictResultDialog(
               context,
               _conflictCountFor(row),
+              name,
               // Clear back to the bare dashboard first (whatever screen this
               // fired on top of -- Edit Property, an already-open drawer,
               // anything) before opening a fresh drawer on the resolved
