@@ -299,8 +299,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   // "please check your link" situation, not a success notification, and is
   // already surfaced persistently on the property's own Overview tab rather
   // than as a one-off toast that could be missed.
-  void _checkScrapeRetryResolved(List<Map<String, dynamic>> rows) {
+  // Returns the property ids this pass just announced, so _checkTrainingCompletion
+  // (called right after, on the same batch) doesn't also fire a second, duplicate
+  // popup for a property whose status genuinely changed as part of the same retry
+  // (e.g. the resume_run path, which flips through "Ingesting" on its way back to
+  // Merged/Trained).
+  Set<String> _checkScrapeRetryResolved(List<Map<String, dynamic>> rows) {
     const healthyStatuses = {'Merged', 'Trained', 'Fully_Trained'};
+    final announced = <String>{};
     for (final row in rows) {
       final id = row['id'] as String?;
       if (id == null) continue;
@@ -308,7 +314,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       // retrying==true added 2026-09-17 -- without it, a host-submitted link
       // fix (which sets retrying on top of a prior give-up shape, so
       // next_retry_at stays null) was never seen as "pending" here, so its
-      // clean-success case could never fire this toast either — only the
+      // clean-success case could never fire this popup either — only the
       // fully-automatic background retry (which always sets a real future
       // next_retry_at) could.
       final current = retry != null &&
@@ -318,19 +324,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       final previous = _prevScrapeRetryPending[id] ?? false;
       _prevScrapeRetryPending[id] = current;
 
-      // TEMP DEBUG (remove before commit) -- print(...) reaches the browser
-      // console in a Flutter web release build too.
-      // ignore: avoid_print
-      print('[DEBUG scrapeRetry] id=$id retry=$retry current=$current previous=$previous hadPrev=$hadPrev status=${row['status']}');
-
       if (!hadPrev || current || !previous) continue; // only a confirmed true->false edge
       if (!healthyStatuses.contains(row['status'])) continue;
 
+      // 2026-09-18: this used to show a small SnackBar instead of the big
+      // "trained" popup -- a link-retry that needs no re-merge leaves the
+      // status label unchanged (e.g. "Merged" the whole time), so
+      // _checkTrainingCompletion's status-transition check never saw a
+      // change and never fired anything. This edge (scrape_retry pending ->
+      // resolved) is the one signal that's actually correct for this case,
+      // so it now drives the same popup every other completion uses.
       final name = row['name'] as String? ?? 'Your property';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Alfred finished training "$name" — all set!')),
-      );
+      announced.add(id);
+      _enqueueResultDialog(() => showTrainedResultDialog(
+            context,
+            name,
+            onDismiss: () => Navigator.of(context, rootNavigator: true)
+                .popUntil((r) => r.isFirst),
+          ));
     }
+    return announced;
   }
 
   // Centralized "training just finished" popup (2026-09-17) — see the field
@@ -340,18 +353,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   // first-time training, for every OTHER flow that can also finish one:
   // retraining with new files, resolving conflicts, fixing a broken Airbnb
   // link, or resuming a stalled property.
-  void _checkTrainingCompletion(List<Map<String, dynamic>> rows) {
+  void _checkTrainingCompletion(List<Map<String, dynamic>> rows, {Set<String> skipIds = const {}}) {
     for (final row in rows) {
       final id = row['id'] as String?;
-      if (id == null) continue;
+      if (id == null || skipIds.contains(id)) continue;
       final status = row['status'] as String?;
       final hadPrev = _prevPropertyStatus.containsKey(id);
       final previous = _prevPropertyStatus[id];
       _prevPropertyStatus[id] = status;
-
-      // TEMP DEBUG (remove before commit)
-      // ignore: avoid_print
-      print('[DEBUG trainingCompletion] id=$id status=$status previous=$previous hadPrev=$hadPrev');
 
       // Seeding pass -- this property's first row since the dashboard
       // subscribed (e.g. app just opened, or navigated back after this
@@ -365,7 +374,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         _enqueueResultDialog(() => showConflictResultDialog(
               context,
               _conflictCountFor(row),
-              onResolve: () => _openDrawer(row),
+              // Clear back to the bare dashboard first (whatever screen this
+              // fired on top of -- Edit Property, an already-open drawer,
+              // anything) before opening a fresh drawer on the resolved
+              // property, so the host never lands on a stale leftover screen.
+              onResolve: () {
+                Navigator.of(context, rootNavigator: true)
+                    .popUntil((r) => r.isFirst);
+                _openDrawer(row);
+              },
             ));
       } else if (_dialogBSuccessStatuses.contains(status) &&
           !_dialogBSuccessStatuses.contains(previous)) {
@@ -378,6 +395,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               context,
               name,
               caveat: _scrapeRetryCaveatFor(row['scrape_retry']),
+              onDismiss: () => Navigator.of(context, rootNavigator: true)
+                  .popUntil((r) => r.isFirst),
             ));
       }
     }
@@ -426,8 +445,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         .inFilter('id', ids)
         .listen((rows) {
           if (!mounted) return;
-          _checkScrapeRetryResolved(rows);
-          _checkTrainingCompletion(rows);
+          final announced = _checkScrapeRetryResolved(rows);
+          _checkTrainingCompletion(rows, skipIds: announced);
           final byId = {for (final p in rows) p['id'] as String: p};
           final updated = _properties
               .map((p) {

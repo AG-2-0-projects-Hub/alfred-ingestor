@@ -180,27 +180,56 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
 // blind pop() could actually close the dashboard's dialog instead, stranding
 // this one on screen. removeRoute closes exactly the route it was given,
 // regardless of what else was pushed on top of it in the meantime.
+const _fadeOutDuration = Duration(milliseconds: 200);
+
+// Keyed by route identity so pushTrainingWaitDialog's own return type (and
+// every existing `Route<void>?` field storing it) never has to change --
+// this is purely an internal detail of how the close fades out.
+final Map<Route<void>, ValueNotifier<bool>> _closingNotifiers = {};
+
 Route<void> pushTrainingWaitDialog(
   BuildContext context, {
   required WidgetBuilder builder,
   bool barrierDismissible = false,
   Color? barrierColor,
 }) {
+  final closing = ValueNotifier<bool>(false);
   final route = DialogRoute<void>(
     context: context,
     barrierDismissible: barrierDismissible,
     barrierColor: barrierColor,
-    builder: builder,
+    builder: (ctx) => ValueListenableBuilder<bool>(
+      valueListenable: closing,
+      builder: (_, isClosing, child) => AnimatedOpacity(
+        opacity: isClosing ? 0 : 1,
+        duration: _fadeOutDuration,
+        child: child,
+      ),
+      child: builder(ctx),
+    ),
   );
+  _closingNotifiers[route] = closing;
   Navigator.of(context, rootNavigator: true).push(route);
   return route;
 }
 
 // No-op if [route] is null or already gone (e.g. dismissed via "Continue in
 // background", or already closed by an earlier call) -- safe to call
-// unconditionally in a finally/catch block.
+// unconditionally in a finally/catch block. Fades the dialog out first
+// instead of the instant cut removeRoute would otherwise produce (2026-09-18
+// founder feedback) -- still uses removeRoute, not a plain pop, so it closes
+// exactly this route regardless of what else was pushed on top meanwhile.
 void popTrainingWaitDialog(BuildContext context, Route<void>? route) {
-  if (route != null && route.isActive) {
+  if (route == null || !route.isActive) return;
+  final closing = _closingNotifiers.remove(route);
+  if (closing == null) {
     Navigator.of(context, rootNavigator: true).removeRoute(route);
+    return;
   }
+  closing.value = true;
+  Future.delayed(_fadeOutDuration, () {
+    if (route.isActive) {
+      Navigator.of(context, rootNavigator: true).removeRoute(route);
+    }
+  });
 }
