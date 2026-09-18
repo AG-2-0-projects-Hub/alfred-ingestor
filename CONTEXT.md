@@ -11,14 +11,14 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 TOP: the scrape-retry give-up/retrying UI has 3 confirmed real bugs from live testing (dashboard
-  card flashing Ready/Needs-Attention, the retry wait-popup never appearing, `scrape_retry.retrying`
-  stuck `true` 6+ min with no resolution on property `44bc37b6-ce29-4588-895c-dcb3cb881ea8`, kept
-  live on staging as the repro). None root-caused yet — self-contained handoff, read first, at
-  `_Context/HANDOFF_scrape-retry-ui-state-bugs_2026-09-17.md`. Do a full FMEA across
-  state × surface × data-delivery-path before patching again, per the founder's explicit direction.
-  The underlying root-cause fix (`scraper/main.py`'s `max_age=0`) is solid and live-verified twice —
-  only this UI layer on top is broken.
+- 🔴 TOP: completion-popup polish + two unconfirmed live bugs (wait-dialog/toast fade cut short;
+  drawer not auto-closing after a successful retry dispatch, despite the code appearing to already
+  do this). Self-contained handoff, read first: `_Context/HANDOFF_completion-popup-polish_2026-09-19.md`.
+  Also 4 low-risk polish items bundled in the same doc (Settings glow on "Needs Attention", fix-link
+  dialog copy, conflict-popup now needs the property name — design pre-approved via artifact — and
+  removing a dead "Resolve" button on Edit Property).
+- 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
+  worth a quick look at the delete path.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
@@ -27,7 +27,36 @@ session-continuity state only: in-flight investigations and handoffs that don't 
 ## Unresolved Decisions
 None currently open.
 
-**Last Session:** 2026-09-17 (**Founder hit a rough stretch of live-testing today — real bugs found
+**Last Session:** 2026-09-19 (**Closed out the scrape-retry-UI handoff from 2026-09-17 for real —
+root-caused two genuine, separate bugs behind "the training-finished popup sometimes just doesn't
+show," fixed both, and had the founder live-verify both outcomes end-to-end on real properties
+(Bungalow: retry → real conflict → resolve → immediate popup → clean dashboard; Sta Prsca: retry →
+clean, no conflict → immediate popup → clean dashboard). Also fully closed the drawer-navigation
+bug from 2026-09-17 (`pushReplacement` fix) — B15 already covered the pure-navigation case;
+confirmed no regression under the fuller live flow too.**) — `staging`, commits `5938718` (drawer
+`pushReplacement` fix + B15), `f21ca07`+`d3e17d4`+`4b22e12` (popup-signal fix + polling fallback +
+B16 scenario), Vercel auto-deployed each push, no backend changes.
+> **✅ Bug 1 — popup wired to the wrong signal.** A clean link-retry never changes the property's
+> coarse status label, so the status-transition check that triggered the popup never fired; it used
+> to show a small SnackBar instead, driven by the one field that *does* correctly track this
+> (`scrape_retry`). Re-wired that signal to fire the same big popup everywhere else uses.
+> **✅ Bug 2 — the real reason it felt random all day: Supabase realtime can silently drop an
+> update.** Proved this empirically (the same controlled DB-write test passed/failed at random
+> purely on realtime timing, including for an *unmodified* status-transition code path). The
+> dashboard already had a 10s polling fallback for exactly this reason, documented in its own code
+> comment — but it only ever refreshed card data, never the popup checks. Wired both check
+> functions into that same poll. This was the actual root cause; bug 1 alone would not have fixed it.
+> **✅ New scenarios B16 (automated) + B17 (founder live pass, `layer: 4`).** Reinforced this
+> project's existing manual-pass convention (scenario A1) — a founder's own confirmed live run is a
+> real PASS, logged as such, no Playwright required.
+> **🟡 Found live, not yet fixed:** the wait dialog/toast can disappear abruptly instead of fading
+> (likely the drawer's own close racing the fade), and the drawer sometimes doesn't auto-close after
+> a dispatch succeeds despite the code intending to — both handed off with hypotheses, unconfirmed.
+> **🟡 Also handed off (design pre-approved):** conflict popup needs the property name in its title,
+> matching the trained popup's format — see the published comparison artifact linked in the handoff doc.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-17 (**Founder hit a rough stretch of live-testing today — real bugs found
 and fixed, but process discipline (FMEA before code, verifying before claiming "fixed") eroded
 enough across sessions that the founder had to chase it prompt by prompt. Rather than another
 promise, built a mechanically-enforced protocol: `FIX_VERIFY_PROTOCOL.md`. Scoped narrowly —

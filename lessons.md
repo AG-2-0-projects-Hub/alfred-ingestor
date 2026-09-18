@@ -3,6 +3,62 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-19 — A realtime-dependent UI signal needs the same polling fallback the data it's derived from already has
+
+**Context:** Chased a "training-finished popup sometimes just doesn't appear" bug across most of a
+day. Fixed the obvious first cause (the popup was wired to a status-*label* transition that a
+clean link-retry never produces), redeployed, and the founder still hit it live. Spent a long
+stretch trying to reproduce it with direct DB writes over Playwright, getting inconsistent
+pass/fail results that looked like a code bug but weren't.
+
+**Discovery:** The dashboard already had a documented 10-second silent-refresh poll specifically
+because "Supabase free-tier realtime can lag or silently drop updates" (a comment already sitting
+in the code, dated 2026-09-16) — but that poll only ever refreshed the property card's data, never
+re-ran the popup-triggering checks. So the card would self-heal within ~10s regardless of whether
+realtime delivered the event, while the popup — wired only to the realtime stream — had exactly
+one chance to fire and silently lost it whenever realtime dropped that specific update. Proved
+this empirically: the *same* controlled DB-write test passed or failed at random depending purely
+on realtime timing, and a plain status-transition popup (unmodified code) showed the identical
+flakiness. This should have been checked via `query_logs`/`edge_logs` first, per the *already
+logged* 2026-09-16 lesson below ("fastest way to prove/disprove a did-the-request-even-happen
+theory") — that lesson exists specifically to avoid the hours of live Playwright guessing this
+took. The mandated lessons-index grep did not happen before debugging started; this is the same
+process gap the 2026-09-16 lessons-discipline entry already describes, recurring.
+
+**Impact:** Any UI signal derived from a realtime subscription needs the same fallback as the data
+it depends on — if a screen already polls to self-heal missed realtime events, anything else
+derived from that same stream (a popup, a toast, an alert) needs to run off the *same* poll, not
+just the stream. Wired `_checkScrapeRetryResolved`/`_checkTrainingCompletion` into the dashboard's
+existing 10s poll in `dashboard_screen.dart`. Also: re-grep `lessons_index.md` before live-testing
+a "sometimes it works, sometimes it doesn't" bug — `query_logs` answers "did delivery even happen"
+in under a minute, far cheaper than reproducing it live repeatedly.
+**Global Candidate: Yes** — "a derived signal needs its source's own reliability fallback, not just
+the happy-path subscription" applies to any project mixing realtime + polling for the same data.
+
+---
+
+## 2026-09-19 — A host's own live confirmation is a valid scenario PASS; log it as layer 4, don't require Playwright for everything
+
+**Context:** Mid-session, the founder pointed out that a full manual walkthrough they'd just run
+live (needs-attention → Settings → warning icon → paste link → Retry → either outcome →
+resolve/dismiss → clean dashboard) should count as a logged, passing scenario on its own — no
+Playwright code required — and asked what happened to that convention, since they remembered using
+it before.
+
+**Discovery:** The convention already exists in `_tests/scenarios.md` (`layer: 4` = manual;
+`status: passing` with `last_tested: ... (manual verification by user)`, e.g. scenario A1) — it
+just wasn't being applied. Every fix this session got a fresh Playwright scenario even when a
+founder's own live pass was already sufficient evidence, which is real effort spent duplicating
+verification that had already happened.
+**Impact:** When the founder verifies a flow live end-to-end, log it as its own `layer: 4` scenario
+row (or extend an existing one) with `status: passing` and a note on who verified it — don't
+default to writing new Playwright code for something already confirmed by a real human running the
+real flow. Added B17 to `_tests/scenarios.md` this way. Playwright automation is for regression
+guarding *after* a fix, not a mandatory gate before a manual pass counts.
+**Global Candidate: No** — specific to this project's existing scenario-matrix convention.
+
+---
+
 ## 2026-09-17 — Prose-only process rules erode under long context; the fix is a mechanical check, not a better-worded reminder
 
 **Context:** The founder had been live-testing scrape-retry UI fixes since 8am and hit a genuinely

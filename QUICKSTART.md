@@ -77,6 +77,12 @@ Applies automatically, every fix/feature, without needing to be asked each time:
    every time, no matter how small.
 7. **Before proposing anything that forks into multiple subagents** (e.g. `/code-review`'s ~10-way
    fork) — say the expected scale up front and get a yes, even if agreed to generically before.
+8. **A live pass you confirm counts as a real PASS — no Playwright required** (`layer: 4` in
+   `_tests/scenarios.md`, same as scenario A1). The intent is Claude logs this the moment you
+   confirm a flow works, same turn, without being asked — but this can't be mechanically enforced
+   (`wrap_up.sh` only sees git diffs, not chat, so it can't catch a skipped manual log the way it
+   catches a skipped code-change scenario). If Claude doesn't do it on its own, just say **"log
+   that"** right after confirming something works — that's the one phrase to remember.
 
 ---
 

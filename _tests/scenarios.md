@@ -416,6 +416,17 @@ unautomated ones manually before a `staging → main` merge.
 - **last_tested:** 2026-09-18 (automated Playwright — PASS, live on staging against the isolated QA property, after widening the intermediate "retrying" hold time to a realistic duration — an earlier attempt with a 3s hold produced a false negative because neither realtime nor a 10s poll cycle landed inside that window)
 - **status:** passing
 
+### B17. Founder walkthrough: fix a broken link end-to-end, both outcomes
+- **id:** scrape-retry-e2e-01
+- **touches:** `frontend/lib/widgets/property_detail_drawer.dart`, `frontend/lib/screens/dashboard_screen.dart`, `frontend/lib/widgets/training_result_dialogs.dart`
+- **layer:** 4 (manual)
+- **setup:** a real property flagged "Needs Attention" (DB-set `scrape_retry` give-up shape)
+- **action:** dashboard card "Needs Attention" → click Settings → click the warning icon next to the Airbnb URL → paste a working link → Retry → wait
+- **host_expected:** "Alfred is retraining…" wait dialog appears, card flips to "Processing", then either (a) no new conflict → "Alfred is now trained" popup appears directly, "Back to Dashboard" returns to a clean dashboard, or (b) a real conflict is found → "Almost there…" popup appears directly (not only after navigating away) → Resolve → drawer → Edit Property → submit resolutions → "Alfred is now trained" popup appears right there on Edit Property → "Back to Dashboard" returns to a clean dashboard, no stale drawer.
+- **last_tested:** 2026-09-19 — both outcomes confirmed live by the founder: (a) on "Sta Prsca" (clean resolve, no conflict), (b) on "Bungalow final chapter" (real 2-item conflict surfaced by the live Airbnb listing, resolved through the full flow). Per this project's manual-verification convention (see A1), this counts as a real PASS without requiring new Playwright code — B16 already automates the underlying signal-detection logic these live runs exercised end-to-end through the actual UI.
+- **status:** passing
+- **known follow-on bugs found during this same walkthrough (not yet fixed, tracked separately):** the wait dialog + toast can disappear abruptly instead of fading (likely raced by the drawer's own close happening at the same instant), and the drawer sometimes fails to auto-close after a successful retry dispatch despite the code already intending to do so — see session handoff plan.
+
 ---
 
 ## C. Chat lifecycle (host + guest perspectives)
