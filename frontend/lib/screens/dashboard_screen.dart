@@ -318,6 +318,11 @@ class _DashboardScreenState extends State<DashboardScreen>
       final previous = _prevScrapeRetryPending[id] ?? false;
       _prevScrapeRetryPending[id] = current;
 
+      // TEMP DEBUG (remove before commit) -- print(...) reaches the browser
+      // console in a Flutter web release build too.
+      // ignore: avoid_print
+      print('[DEBUG scrapeRetry] id=$id retry=$retry current=$current previous=$previous hadPrev=$hadPrev status=${row['status']}');
+
       if (!hadPrev || current || !previous) continue; // only a confirmed true->false edge
       if (!healthyStatuses.contains(row['status'])) continue;
 
@@ -343,6 +348,10 @@ class _DashboardScreenState extends State<DashboardScreen>
       final hadPrev = _prevPropertyStatus.containsKey(id);
       final previous = _prevPropertyStatus[id];
       _prevPropertyStatus[id] = status;
+
+      // TEMP DEBUG (remove before commit)
+      // ignore: avoid_print
+      print('[DEBUG trainingCompletion] id=$id status=$status previous=$previous hadPrev=$hadPrev');
 
       // Seeding pass -- this property's first row since the dashboard
       // subscribed (e.g. app just opened, or navigated back after this
