@@ -26,6 +26,10 @@ class PropertyCard extends StatelessWidget {
   final VoidCallback onAddProperty;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  // Cancel + delete while status is Ingesting/Training/Merging (2026-09-19)
+  // -- the founder's escape hatch for a run that's stuck OR that the host
+  // simply wants to abandon. Always a full soft-delete, never a rollback.
+  final VoidCallback onDeleteProcessing;
   final int activeChatCount;
   final bool hasEscalation;
   final bool hasEmergency;
@@ -44,6 +48,7 @@ class PropertyCard extends StatelessWidget {
     required this.onAddProperty,
     this.onArchivedChats = _noop,
     this.onCalendar = _noop,
+    this.onDeleteProcessing = _noop,
     this.activeChatCount = 0,
     this.hasEscalation = false,
     this.hasEmergency = false,
@@ -61,6 +66,7 @@ class PropertyCard extends StatelessWidget {
         onGuestLink = _noop,
         onArchivedChats = _noop,
         onCalendar = _noop,
+        onDeleteProcessing = _noop,
         activeChatCount = 0,
         hasEscalation = false,
         hasEmergency = false,
@@ -87,6 +93,7 @@ class PropertyCard extends StatelessWidget {
       onGuestLink: onGuestLink,
       onArchivedChats: onArchivedChats,
       onCalendar: onCalendar,
+      onDeleteProcessing: onDeleteProcessing,
       showStep0Hint: showStep0Hint,
     );
   }
@@ -189,6 +196,7 @@ class _PropertyCard extends StatefulWidget {
   final VoidCallback onGuestLink;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  final VoidCallback onDeleteProcessing;
   final bool showStep0Hint;
 
   const _PropertyCard({
@@ -203,6 +211,7 @@ class _PropertyCard extends StatefulWidget {
     required this.onGuestLink,
     required this.onArchivedChats,
     required this.onCalendar,
+    required this.onDeleteProcessing,
     this.showStep0Hint = false,
   });
 
@@ -529,41 +538,61 @@ class _PropertyCardState extends State<_PropertyCard> {
       // action lives (property_detail_drawer -> edit_property_screen).
       final heartbeatIso = widget.property['ingest_heartbeat_at'] as String?;
       final stalled = _isHeartbeatStale(heartbeatIso);
+      // A processing property that isn't obviously stuck still has no way to
+      // back out from the dashboard (2026-09-19) -- maybe the host wants to
+      // add a file they forgot, or it really is stuck and heartbeat just
+      // hasn't gone stale yet. Kills the run + wipes the property either
+      // way; shown for BOTH the stalled and the plain-spinner case below.
+      final deleteBtn = _TinyIconBtn(
+        icon: Icons.close_rounded,
+        tooltip: 'Cancel training and delete this property',
+        onTap: widget.onDeleteProcessing,
+      );
       if (stalled) {
-        return Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: widget.onOpenSettings,
-            borderRadius: BorderRadius.circular(6),
-            child: Row(children: [
-              Icon(Icons.refresh_rounded, size: 15, color: palette.warning),
-              const SizedBox(width: 6),
-              Text(
-                'Resume training',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: palette.warning,
-                ),
+        return Row(children: [
+          Expanded(
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: widget.onOpenSettings,
+                borderRadius: BorderRadius.circular(6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.refresh_rounded, size: 15, color: palette.warning),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Resume training',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: palette.warning,
+                    ),
+                  ),
+                ]),
               ),
-            ]),
+            ),
           ),
-        );
+          deleteBtn,
+        ]);
       }
       return Row(children: [
-        SizedBox(
-          width: 14,
-          height: 14,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: palette.accent,
-          ),
+        Expanded(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: palette.accent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Processing…',
+              style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+            ),
+          ]),
         ),
-        const SizedBox(width: 8),
-        Text(
-          'Processing…',
-          style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
-        ),
+        deleteBtn,
       ]);
     }
 

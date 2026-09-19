@@ -86,6 +86,39 @@ async def soft_delete_property(
     return {"status": "deleted"}
 
 
+@router.post("/property/{property_id}/cancel-initial-train")
+async def cancel_initial_train(
+    property_id: str, authorization: str | None = Header(default=None)
+):
+    """Host clicked Stop on the Add Property screen during the property's
+    FIRST training run. Fences out the in-flight background task and clears
+    the run/status columns, but keeps name/airbnb_url/uploaded files intact —
+    the host stays on the same form, ready to hit Train Now again. Refused
+    (already_trained) once the property has real content; that path is
+    soft-delete or the drawer's own controls instead."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+
+    owner_id = await asyncio.to_thread(supabase_client.get_user_id_from_token, token)
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    result = await asyncio.to_thread(
+        supabase_client.cancel_initial_ingest_run, property_id, owner_id
+    )
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Property not found")
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Not your property")
+    if result == "already_trained":
+        raise HTTPException(
+            status_code=409,
+            detail="This property already has content — Stop only applies to the first training run.",
+        )
+    return {"status": "cancelled"}
+
+
 @router.post("/host/delete-account")
 async def delete_account(authorization: str | None = Header(default=None)):
     """Delete the caller's account and all their property data.

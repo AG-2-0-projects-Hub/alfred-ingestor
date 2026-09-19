@@ -19,6 +19,7 @@ import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
 import '../widgets/host_settings_dialog.dart';
 import '../services/push_notification_service.dart';
+import '../services/api_client.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
 
@@ -692,6 +693,61 @@ class _DashboardScreenState extends State<DashboardScreen>
     ).then((_) => _loadWalkthroughSeenIds());
   }
 
+  // The card's × during Processing (2026-09-19) -- kills the in-flight run
+  // and wipes the property, whether it's genuinely stuck or the host just
+  // wants to abandon it. Reuses the same soft-delete endpoint the drawer's
+  // "Delete Forever" already calls; the backend clears ingest_run_id as
+  // part of that update, which is what fences out the in-flight background
+  // task (see supabase_client.soft_delete_property's comment) rather than
+  // needing an actual Cloud Tasks cancellation call. The card itself drops
+  // off this dashboard the same way any other soft-deleted property already
+  // does (D5), via the existing realtime stream -- no extra wiring needed.
+  Future<void> _deleteProcessingProperty(Map<String, dynamic> property) async {
+    final name = property['name'] as String? ?? 'this property';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.palette.surface,
+        title: const Text('Stop and delete this property?'),
+        content: Text(
+          'This cancels training on "$name" right now and permanently deletes '
+          "it — including anything already uploaded. You'll need to add it "
+          'again from scratch. This can\'t be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('Delete Forever'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final token = Supabase.instance.client.auth.currentSession?.accessToken;
+      await ApiClient.postJson(
+        '/api/property/${property['id']}/soft-delete',
+        const {},
+        bearer: token,
+      );
+    } catch (e) {
+      if (mounted) {
+        final msg = e is ApiException ? e.userMessage : '$e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Delete failed: $msg'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _openArchivedChats(Map<String, dynamic> property) {
     showDialog(
       context: context,
@@ -1176,6 +1232,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     onAddProperty: _openAddProperty,
                     onArchivedChats: () => _openArchivedChats(item),
                     onCalendar: () => _openCalendar(item),
+                    onDeleteProcessing: () => _deleteProcessingProperty(item),
                     showStep0Hint: _showStep0Hint(item),
                   );
             return _StaggeredEntry(
@@ -1250,6 +1307,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onAddProperty: _openAddProperty,
                   onArchivedChats: () => _openArchivedChats(item),
                   onCalendar: () => _openCalendar(item),
+                  onDeleteProcessing: () => _deleteProcessingProperty(item),
                   showStep0Hint: _showStep0Hint(item),
                 );
           return _StaggeredEntry(

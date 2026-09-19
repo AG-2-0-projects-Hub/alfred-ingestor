@@ -511,6 +511,49 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     }
   }
 
+  // Host-triggered Stop, first-training-run only (this screen never handles
+  // a retrain or conflict resolution, so "in progress here" always means
+  // "initial train"). Cancels locally first (stop waiting on the realtime
+  // sub/completer, drop the wait dialog's hold) then tells the backend to
+  // fence the run -- best-effort: even if that call fails, the run_id fence
+  // on the next Train Now click protects against a zombie write either way.
+  // Deliberately does not touch _urlController/_nicknameController/
+  // _filesToIngest -- the host lands back on the same filled-in form.
+  Future<void> _stopIngest() async {
+    if (!_isIngesting && !_isMerging) return;
+    final propertyId = _resolvedPropertyId ?? _propertyId;
+
+    _propertySub?.cancel();
+    _propertySub = null;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    if (_flowCompleter != null && !_flowCompleter!.isCompleted) {
+      _flowCompleter!.complete();
+    }
+
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      await ApiClient.postJson(
+        '/api/property/$propertyId/cancel-initial-train',
+        {},
+        bearer: session?.accessToken,
+        timeout: const Duration(seconds: 15),
+      );
+    } catch (_) {
+      // Best-effort -- see comment above.
+    }
+
+    if (mounted) {
+      setState(() {
+        _isIngesting = false;
+        _isMerging = false;
+        _isStalled = false;
+        _resolvedPropertyId = null;
+        _propertyStatus = null;
+      });
+    }
+  }
+
   String? _parseOfficialName(String? markdown) {
     if (markdown == null) return null;
     final match = RegExp(r'\*\*Property Name:\*\*\s*(.+)').firstMatch(markdown);
@@ -1254,6 +1297,20 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                         : Text(widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'),
                   ),
                 ),
+                // Only while the FIRST training run is actually in flight --
+                // this screen never handles a retrain or conflict
+                // resolution, so that's the only case "in progress here"
+                // can mean. Maybe forgot a file, wrong URL, etc.
+                if (trainingInProgress) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton(
+                      onPressed: _stopIngest,
+                      child: Text('Stop',
+                          style: TextStyle(color: context.palette.textSecondary)),
+                    ),
+                  ),
+                ],
                 if (_ingestedMarkdown != null &&
                     _ingestedMarkdown!.isNotEmpty) ...[
                   const SizedBox(height: 40),

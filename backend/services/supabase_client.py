@@ -1069,6 +1069,15 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
     # delete the host sees is durable even if a later best-effort step fails.
     # NOTE: learned_knowledge is NOT NULL — clear it to [] (an empty array),
     # never None, or the whole update is rejected and nothing gets deleted.
+    #
+    # ingest_run_id is cleared here too (2026-09-19, host-triggered delete
+    # during Processing) -- every ingest_worker.py RPC is scoped
+    # `WHERE ingest_run_id = <the id it was dispatched with>` and silently
+    # no-ops otherwise (see that file's "Task fencing" docstring), so clearing
+    # it is what stops an in-flight background task from writing a real
+    # result into this row after it's already supposed to be gone. No Cloud
+    # Tasks cancellation API call needed -- the fencing design already makes
+    # a zombie task harmless.
     client.table("properties").update({
         "master_json": None,
         "ingested_markdown": None,
@@ -1080,6 +1089,11 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
         "status": "deleted",
         "deleted_at": _now(),
         "updated_at": _now(),
+        "ingest_run_id": None,
+        "ingest_files": None,
+        "ingest_heartbeat_at": None,
+        "ingest_stage": None,
+        "scrape_retry": None,
     }).eq("id", property_id).execute()
 
     # Anonymize guests — keep the rows (FK + chat linkage) but strip the
@@ -1097,6 +1111,50 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
 
     # Remove all stored files for the property (best-effort).
     _delete_property_storage(property_id)
+    return "ok"
+
+
+def cancel_initial_ingest_run(property_id: str, owner_id: str) -> str:
+    """Host-triggered Stop during a property's FIRST training run (Add
+    Property screen only -- never a retrain/resolve, both of which already
+    have master_json and so fail the guard below). Unlike soft_delete_property,
+    this deliberately does NOT touch name, airbnb_url, file_fingerprints, or
+    storage -- the host stays on the same form with what they already typed
+    and uploaded, ready to hit Train Now again.
+
+    Clearing ingest_run_id is what makes the in-flight background task a
+    no-op the next time it calls any ingest_worker.py RPC (see that file's
+    "Task fencing" docstring) -- no Cloud Tasks cancellation API needed.
+
+    Returns "ok", "not_found", "forbidden", or "already_trained" (refused --
+    this property has real content; only soft-delete or the drawer's own
+    controls apply once it's past its first run).
+    """
+    client = get_client()
+    existing = (
+        client.table("properties")
+        .select("id, owner_id, master_json")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    if existing is None or existing.data is None:
+        return "not_found"
+    if existing.data.get("owner_id") != owner_id:
+        return "forbidden"
+    if existing.data.get("master_json") is not None:
+        return "already_trained"
+
+    client.table("properties").update({
+        "status": None,
+        "ingest_run_id": None,
+        "ingest_files": None,
+        "ingest_heartbeat_at": None,
+        "ingest_stage": None,
+        "ingested_markdown": None,
+        "scraped_markdown": None,
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
     return "ok"
 
 
