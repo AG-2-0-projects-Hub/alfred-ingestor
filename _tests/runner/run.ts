@@ -12,6 +12,8 @@ import { runB6 } from './scenarios/b6.ts';
 import { runB7 } from './scenarios/b7.ts';
 import { runB15 } from './scenarios/b15.ts';
 import { runB16 } from './scenarios/b16.ts';
+import { runD6 } from './scenarios/d6.ts';
+import { runD7 } from './scenarios/d7.ts';
 
 export type ScenarioResult = {
   id: string;
@@ -92,6 +94,9 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runB7,
     runB15,
     runB16,
+    // Layer 2 — dashboard
+    runD6,
+    runD7,
   ];
 }
 

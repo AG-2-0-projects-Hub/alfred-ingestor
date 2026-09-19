@@ -654,6 +654,26 @@ unautomated ones manually before a `staging → main` merge.
 - **last_tested:** 2026-07-01 (manual by user — PASS)
 - **status:** passing
 
+### D6. Top-bar Settings menu holds the walkthrough replay toggle
+- **id:** dashboard-settings-menu-01
+- **touches:** `frontend/lib/screens/dashboard_screen.dart`, `frontend/lib/widgets/host_settings_dialog.dart`, `frontend/lib/widgets/property_detail_drawer.dart`, `frontend/lib/utils/walkthrough_prefs.dart`
+- **layer:** 2 — `_tests/runner/scenarios/d6.ts`
+- **setup:** host logged in on the dashboard (any account state)
+- **action:** click the top-bar "Settings" gear icon (between Profile and the "?" host-guide icon); click the "+ Show walkthrough again" switch
+- **host_expected:** a dialog titled "Settings" opens with the "+ Show walkthrough again" row and a Close button — not a property drawer (no Overview/Files/Knowledge tabs, no Delete Property). The toggle actually flips when clicked. Moved here 2026-09-19 from inside each property's own drawer, since it always acted account-wide.
+- **last_tested:** 2026-09-19 — PASS
+- **status:** passing
+
+### D7. Ready card shows "Details" + an opaque status pill, still opens on tap
+- **id:** dashboard-card-ready-01
+- **touches:** `frontend/lib/widgets/property_card.dart`
+- **layer:** 2 — `_tests/runner/scenarios/d7.ts`
+- **setup:** host logged in with at least one Ready (trained) property on the dashboard
+- **action:** none beyond loading the dashboard; then tap the card body
+- **host_expected:** the card's second action button reads "Details" with a magnifying-glass icon (was "Settings" + gear); the status pill (e.g. "Ready") is a solid, opaque color legible against the card photo (was a washed-out ~10-12% opacity tint in light mode); tapping the card body still opens the Conversations/New Guest Link popup normally, since Ready is exactly the state that popup should be reachable from.
+- **last_tested:** 2026-09-19 — PASS
+- **status:** passing
+
 ---
 
 ## E. Multi-property
