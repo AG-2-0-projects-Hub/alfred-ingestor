@@ -306,6 +306,15 @@ class _PropertyCardState extends State<_PropertyCard> {
     final masterJson = widget.property['master_json'] as Map<String, dynamic>?;
     final media = masterJson?['media'] as Map<String, dynamic>?;
     final thumbnailUrl = media?['thumbnail_url'] as String?;
+    // Computed once here (not re-derived inside _buildActions) so the
+    // whole-card tap gate below and the action row's own branching can never
+    // disagree on what counts as Ready.
+    final wasTrainedBefore = masterJson != null;
+    final isReady = status == 'Trained' ||
+        status == 'Active' ||
+        status == 'Resolved' ||
+        status == 'Merged' ||
+        (wasTrainedBefore && status == 'Ingested');
 
     return Stack(
       clipBehavior: Clip.none,
@@ -320,12 +329,18 @@ class _PropertyCardState extends State<_PropertyCard> {
         // readers.
         Semantics(
           button: true,
+          enabled: isReady,
+          // Not ready yet -- the "New Guest Link"/conversations popup this
+          // opens assumes a trained property (see PropertyExpandedView), so
+          // tapping a still-processing/error/conflict card silently did
+          // nothing useful. Disabled instead of wired to a different
+          // destination -- there isn't one specified for those states yet.
           label: 'Open ${widget.property['name'] as String? ?? 'property'}',
           child: FocusableActionDetector(
             actions: {
               ActivateIntent: CallbackAction<ActivateIntent>(
                 onInvoke: (intent) {
-                  widget.onOpenExpanded();
+                  if (isReady) widget.onOpenExpanded();
                   return null;
                 },
               ),
@@ -333,12 +348,13 @@ class _PropertyCardState extends State<_PropertyCard> {
             child: MouseRegion(
               onEnter: (_) => setState(() => _hovered = true),
               onExit: (_) => setState(() => _hovered = false),
-              cursor: SystemMouseCursors.click,
+              cursor:
+                  isReady ? SystemMouseCursors.click : SystemMouseCursors.basic,
               child: GestureDetector(
-                onTap: widget.onOpenExpanded,
-                onTapDown: (_) => setState(() => _pressed = true),
-                onTapUp: (_) => setState(() => _pressed = false),
-                onTapCancel: () => setState(() => _pressed = false),
+                onTap: isReady ? widget.onOpenExpanded : null,
+                onTapDown: isReady ? (_) => setState(() => _pressed = true) : null,
+                onTapUp: isReady ? (_) => setState(() => _pressed = false) : null,
+                onTapCancel: isReady ? () => setState(() => _pressed = false) : null,
                 child: AnimatedScale(
                   duration: const Duration(milliseconds: 200),
                   curve: AppTheme.standardEasing,
@@ -467,7 +483,9 @@ class _PropertyCardState extends State<_PropertyCard> {
                                 ] else
                                   const Spacer(),
                                 _buildActions(context, status, palette,
-                                    scrapeLinkNeedsAttention),
+                                    scrapeLinkNeedsAttention,
+                                    wasTrainedBefore: wasTrainedBefore,
+                                    isReady: isReady),
                               ],
                             ),
                           ),
@@ -486,14 +504,8 @@ class _PropertyCardState extends State<_PropertyCard> {
   }
 
   Widget _buildActions(BuildContext context, String status, AppPalette palette,
-      bool needsAttention) {
-    // A retrain on an already-live property legitimately passes back through
-    // 'Ingested'/'Merged' (backend/routers/ingest.py) — those used to fall
-    // through to a bare "Details" button, hiding +Guest/Settings for a
-    // property guests could still be actively messaging. master_json only
-    // gets cleared once a *new* merge actually completes, so its presence
-    // here reliably means "this property has been trained before."
-    final wasTrainedBefore = widget.property['master_json'] != null;
+      bool needsAttention,
+      {required bool wasTrainedBefore, required bool isReady}) {
     // A first-time 'Ingested' property (no prior master_json) is still
     // mid-chain toward merge, same as the badge above treats it — without
     // this it fell through to a clickable "Details" button on a property
@@ -504,11 +516,6 @@ class _PropertyCardState extends State<_PropertyCard> {
         (status == 'Ingested' && !wasTrainedBefore);
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
-    final isReady = status == 'Trained' ||
-        status == 'Active' ||
-        status == 'Resolved' ||
-        status == 'Merged' ||
-        (wasTrainedBefore && status == 'Ingested');
 
     if (isProcessing) {
       // Phase 2 (2026-09-16): this card used to show a bare "Processing…"
@@ -678,8 +685,8 @@ class _ReadyActions extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         _CardAction(
-          icon: Icons.settings_rounded,
-          label: 'Settings',
+          icon: Icons.search_rounded,
+          label: 'Details',
           onTap: onOpenSettings,
           highlighted: highlightHint,
           glow: settingsNeedsAttention,
@@ -844,7 +851,7 @@ class _Step0Tip extends StatelessWidget {
                   ),
                   const TextSpan(text: ' to connect your guest, or '),
                   TextSpan(
-                    text: 'Settings',
+                    text: 'Details',
                     style: TextStyle(
                         fontWeight: FontWeight.w700,
                         color: palette.textPrimary),
@@ -947,7 +954,13 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: bg,
+        // bg is a translucent "container" token shared with 9+ other spots
+        // in the app (buttons, banners, dialogs) that are deliberately soft.
+        // Blending it against the card's own surface color -- rather than
+        // making the shared token itself opaque -- keeps this pill legible
+        // over any thumbnail photo without changing how bg looks anywhere
+        // else it's used.
+        color: Color.alphaBlend(bg, p.surface),
         borderRadius: BorderRadius.circular(100),
         boxShadow: glowAlpha > 0
             ? [

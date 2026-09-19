@@ -212,7 +212,7 @@ Future<void> showConflictResultDialog(
               ),
               const SizedBox(height: 10),
               Text(
-                'Alfred merged your information but found $conflictCount ${conflictCount == 1 ? 'point' : 'points'} where your listing and uploaded documents disagree. Review each one and choose the version Alfred should use.',
+                'Alfred learned from your information but found $conflictCount ${conflictCount == 1 ? 'point' : 'points'} where your listing and uploaded documents disagree. Review each one and choose the version Alfred should use.',
                 style: GoogleFonts.inter(
                     fontSize: 13,
                     color: context.palette.textSecondary,

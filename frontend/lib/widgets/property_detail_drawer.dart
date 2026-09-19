@@ -106,12 +106,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // own text stayed stale even after markNeedsBuild() calls and a 3s wait.
   // A ValueListenableBuilder inside the entry is the documented-safe pattern.
   final _wtStepNotifier = ValueNotifier<int?>(null);
-  // "+ Show walkthrough again" switch state — true while either half (this
-  // property's Settings walkthrough, or the global Guest Link walkthrough)
-  // hasn't been seen yet. Loaded async since both live in SharedPreferences;
-  // null until the first load resolves. See _loadReplayPending/_toggleReplayWalkthrough.
-  bool? _wtReplayPending;
-
   @override
   void initState() {
     super.initState();
@@ -130,14 +124,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     // added 2026-09-17.
     _refreshProperty();
     _maybeStartWalkthrough();
-    _loadReplayPending();
   }
 
   Future<void> _maybeStartWalkthrough() async {
     if (widget.isDev) return;
     final status = _property['status'] as String? ?? '';
     if (!_wtReadyStatuses.contains(status)) return;
-    final seen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
+    final seen = await WalkthroughPrefs.isPostTrainingSeen();
     if (seen || !mounted) return;
     // The tip panel explaining each highlighted step is hidden below this
     // width (see _ensureWtOverlayInserted's own screenW < 1000 check) — never
@@ -146,13 +139,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     // way to progress.
     if (MediaQuery.sizeOf(context).width < 1000) return;
     _setWtStep(0);
-  }
-
-  Future<void> _loadReplayPending() async {
-    if (widget.isDev) return;
-    final settingsSeen = await WalkthroughPrefs.isPostTrainingSeen(_property['id'] as String);
-    final guestLinkSeen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
-    if (mounted) setState(() => _wtReplayPending = !(settingsSeen && guestLinkSeen));
   }
 
   // Single point of mutation for _wtStep — keeps the highlight (plain
@@ -245,32 +231,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   void _wtFinish() {
     _setWtStep(null);
-    WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
-  }
-
-  // "+ Show walkthrough again" switch. One control for both halves: turning
-  // it on resets BOTH the Settings walkthrough (this property) and the Guest
-  // Link walkthrough (global) and sends the host back to the dashboard, where
-  // Step 0 now points at both +Guest and Settings again — see
-  // dashboard_screen.dart's _showStep0Hint. Each dedicated walkthrough then
-  // starts on its own the next time its real entry point opens
-  // (_maybeStartWalkthrough here, GenerateGuestLinkDialog's own equivalent for
-  // Guest Link) — no need to drive either one directly from here. Turning it
-  // off cancels/dismisses both at once, same as closing today.
-  Future<void> _toggleReplayWalkthrough(bool value) async {
-    if (!value) {
-      await WalkthroughPrefs.markPostTrainingSeen(_property['id'] as String);
-      await WalkthroughPrefs.markGuestLinkWalkthroughSeen();
-      if (!mounted) return;
-      if (_wtStep != null) _setWtStep(null);
-      setState(() => _wtReplayPending = false);
-      return;
-    }
-    await WalkthroughPrefs.resetPostTrainingWalkthrough(_property['id'] as String);
-    await WalkthroughPrefs.resetGuestLinkWalkthrough();
-    if (!mounted) return;
-    setState(() => _wtReplayPending = true);
-    Navigator.of(context).pop();
+    WalkthroughPrefs.markPostTrainingSeen();
   }
 
   // Inserts the docked tip panel as a real Overlay entry
@@ -1163,8 +1124,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _infoRow('Added', _formatDate(createdAt)),
           const SizedBox(height: 8),
           _buildWelcomeLanguageSetting(),
-          if (!widget.isDev && _wtReadyStatuses.contains(status))
-            _buildReplayWalkthroughSetting(),
           if (!widget.isDev) ...[
             const SizedBox(height: 16),
             _buildFilesSummaryCard(),
@@ -1290,44 +1249,10 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
   }
 
-  Widget _buildReplayWalkthroughSetting() {
-    final palette = context.palette;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: palette.surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: palette.border),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Tooltip(
-              message: 'Replays the setup tips shown right after this '
-                  'property finished training — both the Settings walkthrough '
-                  'and the guest link walkthrough.',
-              waitDuration: const Duration(milliseconds: 300),
-              child: Text(
-                '+ Show walkthrough again',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: palette.textPrimary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Switch(
-            value: _wtReplayPending ?? false,
-            activeThumbColor: palette.primary,
-            onChanged: _toggleReplayWalkthrough,
-          ),
-        ],
-      ),
-    );
-  }
+  // "+ Show walkthrough again" moved to the dashboard's top-right Settings
+  // menu (2026-09-19) — it always acted account-wide even when it lived
+  // here, so it belongs with the other account-level controls, not inside
+  // one property's drawer. See dashboard_screen.dart.
 
   // Scrape-quality failsafe (2026-09-17) — true once the background retry has
   // exhausted itself (see migrations/2026-09-17_scrape_retry.sql). Alfred

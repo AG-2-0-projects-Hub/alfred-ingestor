@@ -59,7 +59,7 @@ class AddPropertyWalkthroughPanel extends StatelessWidget {
         ),
       WalkthroughScreen.train => (
           'Train me',
-          'Tap Ingest Now to have me read everything you uploaded. Once that finishes, tap Merge Now — if anything disagrees with the listing, I\'ll ask you to confirm before I\'m done.',
+          'Tap Train Now and I\'ll read everything you uploaded, then merge it with the listing automatically — if anything disagrees, I\'ll ask you to confirm before I\'m done.',
         ),
     };
 

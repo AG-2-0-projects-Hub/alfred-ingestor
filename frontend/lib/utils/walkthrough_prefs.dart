@@ -1,37 +1,29 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Dismiss-state for the post-training walkthrough. Part A (dashboard's Step
-/// 0 hint) reads the same "seen" flag Part B (Settings drawer) writes, via
-/// [seenPostTrainingPropertyIds] — see walkthrough.md for the full map.
+/// Dismiss-state for the post-training walkthrough. A single account-wide
+/// flag (changed 2026-09-19 — was per-property) since it's an onboarding
+/// explainer for the Settings drawer's own controls, not knowledge tied to
+/// any one property; a host training a 2nd/3rd property shouldn't see it
+/// repeat. Part A (dashboard's Step 0 hint) reads the same flag Part B
+/// (Settings drawer) writes — see walkthrough.md for the full map.
 class WalkthroughPrefs {
   WalkthroughPrefs._();
 
-  static const _postTrainingPrefix = 'post_training_walkthrough_seen_';
+  static const _postTrainingKey = 'post_training_walkthrough_seen';
 
-  /// All property IDs already marked seen — lets the dashboard compute which
-  /// cards need Part A's hint in one pass instead of one async call per card.
-  static Future<Set<String>> seenPostTrainingPropertyIds() async {
+  static Future<bool> isPostTrainingSeen() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs
-        .getKeys()
-        .where((k) => k.startsWith(_postTrainingPrefix))
-        .map((k) => k.substring(_postTrainingPrefix.length))
-        .toSet();
+    return prefs.getBool(_postTrainingKey) ?? false;
   }
 
-  static Future<bool> isPostTrainingSeen(String propertyId) async {
+  static Future<void> markPostTrainingSeen() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('$_postTrainingPrefix$propertyId') ?? false;
+    await prefs.setBool(_postTrainingKey, true);
   }
 
-  static Future<void> markPostTrainingSeen(String propertyId) async {
+  static Future<void> resetPostTrainingWalkthrough() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('$_postTrainingPrefix$propertyId', true);
-  }
-
-  static Future<void> resetPostTrainingWalkthrough(String propertyId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('$_postTrainingPrefix$propertyId');
+    await prefs.remove(_postTrainingKey);
   }
 
   // Part C (Guest Link dialog + Host Chat, 9 combined steps) — a single

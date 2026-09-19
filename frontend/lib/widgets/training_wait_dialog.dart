@@ -180,7 +180,7 @@ class _TrainingWaitDialogState extends State<TrainingWaitDialog> {
 // blind pop() could actually close the dashboard's dialog instead, stranding
 // this one on screen. removeRoute closes exactly the route it was given,
 // regardless of what else was pushed on top of it in the meantime.
-const _fadeOutDuration = Duration(milliseconds: 200);
+const _fadeDuration = Duration(milliseconds: 200);
 
 // Keyed by route identity so pushTrainingWaitDialog's own return type (and
 // every existing `Route<void>?` field storing it) never has to change --
@@ -193,16 +193,25 @@ Route<void> pushTrainingWaitDialog(
   bool barrierDismissible = false,
   Color? barrierColor,
 }) {
+  // Starts invisible and flips true a frame after the route is pushed, so
+  // AnimatedOpacity below animates it in over _fadeDuration instead of
+  // popping straight to opacity 1 on the first frame (founder feedback,
+  // 2026-09-19 -- fade-out already existed, fade-in didn't).
+  final visible = ValueNotifier<bool>(false);
   final closing = ValueNotifier<bool>(false);
   final route = DialogRoute<void>(
     context: context,
     barrierDismissible: barrierDismissible,
     barrierColor: barrierColor,
     builder: (ctx) => ValueListenableBuilder<bool>(
-      valueListenable: closing,
-      builder: (_, isClosing, child) => AnimatedOpacity(
-        opacity: isClosing ? 0 : 1,
-        duration: _fadeOutDuration,
+      valueListenable: visible,
+      builder: (_, isVisible, child) => ValueListenableBuilder<bool>(
+        valueListenable: closing,
+        builder: (_, isClosing, child) => AnimatedOpacity(
+          opacity: (isVisible && !isClosing) ? 1 : 0,
+          duration: _fadeDuration,
+          child: child,
+        ),
         child: child,
       ),
       child: builder(ctx),
@@ -210,6 +219,7 @@ Route<void> pushTrainingWaitDialog(
   );
   _closingNotifiers[route] = closing;
   Navigator.of(context, rootNavigator: true).push(route);
+  WidgetsBinding.instance.addPostFrameCallback((_) => visible.value = true);
   return route;
 }
 
@@ -238,7 +248,7 @@ Future<void> popTrainingWaitDialog(BuildContext context, Route<void>? route) asy
     return;
   }
   closing.value = true;
-  await Future.delayed(_fadeOutDuration);
+  await Future.delayed(_fadeDuration);
   if (route.isActive) {
     Navigator.of(context, rootNavigator: true).removeRoute(route);
   }

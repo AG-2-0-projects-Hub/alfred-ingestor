@@ -17,6 +17,7 @@ import 'add_property_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
+import '../widgets/host_settings_dialog.dart';
 import '../services/push_notification_service.dart';
 import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
@@ -41,12 +42,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   Map<String, dynamic>? _hostStats;
   String? _hostAvatarUrl;
   bool _isDev = false;
-  // Part A of the User-mode post-training walkthrough (Step 0) — property IDs
-  // that have already had their dashboard nudge dismissed. Step 0 points at
-  // both +Guest and Settings, so it only actually dismisses once BOTH the
-  // per-property Settings walkthrough (Part B) and the global Guest Link
-  // walkthrough (Part C) have been seen — see _showStep0Hint below.
-  Set<String> _walkthroughSeenIds = {};
+  // Part A of the User-mode post-training walkthrough (Step 0) — the
+  // dashboard nudge shown on any Ready card. Step 0 points at both +Guest
+  // and Settings, so it only actually dismisses once BOTH the account-wide
+  // Settings walkthrough (Part B, changed 2026-09-19 — was per-property) and
+  // the global Guest Link walkthrough (Part C) have been seen — see
+  // _showStep0Hint below.
+  bool _settingsWalkthroughSeen = false;
   bool _guestLinkWalkthroughSeen = true;
 
   static const _readyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
@@ -549,11 +551,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _loadWalkthroughSeenIds() async {
-    final ids = await WalkthroughPrefs.seenPostTrainingPropertyIds();
+    final settingsSeen = await WalkthroughPrefs.isPostTrainingSeen();
     final guestLinkSeen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
     if (mounted) {
       setState(() {
-        _walkthroughSeenIds = ids;
+        _settingsWalkthroughSeen = settingsSeen;
         _guestLinkWalkthroughSeen = guestLinkSeen;
       });
     }
@@ -563,8 +565,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_isDev) return false;
     final status = property['status'] as String? ?? '';
     if (!_readyStatuses.contains(status)) return false;
-    final settingsSeen = _walkthroughSeenIds.contains(property['id'] as String);
-    return !(settingsSeen && _guestLinkWalkthroughSeen);
+    return !(_settingsWalkthroughSeen && _guestLinkWalkthroughSeen);
   }
 
   Widget _profileGlyph(double size, Color color) {
@@ -849,6 +850,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                     icon: _profileGlyph(22, palette.textSecondary),
                     onPressed: _openProfile,
                   ),
+                IconButton(
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  onPressed: () => HostSettingsDialog.show(context)
+                      .then((_) => _loadWalkthroughSeenIds()),
+                ),
                 IconButton(
                   tooltip: 'Host setup guide',
                   icon: const Icon(Icons.help_outline_rounded, size: 18),
