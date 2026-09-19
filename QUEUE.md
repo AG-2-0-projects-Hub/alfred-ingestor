@@ -58,6 +58,14 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Alfred mascot/persona — own mini-project, Clippy-style riff, 🤖 emoji is the placeholder (queued 2026-09-09)
 - [ ] Revisit "Update a Property" — file deletion doesn't retract knowledge, real Airbnb listing changes (photos, house code); wants real beta-tester input first (queued 2026-09-09)
 - [ ] Add real sourced stats/fun facts to the Train Now wait popup's rotating card (currently Alfred-capability tips only, no stats — deliberately avoided fabricating numbers) (queued 2026-09-09)
+- [ ] Property/document match-check (queued 2026-09-19, deliberately parked as its own design
+      problem — not part of the 2026-09-19 UI/UX batch): verify that uploaded supporting documents
+      (house manual, WiFi photo, etc.) actually belong to the property they're attached to, rather
+      than trusting whatever the host drops in — e.g. catch a host accidentally uploading a
+      different property's manual. Needs its own FMEA/Plan-Mode pass before scoping: how to
+      actually detect a mismatch (address/name matching against `master_json`? a Gemini
+      cross-check pass over the doc vs. the scraped listing?), what a false positive costs the host
+      (a wrongly-flagged real document), and whether it blocks training or just warns.
 - [ ] Anonymized guest-conversation training database (mini-project, queued 2026-09-19) — separate store of past guest conversation logs (beyond per-property knowledge) for eventual model fine-tuning. Needs its own design pass before scoping: a disclaimer shown to the host before upload explaining conversations will be anonymized, a full anonymization pass on names, and explicit detection + removal/flagging of payment and contact info (card numbers, phone, email) before anything lands in the training store. Retention policy and storage location undecided.
 
 ## Done (came off the queue)
