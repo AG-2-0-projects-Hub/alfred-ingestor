@@ -3,6 +3,30 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-19 — Full `Read` on a known secrets file is still a leak, not just raw `grep`/`cat`
+
+**Context:** Mid-session, writing a new Playwright scenario for the Stop/Delete UI fixes, needed
+to check `_tests/fixtures/.env.test`'s structure before reusing its values.
+
+**Discovery:** Ran the `Read` tool directly on the file instead of `env.ts`'s already-exported
+values (which `b16.ts` already uses for exactly this) or an anchored `grep '^KEY='`. `Read`
+dumped every real secret in the file into the transcript — Vercel API token, WhatsApp/Telegram
+tokens, Firecrawl key, Gemini test key, and the test account password. Same file/class as the
+2026-09-10 exposure already logged in `QUEUE.md` (deferred as low-stakes local exposure); founder
+re-confirmed that stance rather than requesting rotation this time too. The existing
+"structural, not regex" lesson (grep/sed/cat on secrets files) apparently didn't generalize far
+enough in practice — a full-file `Read` is the same class of mistake and wasn't front-of-mind
+when the actual need was just "see the keys, not the values."
+
+**Impact:** Going forward this session, used `env.ts`'s exports directly for Supabase
+URL/anon-key/test-host credentials rather than touching the raw file again.
+
+**Global Candidate:** Yes — the existing global lesson on structural secret redaction should
+explicitly name `Read`/`cat`-the-whole-file as an equally-covered case, not just line-oriented
+`grep`/`sed`, since that's exactly the gap that let this recur.
+
+---
+
 ## 2026-09-19 — Coordinate-click a Flutter/CanvasKit dialog from a fresh screenshot, not an earlier one; use video capture, not screenshot polling, for sub-200ms transitions
 
 **Context:** The completion-popup-polish handoff required live-reproducing two unconfirmed bugs

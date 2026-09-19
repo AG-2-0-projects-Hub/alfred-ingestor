@@ -1090,10 +1090,15 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
         "deleted_at": _now(),
         "updated_at": _now(),
         "ingest_run_id": None,
-        "ingest_files": None,
+        # NOT NULL, like learned_knowledge above -- {} (empty jsonb object),
+        # never None, or the whole update is rejected (confirmed live:
+        # postgrest.exceptions.APIError 23502 on a real staging call).
+        "ingest_files": {},
         "ingest_heartbeat_at": None,
         "ingest_stage": None,
-        "scrape_retry": None,
+        # NOT NULL too -- same fix as ingest_files above (confirmed live,
+        # same 23502 error class, one column at a time).
+        "scrape_retry": {},
     }).eq("id", property_id).execute()
 
     # Anonymize guests — keep the rows (FK + chat linkage) but strip the
@@ -1148,7 +1153,8 @@ def cancel_initial_ingest_run(property_id: str, owner_id: str) -> str:
     client.table("properties").update({
         "status": None,
         "ingest_run_id": None,
-        "ingest_files": None,
+        # NOT NULL -- see soft_delete_property's comment on the same column.
+        "ingest_files": {},
         "ingest_heartbeat_at": None,
         "ingest_stage": None,
         "ingested_markdown": None,
