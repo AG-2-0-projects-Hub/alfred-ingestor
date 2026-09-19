@@ -11,12 +11,6 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 TOP: completion-popup polish + two unconfirmed live bugs (wait-dialog/toast fade cut short;
-  drawer not auto-closing after a successful retry dispatch, despite the code appearing to already
-  do this). Self-contained handoff, read first: `_Context/HANDOFF_completion-popup-polish_2026-09-19.md`.
-  Also 4 low-risk polish items bundled in the same doc (Settings glow on "Needs Attention", fix-link
-  dialog copy, conflict-popup now needs the property name — design pre-approved via artifact — and
-  removing a dead "Resolve" button on Edit Property).
 - 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
   worth a quick look at the delete path.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
@@ -25,9 +19,91 @@ session-continuity state only: in-flight investigations and handoffs that don't 
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
 
 ## Unresolved Decisions
-None currently open.
+- guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
+  canvas-rendered file picker didn't respond to Playwright's native file-chooser intercept or a
+  synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
+  different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-19 (**Closed out the scrape-retry-UI handoff from 2026-09-17 for real —
+**Last Session:** 2026-09-19 (**Fixed the Step 0 hint showing on every Ready card instead of one;
+root-caused and fixed "Stop doesn't actually stop training" as two separate real bugs; built and
+live-verified a ghost-property recovery UX on top of that fix; finished Wave 4 (guide.html) with
+real screenshot fixes.**) — `staging`, commits `5469d5a`..`24b9afa` (11 commits). Frontend +
+backend; backend redeployed twice (`alfred-backend-staging-00026-szv`, `-00027-vmw`), Vercel
+auto-deployed each frontend push.
+> **✅ Step 0 hint scope bug**: `_showStep0Hint` gated only on status + global seen-flags, not card
+> position, so it rendered on every Ready card instead of one. Now only the first Ready property in
+> dashboard order shows it.
+> **✅ "Stop doesn't stop" — two real, unrelated fencing gaps, found by direct code trace, not
+> guessing.** (1) `claim_merge`/`save_merge_result` checked `status` alone, never `ingest_run_id` —
+> an already-in-flight file completion after Stop could still claim and finish a merge. (2) The
+> actual mechanism behind what the founder saw live: `ingest_worker.run_start`'s *second*
+> `begin_ingest_run` call (re-seeding `ingest_files` after the scrape completes) was completely
+> unconditional — a Stop landing mid-scrape got silently undone the instant the scrape returned,
+> resurrecting the cancelled run with no further host action. Both fenced with the same
+> `expected_run_id` pattern already used elsewhere. Verified via a direct DB-level test of the exact
+> fencing query, then 4 live end-to-end Playwright runs against redeployed staging (added a new 25s
+> post-Stop re-check to D8 specifically to catch the delayed resurrection), plus manual re-checks
+> minutes later confirming no resurrection.
+> **✅ Ghost-property recovery UX** (founder decision: Resume-or-delete, not auto-delete on Stop) —
+> built on reused infrastructure, not new UI: `setup_status.dart`'s `nextStepFor` gained a "Training
+> incomplete" case so the existing `SetupStatusBanner` renders it in both the drawer and Edit
+> Property; `property_card.dart` recognizes the same state on the dashboard card (Resume Training +
+> a red delete x, reusing the existing soft-delete confirm dialog); `edit_property_screen.dart`
+> routes Resume to the same `_startIngest()` every other resume path already uses. Live-verified the
+> full chain end-to-end, including capturing the real `/api/ingest` network call Resume Training
+> fires.
+> **✅ Wave 4 (guide.html), finished**: "What trains Alfred best" split into Gold-for-Alfred/
+> Also-helps tiers, mirrored into the in-app tips (`add_property_screen.dart`/
+> `add_property_walkthrough_panel.dart`); Step 2/4 screenshots fixed (stale dev-mode "INGEST NOW"
+> composite removed; Step 4 widened to show real context, with a highlight glow around Train Now
+> matching the in-app walkthrough's own style); Property Enhancement screenshots recaptured at 2x
+> DPI with a capped display width (were stretched full-width from a low-res capture, blurry);
+> "Guest Experience" tab renamed "Add a Guest" and expanded 3→4 steps (added Autopilot/Intervene,
+> enriched the resolve flow) to better reflect the real in-app 9-step walkthrough's depth.
+> Logged: `_tests/scenarios.md` (D8 rewritten + extended, ghost-property row updated to confirmed
+> fact, tips-restructure row); `QUEUE.md` item #13 added (approved during FMEA, never actually
+> queued until now).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Closed out the completion-popup-polish handoff (`HANDOFF_completion-
+popup-polish_2026-09-19.md`) from earlier today — all 6 items shipped and founder-live-verified on
+real properties (Bungalow, Sta Prsca), plus root-caused and fixed the two bugs the handoff left
+unconfirmed.**) — `staging`, commit `f872c5d` (items 1/2/5/6 + the drawer/wait-dialog race fix); a
+fade-in add-on landed via a parallel session's `754400a` (with credit) rather than a separate
+commit here — see below. Vercel auto-deployed, no backend changes.
+> **✅ Items 1/2/5/6 shipped as specified.** Settings button glows (warning color) when the
+> scrape-link failsafe flags a property; fix-link dialog copy collapsed to founder's exact wording,
+> kept per-reason (`unreachable` vs `low_completeness`); conflict popup now titles on the property
+> name with the conflict count moved to a pill below it, matching the trained popup (design
+> pre-approved via artifact); Edit Property's dead "Resolve" button (confirmed no-op —
+> `_handleNextStepAction` has no case for `Conflict_Pending`) removed and its banner reworded —
+> the drawer's own separate, *working* Resolve button was left untouched.
+> **✅ Root-caused items 3/4 by live reproduction, not another guess.** A throwaway Playwright script
+> against staging (isolated QA property) found `page.getByText` returns nothing — this app is
+> CanvasKit, coordinate-click only — and a stale Retry-button coordinate silently missed 3 runs in a
+> row until a fresh-screenshot-then-measure pass caught it. Screenshot polling only produced 1-8
+> frames per 2-3s attempt (150ms-1.2s per call, too coarse); switched to Playwright `recordVideo` +
+> `ffmpeg` frame extraction for true ~40ms granularity, which proved both bugs directly on video: the
+> wait dialog vanished inside a single 40ms frame (no fade at all), and the drawer stayed open
+> through the entire capture window.
+> **✅ Actual root cause:** `Navigator.of(context, rootNavigator: true).pop()` fired synchronously
+> right after `popTrainingWaitDialog`, before that function's 200ms fade-then-`removeRoute` had
+> actually removed the wait-dialog route — so `pop()` closed the still-fading wait dialog instead of
+> the drawer. Fixed by making `popTrainingWaitDialog` return an awaitable `Future<void>`, and
+> awaiting it (with a `mounted` re-check after) in all three branches of `_retryScrapeLink`.
+> **✅ Founder live-verified everything post-fix**, including seeding a real conflict on "Sta Prsca"
+> (direct DB write, restored after) to check the conflict-popup name/pill and the reworded banner.
+> **✅ Also added a matching fade-IN** for the wait dialog (founder noticed the fade-out but no
+> entrance) — same 200ms `AnimatedOpacity`, self-owned rather than relying on `DialogRoute`'s default
+> transition. Left uncommitted at session end for scope reasons; a parallel session (`the-ingestor-60`)
+> picked it up off the shared working tree and folded it into its own `754400a` with explicit credit
+> in that commit's message — confirmed via `git show`, so no separate commit was needed here.
+> Logged: `_tests/scenarios.md` pending-intake row (grouped with B16/B17); `lessons.md`/
+> `lessons_index.md` entry on the Playwright video-capture + fresh-screenshot-measurement technique
+> (flagged as a global candidate).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Closed out the scrape-retry-UI handoff from 2026-09-17 for real —
 root-caused two genuine, separate bugs behind "the training-finished popup sometimes just doesn't
 show," fixed both, and had the founder live-verify both outcomes end-to-end on real properties
 (Bungalow: retry → real conflict → resolve → immediate popup → clean dashboard; Sta Prsca: retry →

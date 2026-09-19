@@ -487,6 +487,73 @@ top (5-min background re-scrape+re-merge, give-up state with host-facing messagi
 cause of the same signal — but the cache bug itself needed the direct fix, not just a retry loop,
 since a naive retry without `max_age=0` would just hit the same stale cache again.
 
+---
+
+## 2026-09-19 — A cancellable async pipeline needs every write fenced, not just the first one; a "fixed" cancel bug can still resurrect the run one step later
+
+**Context:** Founder clicked Stop on a real Train Now run, saw the UI and DB both correctly reset,
+then ~15-20s later watched the same property silently flip back to Processing and reach
+Conflict_Pending with zero further action on their part. First fix (`claim_merge`/`save_merge_result`
+in `supabase_client.py`, which checked `status` alone and never `ingest_run_id`) was real, shipped,
+and still didn't stop it — a second live re-test failed the same way.
+
+**Discovery:** `ingest_worker.run_start` checks `ingest_run_id == run_id` exactly once, at its very
+first line, before the scrape call. Everything after that — including a *second* call to
+`begin_ingest_run` (re-seeding `ingest_files` with the real per-file plan once the scrape result is
+known) — ran with zero further fencing. That second call's own SQL had no `ingest_run_id` precondition
+at all, so it unconditionally rewrote `ingest_run_id`/`status` back to the original run's values. A
+Stop landing while the scrape was still in flight (a real network call, seconds long) got silently
+undone the instant the scrape returned — the row looked cancelled for exactly as long as the scrape
+took, then came back to life. The first fencing fix (`claim_merge`) was still correct and still
+necessary; it just wasn't the actual mechanism the founder saw, which was one step earlier in the
+pipeline. Confirmed by direct Cloud Run log correlation (`/ingest-worker/start` → `/ingest-worker/
+merge-step` request pairs, timestamps lining up with the resurrection) and a live re-test with a
+25-second delayed re-check added specifically because the first "immediate" check was too fast to
+catch it.
+
+**Fix:** Same `expected_run_id`-fencing pattern applied to the second `begin_ingest_run` call — abort
+the rest of the pipeline immediately if the row's `ingest_run_id` no longer matches what this task
+was dispatched for.
+
+**Impact:** `backend/services/supabase_client.py`, `backend/routers/ingest_worker.py`. Verified via a
+direct DB-level test of the fencing query's exact semantics (not just reasoning about the SQL), then 4
+live end-to-end Playwright runs against redeployed staging, plus manual re-checks of passing test rows
+several minutes later confirming no delayed resurrection.
+
+**Global Candidate:** Yes — "a cancel/fencing fix only covers the write path you tested, not
+necessarily every write in the pipeline" generalizes well past this project. The specific tell worth
+naming: if a *first* fencing fix doesn't fully close a "cancel still gets undone later" bug, look for
+a *second* unconditional write further down the same code path before assuming the fencing logic
+itself is wrong.
+
+---
+
+## 2026-09-19 — Flutter web's file_picker (canvas-rendered) doesn't respond to Playwright's file-chooser intercept or a synthetic HTML5 drag-and-drop
+
+**Context:** Wanted a guide.html screenshot showing the Upload Files dropzone with a couple of real
+dummy files already added, not just the empty "Drag & drop or tap to browse" state.
+
+**Discovery:** Tried `page.waitForEvent('filechooser')` around a click on the dropzone (the standard
+Playwright pattern for a native `<input type="file">`) — timed out after 30s with zero native file
+dialog ever appearing, and `page.locator('input[type="file"]').count()` returned 0, confirming no such
+element exists in the DOM at all (Flutter's `file_picker` web implementation isn't using a plain
+clickable `<input>` the way a typical web form would). Tried simulating a real HTML5 drag-and-drop
+instead — constructing an actual `DataTransfer` with real `File` objects and dispatching
+`dragenter`/`dragover`/`drop` on `document.body` — which needs no native dialog at all, just DOM
+events. Also no effect: the dropzone's UI never changed. Flutter's CanvasKit renderer listens for
+pointer/drop events through its own internal engine plumbing (likely a specific glass-pane element,
+not a bare `document.body` listener), so synthetic top-level DOM events don't reach it either.
+
+**Impact:** Shipped the guide.html screenshot without dummy files rather than continuing to sink time
+into this; logged as an open founder decision in `CONTEXT.md` (accept as-is, or supply a real
+screenshot manually) rather than guessing at a third automation approach.
+
+**Global Candidate:** Yes — this is a real, reusable finding about Flutter web + Playwright generally:
+file upload automation likely needs to target the specific element/mechanism Flutter's engine
+actually listens on (would need investigation inside `flutter_web_plugins`' `file_picker` source to
+find it), not the generic "native input" or "generic drop event" patterns that work on a normal DOM
+app.
+
 **Impact:** `scraper/main.py`, live-verified twice (direct scraper call + full Train Now retest).
 **Global Candidate:** Yes — any project using Firecrawl (or likely similar scrape-as-a-service tools)
 against JS-heavy/frequently-changing pages should default to a fresh fetch, not the library default,
