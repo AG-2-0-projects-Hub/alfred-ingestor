@@ -566,7 +566,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_isDev) return false;
     final status = property['status'] as String? ?? '';
     if (!_readyStatuses.contains(status)) return false;
-    return !(_settingsWalkthroughSeen && _guestLinkWalkthroughSeen);
+    if (_settingsWalkthroughSeen && _guestLinkWalkthroughSeen) return false;
+    // Only the first Ready property on the dashboard shows the hint — not
+    // every Ready card. Toggling "Show walkthrough again" replays it there
+    // only, same reasoning.
+    final firstReady = _properties.firstWhere(
+      (p) => _readyStatuses.contains(p['status'] as String? ?? ''),
+      orElse: () => const <String, dynamic>{},
+    );
+    return firstReady['id'] == property['id'];
   }
 
   Widget _profileGlyph(double size, Color color) {
