@@ -100,7 +100,13 @@ export async function runD8(): Promise<ScenarioResult> {
     await page.mouse.click(vp.width * 0.499, vp.height * 0.228);
     await page.waitForTimeout(300);
     await page.keyboard.type(TEST_URL, { delay: 15 });
-    await page.mouse.click(vp.width * 0.499, vp.height * 0.903);
+    // The Gold-for-Alfred/Also-helps tips card (2026-09-19) made the form
+    // taller than one viewport, pushing Train Now below the old fixed
+    // coordinate -- scroll it into view first, same fix applied to the
+    // guide.html screenshot capture that hit this same staleness.
+    await page.mouse.wheel(0, 1400);
+    await page.waitForTimeout(400);
+    await page.mouse.click(vp.width * 0.499, vp.height * 0.863);
 
     await Promise.race([
       capturedIdPromise,
@@ -119,8 +125,9 @@ export async function runD8(): Promise<ScenarioResult> {
 
     // Click Stop as fast as realistically possible after that -- the whole
     // point is proving it works on a genuinely in-flight run, not one
-    // that's had time to finish.
-    await page.mouse.click(vp.width * 0.5, vp.height * 0.960);
+    // that's had time to finish. Coordinate re-measured 2026-09-19 (was
+    // 0.960, below the actual button, after the scroll fix above).
+    await page.mouse.click(vp.width * 0.499, vp.height * 0.922);
     await page.waitForTimeout(1500);
 
     const afterStop = await page.screenshot({ fullPage: true });
@@ -142,7 +149,23 @@ export async function runD8(): Promise<ScenarioResult> {
       row.airbnb_url === TEST_URL;
     notes.push(`db check: ${dbOk ? 'PASS' : 'FAIL'} — row=${JSON.stringify(row)}`);
 
-    status = uiVerdict.pass && dbOk ? 'pass' : 'fail';
+    // Regression check (2026-09-19): Stop used to appear to work but an
+    // already-in-flight file/scrape completion could still claim and finish
+    // a merge minutes later, silently overwriting the cancellation (found
+    // live -- card flipped Processing -> Conflict_Pending ~15-20s after a
+    // successful Stop, with no further host action). claim_merge/
+    // save_merge_result are now fenced on ingest_run_id -- re-check the same
+    // row well past that window and confirm it's still cancelled, not
+    // resumed on its own.
+    await new Promise((r) => setTimeout(r, 25_000));
+    const rowLater = capturedId ? await getProperty(token, capturedId) : null;
+    const staysCancelled = !!rowLater &&
+      rowLater.status == null &&
+      rowLater.ingest_run_id == null &&
+      rowLater.master_json == null;
+    notes.push(`stays-cancelled check (+25s): ${staysCancelled ? 'PASS' : 'FAIL'} — row=${JSON.stringify(rowLater)}`);
+
+    status = uiVerdict.pass && dbOk && staysCancelled ? 'pass' : 'fail';
     details = notes.join(' | ');
   } catch (err) {
     status = 'fail';
@@ -150,6 +173,16 @@ export async function runD8(): Promise<ScenarioResult> {
   } finally {
     if (capturedId) {
       try { await cancelProperty(token, capturedId); } catch {}
+      // Full soft-delete, not just cancel -- a left-behind "ghost" row still
+      // occupies TEST_URL under properties_airbnb_url_owner_unique and 500s
+      // the next run's /api/ingest call (found live, 2026-09-19).
+      try {
+        await fetch(`${env.stagingBackend}/api/property/${capturedId}/soft-delete`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+      } catch {}
     }
     await browser.close();
   }

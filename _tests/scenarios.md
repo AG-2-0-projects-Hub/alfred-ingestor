@@ -676,13 +676,13 @@ unautomated ones manually before a `staging → main` merge.
 
 ### D8. Stop on the first training run rolls back the row, keeps the form filled in
 - **id:** add-property-stop-01
-- **touches:** `frontend/lib/screens/add_property_screen.dart`, `backend/routers/properties.py`, `backend/services/supabase_client.py`
+- **touches:** `frontend/lib/screens/add_property_screen.dart`, `backend/routers/properties.py`, `backend/routers/ingest.py`, `backend/routers/ingest_worker.py`, `backend/routers/merge_resolve.py`, `backend/services/supabase_client.py`
 - **layer:** 2 — `_tests/runner/scenarios/d8.ts`
 - **setup:** host on the Add Property screen (first time adding this property, not a retrain)
-- **action:** fill the Airbnb URL, tap Train Now, dismiss the wait dialog via "Continue in background", then tap Stop while the run is still genuinely in flight
+- **action:** fill the Airbnb URL, tap Train Now, dismiss the wait dialog via "Continue in background", then tap Stop while the run is still genuinely in flight; wait 25s more and re-check the row a second time
 - **host_expected:** back on the same Add Property form with the URL still filled in and a plain "Train Now" button (not a spinner) — ready to try again with no re-entry needed
-- **db_expected:** the property row's `status`/`ingest_run_id` are cleared (fencing out the in-flight background task) while `airbnb_url` is preserved and `master_json` stays null (never actually trained)
-- **last_tested:** 2026-09-19 — PASS (found + fixed two real bugs first: `ingest_files`/`scrape_retry` NOT NULL violations from setting them to `None` instead of `{}`, caught via a live 500 on staging)
+- **db_expected:** the property row's `status`/`ingest_run_id` are cleared (fencing out the in-flight background task) while `airbnb_url` is preserved and `master_json` stays null (never actually trained) — **and stays that way** 25+ seconds later, not silently resumed
+- **last_tested:** 2026-09-19 — PASS (found + fixed two real bugs first this session: `ingest_files`/`scrape_retry` NOT NULL violations from setting them to `None` instead of `{}`. Then, in a **later same-day session**, the founder found Stop appeared to work but the property kept training anyway, reaching Conflict_Pending unattended — root-caused to two real, unrelated fencing gaps: `claim_merge`/`save_merge_result` checked `status` only, never `ingest_run_id` (fixed); and, the actual mechanism behind what the founder saw, `ingest_worker.run_start`'s *second* `begin_ingest_run` call — re-seeding `ingest_files` after the scrape completes — was completely unconditional, so a Stop landing mid-scrape got silently undone the instant the scrape finished, resurrecting the original `ingest_run_id`/status. Fixed with the same `expected_run_id`-fencing pattern. Verified via a direct DB-level test proving the exact fencing query semantics, then 4 live end-to-end runs against redeployed staging — 3 clean passes (including the extended 25s re-check), 1 unrelated 500 from a test-cleanup gap (a left-behind ghost row collided with `properties_airbnb_url_owner_unique` on the shared test URL — fixed by having the scenario's own cleanup soft-delete, not just cancel). Both previously-passing properties re-checked several minutes after their test ended and confirmed still cancelled, not resurrected.)
 - **status:** passing
 
 ### D9. x on a Processing card cancels the run and soft-deletes the property

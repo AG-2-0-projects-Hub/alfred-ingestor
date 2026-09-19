@@ -278,8 +278,15 @@ async def run_start(property_id: str, run_id: str) -> None:
 
     # Re-seeds ingest_files with the real per-file plan — overwrites the '{}'
     # placeholder that begin_ingest_run (dispatcher) or resume_run wrote
-    # before this task even knew the actual file list.
-    await asyncio.to_thread(supabase_client.begin_ingest_run, property_id, run_id, file_states)
+    # before this task even knew the actual file list. Fenced on run_id
+    # (2026-09-19) — this used to be unconditional, so a Stop click landing
+    # during the scrape above got silently undone the moment it finished:
+    # this write would resurrect the cancelled run_id and status regardless.
+    reseeded = await asyncio.to_thread(
+        supabase_client.begin_ingest_run, property_id, run_id, file_states, run_id
+    )
+    if not reseeded:
+        return  # fenced — cancelled or superseded while the scrape was in flight
 
     if not to_process:
         # No files at all, or every file already fingerprinted identical —

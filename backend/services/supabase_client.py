@@ -218,22 +218,51 @@ def update_file_fingerprints(property_id: str, fingerprints: dict) -> None:
 # postgrest UPDATE can't express that the way it can a single conditional
 # field (see claim_merge, which doesn't need an RPC for that reason).
 
-def begin_ingest_run(property_id: str, run_id: str, file_states: dict[str, str]) -> None:
+def begin_ingest_run(
+    property_id: str,
+    run_id: str,
+    file_states: dict[str, str],
+    expected_run_id: str | None = None,
+) -> bool:
     """Mint a fresh run: status -> Ingesting, set the fencing token (any
     in-flight task carrying the OLD run_id becomes a no-op the moment it next
     calls an RPC), seed ingest_files with each file's starting state
     ('pending' or 'skipped' — computed by the caller via hash_guard before
-    this call), stamp a heartbeat so it doesn't read as stale immediately."""
+    this call), stamp a heartbeat so it doesn't read as stale immediately.
+
+    expected_run_id (2026-09-19): ingest_worker.run_start calls this a SECOND
+    time, after the scrape completes, to re-seed ingest_files with the real
+    per-file plan — that call was completely unconditional (no ingest_run_id
+    check at all), so a Stop click landing mid-scrape got silently undone the
+    instant the scrape finished: this write blindly resurrected the original
+    run_id and flipped status back to Ingesting, and the pipeline carried on
+    to a real merge minutes later with no further host action (found live,
+    the actual mechanism behind "Stop appeared to work but training
+    continued anyway" — claim_merge's own fencing was necessary but not
+    sufficient, since the row was never really cancelled to begin with by the
+    time file/merge work ran). The initial call from the /ingest dispatcher
+    and resume_run's call are deliberately starting a run, not continuing an
+    existing one — they pass None (unconditional, unchanged). Returns
+    whether the write matched -- always True when expected_run_id is None.
+    """
     client = get_client()
     files = {name: {"state": state} for name, state in file_states.items()}
-    client.table("properties").update({
-        "status": "Ingesting",
-        "ingest_run_id": run_id,
-        "ingest_files": files,
-        "ingest_stage": "processing",
-        "ingest_heartbeat_at": _now(),
-        "updated_at": _now(),
-    }).eq("id", property_id).execute()
+    query = (
+        client.table("properties")
+        .update({
+            "status": "Ingesting",
+            "ingest_run_id": run_id,
+            "ingest_files": files,
+            "ingest_stage": "processing",
+            "ingest_heartbeat_at": _now(),
+            "updated_at": _now(),
+        })
+        .eq("id", property_id)
+    )
+    if expected_run_id is not None:
+        query = query.eq("ingest_run_id", expected_run_id)
+    result = query.execute()
+    return bool(result.data)
 
 
 def get_ingest_run(property_id: str) -> dict | None:
