@@ -9,17 +9,22 @@ import 'glass_panel.dart';
 /// confusion between the two.
 enum WalkthroughScreen { url, upload, train }
 
-/// Shared with guide.html's Step 3 ("What trains Alfred best") — keep both in
-/// sync by hand when either changes.
-const kAlfredTrainingTips = [
+/// Shared with guide.html's Step 3 ("Gold for Alfred" / "Also helps") — keep
+/// both in sync by hand when either changes.
+const kAlfredGoldTips = [
+  'Past guest conversations — an Airbnb message export, or just your longest threads',
+  'A voice note for anything hands-on — towels, linens, the washer, how guests get in',
+  "A voice note about a past complaint or escalation — what happened and how you'd want it handled next time",
+  'A video walkthrough of the property (coming soon — not yet supported)',
+];
+const kAlfredAlsoHelpsTips = [
   'Your house manual or welcome-book',
   'A photo of the WiFi router — name + password',
   'How your appliances work — thermostat, washer, coffee machine',
   'Check-in / check-out steps and house rules',
   'Parking or building access notes',
-  'A voice note for anything hands-on — towels, linens, the washer, how guests get in',
-  'Past guest conversations — an Airbnb message export, or just your longest threads',
   'Your automated or saved-reply templates, if you already use them',
+  "Extra photos of specific details the public Airbnb photos don't show",
 ];
 const kAlfredTrainingTipsClosing =
     "Whatever's easiest — photo, PDF, document or just tell me in a voicenote.";
@@ -118,7 +123,29 @@ class AddPropertyWalkthroughPanel extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final tip in kAlfredTrainingTips)
+                Text('GOLD FOR ALFRED',
+                    style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                        color: palette.warning)),
+                const SizedBox(height: 4),
+                for (final tip in kAlfredGoldTips)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Text('•  $tip',
+                        style: GoogleFonts.inter(
+                            fontSize: 12, height: 1.4, color: palette.textSecondary)),
+                  ),
+                const SizedBox(height: 8),
+                Text('ALSO HELPS',
+                    style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                        color: palette.success)),
+                const SizedBox(height: 4),
+                for (final tip in kAlfredAlsoHelpsTips)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 5),
                     child: Text('•  $tip',

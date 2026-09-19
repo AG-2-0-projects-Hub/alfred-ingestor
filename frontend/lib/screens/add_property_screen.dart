@@ -797,30 +797,67 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   }
 
   Widget _buildTrainingTipsCard(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTipsGroup(
+          context,
+          label: 'Gold for Alfred',
+          icon: Icons.star_rounded,
+          color: context.palette.warning,
+          containerColor: context.palette.warningContainer,
+          tips: kAlfredGoldTips,
+        ),
+        const SizedBox(height: 10),
+        _buildTipsGroup(
+          context,
+          label: 'Also helps',
+          icon: Icons.lightbulb_outline_rounded,
+          color: context.palette.success,
+          containerColor: context.palette.successContainer,
+          tips: kAlfredAlsoHelpsTips,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(kAlfredTrainingTipsClosing,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  color: context.palette.textSecondary)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTipsGroup(
+    BuildContext context, {
+    required String label,
+    required IconData icon,
+    required Color color,
+    required Color containerColor,
+    required List<String> tips,
+  }) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: context.palette.successContainer,
+        color: containerColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.palette.success.withValues(alpha: 0.4), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.lightbulb_outline_rounded,
-                  size: 16, color: context.palette.success),
+              Icon(icon, size: 16, color: color),
               const SizedBox(width: 8),
-              Text('What trains Alfred best',
+              Text(label,
                   style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: context.palette.success)),
+                      fontSize: 12, fontWeight: FontWeight.w600, color: color)),
             ],
           ),
           const SizedBox(height: 8),
-          for (final tip in kAlfredTrainingTips)
+          for (final tip in tips)
             Padding(
               padding: const EdgeInsets.only(bottom: 3),
               child: Text('•  $tip',
@@ -829,14 +866,6 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       color: context.palette.textSecondary,
                       height: 1.4)),
             ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(kAlfredTrainingTipsClosing,
-                style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontStyle: FontStyle.italic,
-                    color: context.palette.textSecondary)),
-          ),
         ],
       ),
     );
