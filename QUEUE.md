@@ -34,7 +34,16 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       as a Global Candidate) for the structural fix now in place. Revoke both on Vercel's Account →
       Tokens page, create replacements,
       hand new values to Claude via the usual Desktop `.txt` drop for `_mcp_profiles/global.json` update.
-- [ ] Rotate `_tests/fixtures/.env.test` test credentials printed in full in a session transcript 2026-09-10 (`GEMINI_API_TEST_KEY`, `VERCEL_API_TOKEN`, `VERCEL_BYPASS_TOKEN`, `TELEGRAM_BOT_TOKEN_TEST`, `WHATSAPP_ACCESS_TOKEN_TEST`, `FIRECRAWL_API_KEY_TEST` — a `cat`+`sed` redaction only covered the password field) — deferred, founder is treating it as local-session exposure for now
+- [ ] Rotate `_tests/fixtures/.env.test` test credentials — exposed TWICE now, deferred both times:
+      (1) 2026-09-10, printed in full in a session transcript (`GEMINI_API_TEST_KEY`, `VERCEL_API_TOKEN`,
+      `VERCEL_BYPASS_TOKEN`, `TELEGRAM_BOT_TOKEN_TEST`, `WHATSAPP_ACCESS_TOKEN_TEST`, `FIRECRAWL_API_KEY_TEST`
+      — a `cat`+`sed` redaction only covered the password field); (2) 2026-09-19, the same file exposed
+      again via a plain `Read` tool call (same set, plus `TEST_HOST_PASSWORD` this time) — founder
+      re-confirmed deferring rather than rotating, but asked for a real mechanical safeguard against a third
+      recurrence rather than relying on memory alone (see the PreToolUse hook added the same session,
+      `.claude/hooks/block-secret-reads.*` — blocks Read/cat/grep/etc. on paths matching `.env`/secret/
+      credential/fixtures patterns repo-wide, not just a documented convention). If this file gets exposed a
+      third time despite the hook, that's the actual signal to stop deferring and rotate for real.
 - [ ] Rotate `SUPABASE_SERVICE_ROLE_KEY` for staging (project `gcxxilzfhwlsjcvtpsvj`), printed in full in a
       session transcript 2026-09-16 by a plain `grep` of `backend/.env` (same ad-hoc-redaction failure
       class as the other rows here, structural fix already in place per `lessons.md`'s 2026-09-15 entry —

@@ -89,5 +89,20 @@
       "mcp__firecrawl_mcp__map",
       "mcp__firecrawl_mcp__scrape"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"\\\\wsl.localhost\\Ubuntu\\home\\santoskoy\\AG_master_files\\projects\\the-ingestor\\.claude\\hooks\\block-secret-reads.ps1\"",
+            "timeout": 10,
+            "statusMessage": "Checking for secrets-file access..."
+          }
+        ]
+      }
+    ]
   }
 }
