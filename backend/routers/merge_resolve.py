@@ -58,7 +58,9 @@ def has_mergeable_content(prop: dict) -> bool:
     )
 
 
-async def run_merge_and_save(property_id: str, prop: dict) -> dict:
+async def run_merge_and_save(
+    property_id: str, prop: dict, expected_run_id: str | None = None
+) -> dict:
     """Core merge logic: run the Gemini merger and persist the result. Callers
     own the status guard/transition (merge_property below checks 'Ingested';
     ingest_worker's merge-step task already won claim_merge's Ingested->Merging
@@ -67,6 +69,11 @@ async def run_merge_and_save(property_id: str, prop: dict) -> dict:
     unconditionally. May raise ValueError if the Gemini call itself fails
     (e.g. malformed response) — a genuine upstream failure, distinct from the
     empty-content case above.
+
+    expected_run_id (2026-09-19): passed through to save_merge_result so the
+    final write is fenced against a Stop landing during the Gemini call
+    itself, not just at claim_merge's entry — see that function's docstring.
+    None for the host-triggered /merge endpoint below, which has no run_id.
     """
     scraped = prop.get("scraped_markdown") or ""
     ingested = prop.get("ingested_markdown") or ""
@@ -79,10 +86,14 @@ async def run_merge_and_save(property_id: str, prop: dict) -> dict:
     new_status = "Conflict_Pending" if has_conflicts else "Merged"
     new_conflict_status = "pending" if has_conflicts else "none"
 
-    await asyncio.to_thread(
+    saved = await asyncio.to_thread(
         supabase_client.save_merge_result,
-        property_id, result, new_status, new_conflict_status,
+        property_id, result, new_status, new_conflict_status, expected_run_id,
     )
+    if not saved:
+        # Fenced out — the host clicked Stop while this merge was running.
+        # Discard the result; cancel_initial_ingest_run already reset the row.
+        return {"status": None, "has_conflicts": False, "master_json": None}
 
     return {
         "status": new_status,

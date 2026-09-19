@@ -89,6 +89,7 @@ class _FileBody(BaseModel):
 
 class _MergeBody(BaseModel):
     property_id: str
+    run_id: str
 
 
 class _WatchdogBody(BaseModel):
@@ -356,7 +357,7 @@ async def _finish_ordispatch_task_merge(property_id: str, run_id: str) -> None:
     if new_status == "Ingested":
         dispatch_task(
             "/api/ingest-worker/merge-step",
-            {"property_id": property_id},
+            {"property_id": property_id, "run_id": run_id},
             name=task_queue.sanitize_task_name(f"ing-merge-{property_id}-{run_id}"),
         )
     # new_status == "Ingest_Error": nothing usable, nothing to enqueue.
@@ -367,10 +368,11 @@ async def _finish_ordispatch_task_merge(property_id: str, run_id: str) -> None:
 
 # ── merge-step: claim Ingested->Merging, then run the shared merge logic ───
 
-async def run_merge_step(property_id: str) -> None:
-    won = await asyncio.to_thread(supabase_client.claim_merge, property_id)
+async def run_merge_step(property_id: str, run_id: str) -> None:
+    won = await asyncio.to_thread(supabase_client.claim_merge, property_id, run_id)
     if not won:
-        return  # already Merging/past it — another task or host call got there first
+        return  # already Merging/past it, or fenced — another task, a host call,
+        # or a Stop-triggered cancel got there first
 
     prop = await asyncio.to_thread(supabase_client.get_property_for_merge, property_id)
     if prop is None:
@@ -379,7 +381,7 @@ async def run_merge_step(property_id: str) -> None:
         await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
         return
     try:
-        await run_merge_and_save(property_id, prop)
+        await run_merge_and_save(property_id, prop, expected_run_id=run_id)
     except ValueError as exc:
         print(f"ingest_worker.run_merge_step: merge failed for {property_id}: {exc}")
         await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
@@ -519,7 +521,7 @@ async def worker_process_file(body: _FileBody, request: Request):
 @router.post("/ingest-worker/merge-step")
 async def worker_merge_step(body: _MergeBody, request: Request):
     _check_secret(request)
-    await run_merge_step(body.property_id)
+    await run_merge_step(body.property_id, body.run_id)
     return {"ok": True}
 
 

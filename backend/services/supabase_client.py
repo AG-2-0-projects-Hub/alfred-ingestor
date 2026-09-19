@@ -313,16 +313,22 @@ def maybe_complete_ingest(property_id: str, run_id: str) -> str | None:
     return result.data
 
 
-def claim_merge(property_id: str) -> bool:
+def claim_merge(property_id: str, run_id: str) -> bool:
     """Atomically flip Ingested -> Merging. No RPC needed — a single
     conditional field UPDATE is already atomic under Postgres's own row lock,
     unlike the jsonb read-modify-write functions above. A retried/duplicate
-    merge task loses this race and does nothing; True means THIS call won it."""
+    merge task loses this race and does nothing; True means THIS call won it.
+
+    Fenced on ingest_run_id (2026-09-19) — this used to check status alone,
+    so a Stopped run's already-in-flight file completion could still claim
+    and run a full merge minutes after cancel_initial_ingest_run cleared the
+    row, silently overwriting the cancellation (found live: Stop appeared to
+    work, the property kept training in the background anyway)."""
     client = get_client()
     result = (
         client.table("properties")
         .update({"status": "Merging", "updated_at": _now()})
-        .eq("id", property_id).eq("status", "Ingested")
+        .eq("id", property_id).eq("status", "Ingested").eq("ingest_run_id", run_id)
         .execute()
     )
     return bool(result.data)
@@ -434,15 +440,33 @@ def save_merge_result(
     master_json_dict: dict,
     status: str,
     conflict_status: str,
-) -> None:
-    """Write master_json, status, and Conflict_status after a successful merge."""
+    expected_run_id: str | None = None,
+) -> bool:
+    """Write master_json, status, and Conflict_status after a successful merge.
+
+    expected_run_id (2026-09-19): the background merge-step task passes the
+    run_id it was claimed under so this final write is fenced too, not just
+    claim_merge's entry -- a Gemini merge call can run for many seconds after
+    claim_merge succeeds, wide enough for a Stop click to land mid-call and
+    clear ingest_run_id before this write commits. None (the host-triggered
+    /merge endpoint's own call, which has no run_id concept) keeps the prior
+    unconditional behavior. Returns whether the write actually matched a row
+    -- always True when expected_run_id is None."""
     client = get_client()
-    client.table("properties").update({
-        "master_json": master_json_dict,
-        "status": status,
-        "Conflict_status": conflict_status,
-        "updated_at": _now(),
-    }).eq("id", property_id).execute()
+    query = (
+        client.table("properties")
+        .update({
+            "master_json": master_json_dict,
+            "status": status,
+            "Conflict_status": conflict_status,
+            "updated_at": _now(),
+        })
+        .eq("id", property_id)
+    )
+    if expected_run_id is not None:
+        query = query.eq("ingest_run_id", expected_run_id)
+    result = query.execute()
+    return bool(result.data)
 
 
 def get_property_for_resolve(property_id: str) -> dict | None:

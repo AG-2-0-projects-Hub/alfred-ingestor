@@ -173,12 +173,11 @@ async def resume_ingest(property_id: str, request: Request):
         return {"status": status, "message": "Already at a terminal state — nothing to resume."}
 
     if status == "Ingested" and not prop.get("master_json"):
+        run_id = prop.get("ingest_run_id") or ""
         ingest_worker.dispatch_task(
             "/api/ingest-worker/merge-step",
-            {"property_id": property_id},
-            name=task_queue.sanitize_task_name(
-                f"ing-merge-{property_id}-{prop.get('ingest_run_id') or 'resume'}"
-            ),
+            {"property_id": property_id, "run_id": run_id},
+            name=task_queue.sanitize_task_name(f"ing-merge-{property_id}-{run_id or 'resume'}"),
         )
         return {"status": "Ingested", "message": "Merge enqueued."}
 

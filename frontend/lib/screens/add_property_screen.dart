@@ -1336,7 +1336,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                     child: TextButton(
                       onPressed: _stopIngest,
                       child: Text('Stop',
-                          style: TextStyle(color: context.palette.textSecondary)),
+                          style: TextStyle(
+                              color: context.palette.danger,
+                              fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ],

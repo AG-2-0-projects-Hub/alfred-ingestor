@@ -1116,7 +1116,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 ? 'Processing'
                 : _scrapeLinkNeedsAttention
                     ? 'Needs Attention'
-                    : status,
+                    : status.isEmpty
+                        ? 'Training incomplete'
+                        : status,
           ),
           if (airbnbUrl.isNotEmpty)
             _airbnbUrlRow(airbnbUrl),

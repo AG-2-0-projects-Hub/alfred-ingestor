@@ -627,6 +627,12 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       _confirmAndMerge();
     } else if (status == 'Ingest_Error') {
       _startIngest();
+    } else if (status.isEmpty && _masterJson == null) {
+      // "Training incomplete" (2026-09-19) -- a first-run Stop left this row
+      // with no live run and no master_json. Same trigger as Scraped/
+      // Ingest_Error: /api/ingest re-dispatches from scratch, hash_guard
+      // skips whatever was already fingerprinted before Stop was clicked.
+      _startIngest();
     }
     // Conflict_Pending: conflicts panel is visible below; Merged: no train endpoint yet
   }

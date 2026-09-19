@@ -149,6 +149,20 @@ SetupStep? nextStepFor(
         accent: (ctx) => Theme.of(ctx).colorScheme.primary,
       );
     default:
+      // A first-run Stop clears status/ingest_run_id but never soft-deletes
+      // the row (2026-09-19) — the only way a never-trained property (no
+      // master_json) ends up with an empty status. Give it a real recovery
+      // path instead of silently falling through with no banner at all.
+      if (status.isEmpty && !hasMasterJson) {
+        return SetupStep(
+          headline: 'Training incomplete',
+          subtext: 'Training was stopped before it finished. Resume to pick '
+              'up where you left off, or delete this property to start over.',
+          actionLabel: 'Resume Training',
+          icon: Icons.pause_circle_outline_rounded,
+          accent: (ctx) => ctx.palette.warning,
+        );
+      }
       return null;
   }
 }

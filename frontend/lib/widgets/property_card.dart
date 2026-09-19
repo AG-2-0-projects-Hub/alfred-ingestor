@@ -324,6 +324,12 @@ class _PropertyCardState extends State<_PropertyCard> {
         status == 'Resolved' ||
         status == 'Merged' ||
         (wasTrainedBefore && status == 'Ingested');
+    // A first-run Stop clears status/ingest_run_id but never soft-deletes the
+    // row (2026-09-19) -- the only way a never-trained property ends up with
+    // an empty status. Distinct from "processing" (which always has a real
+    // in-flight status) and from a genuinely unrecognized status (which
+    // would still be non-empty).
+    final isGhost = status.isEmpty && !wasTrainedBefore;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -428,6 +434,7 @@ class _PropertyCardState extends State<_PropertyCard> {
                                   status: status,
                                   needsAttention: scrapeLinkNeedsAttention,
                                   retrying: scrapeLinkRetrying,
+                                  isGhost: isGhost,
                                 ),
                               ),
                               if (widget.activeChatCount > 0)
@@ -658,6 +665,42 @@ class _PropertyCardState extends State<_PropertyCard> {
         step0Link: widget.showStep0Hint ? _step0Link : null,
         settingsNeedsAttention: needsAttention,
       );
+    }
+
+    // Stop was clicked on the first-ever run and the host navigated away
+    // without retrying (2026-09-19) -- status/ingest_run_id were cleared but
+    // the row was never soft-deleted. Only two ways out: resume (opens the
+    // drawer, which shows the matching SetupStatusBanner and its own route
+    // into EditPropertyScreen) or delete outright.
+    if (status.isEmpty && !wasTrainedBefore) {
+      return Row(children: [
+        Icon(Icons.pause_circle_outline_rounded, size: 15, color: palette.warning),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: widget.onOpenSettings,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  'Resume Training',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: palette.warning,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        _TinyIconBtn(
+          icon: Icons.close_rounded,
+          tooltip: 'Delete this incomplete property',
+          onTap: widget.onDeleteProcessing,
+        ),
+      ]);
     }
 
     return Align(
@@ -935,7 +978,17 @@ class _StatusBadge extends StatelessWidget {
   // already re-checking) and reuses the exact same "Processing" treatment
   // Ingesting/Merging already use, rather than inventing a new visual state.
   final bool retrying;
-  const _StatusBadge({required this.status, this.needsAttention = false, this.retrying = false});
+  // True for a first-run Stop left un-retried (2026-09-19) — a never-trained
+  // property with status cleared but not soft-deleted. Distinguishes this
+  // from a genuinely unrecognized status, which still falls to the generic
+  // fallback below.
+  final bool isGhost;
+  const _StatusBadge({
+    required this.status,
+    this.needsAttention = false,
+    this.retrying = false,
+    this.isGhost = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -945,6 +998,8 @@ class _StatusBadge extends StatelessWidget {
     // bioluminescent mint; emergencies/errors get warm red glow.
     final (label, bg, fg, glowAlpha) = retrying
         ? ('Processing', p.accentContainer, p.accent, 0.25)
+        : isGhost
+        ? ('Training incomplete', p.warningContainer, p.warning, 0.30)
         : needsAttention
         ? ('Needs Attention', p.warningContainer, p.warning, 0.35)
         : switch (status) {
