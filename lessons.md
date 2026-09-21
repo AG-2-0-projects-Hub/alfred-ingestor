@@ -595,3 +595,64 @@ to any visual/UI fix task, not just this project. Two concrete countermeasures w
 forward: prefer element-locator screenshots over hand-guessed pixel `clip` coordinates (removes an
 entire class of position-guessing bugs), and treat "I noticed this is still imperfect" during your
 own work as a stop-and-fix signal, not something to ship and let the user catch.
+
+---
+
+## 2026-09-21 — An unverified fix for a slow Gemini call broke it completely in prod, immediately
+
+**Context:** Investigating Submit Resolutions' "Alfred is not responding" error (founder report:
+the error fired once, but clicking Submit again immediately succeeded). Reasoned by analogy to a
+past bug (a 2026-09-09 incident where a Gemini call silently stalled forever with zero response)
+and added a 25s call_timeout + 2-attempt retry to the resolver's Gemini call, on the theory it
+might be the same class of stall.
+
+**Discovery:** It wasn't the same bug. The founder's own report was the disproof, missed at
+analysis time: "clicked Submit again, got 'Alfred is now trained' immediately" means the ORIGINAL
+call (no timeout at all) had already completed successfully server-side -- a call that truly never
+responds can't produce that outcome. The real cause was just latency past the frontend's 60s
+timeout, not a stall. Cloud Run's own request timeout is 300s, so nothing was actually forcing a
+25s ceiling -- capping it there guaranteed failure (2x25s, then a raised TimeoutError) on every real
+property instead of the occasional slow-but-successful call. Shipped straight to prod (merged same
+session, FIX_VERIFY_PROTOCOL.md explicitly skipped per founder request to save tokens) and broke
+every live /api/resolve call immediately -- caught only because the founder was testing live and
+reported it right away, not by any automated check.
+
+**Impact:** Reverted the cap entirely (bfc1907), fixed the actual latency contributor (the resolver
+was sending the full master_json twice in one prompt -- once in system_instruction, once in the
+user message), and gave the frontend call more patience (120s) instead of the backend less.
+Founder live-verified the revert on prod immediately after.
+
+**Global Candidate:** Yes -- before adding a timeout/cap to "fix" a slow call, confirm it's a true
+stall (zero response, ever) and not just legitimately slow relative to some OTHER, tighter timeout
+in the chain (here: the frontend's 60s, not the backend's real 300s ceiling). The fix for "too slow
+for timeout X" is very often "raise timeout X," not "cap the work at some shorter Y." Also: a
+backend timing change with no FIX_VERIFY / no test coverage went straight to prod in the same
+session it was written -- exactly the risk that protocol exists to catch, skipped here by explicit
+request under token pressure. Worth deciding as a standing rule whether timing/timeout changes
+specifically (as opposed to logic changes) get a lighter-weight mandatory check even under time
+pressure, since their failure mode is "breaks every call of this type identically," not a rare edge
+case.
+
+## 2026-09-21 — Git Bash silently rewrites POSIX-looking script paths into Windows paths before they reach `wsl`
+
+**Context:** Polling GCP Cloud Build status from the Bash tool via `wsl bash /tmp/some_script.sh`,
+after writing the script to `\\wsl.localhost\Ubuntu\tmp\some_script.sh` (WSL's real /tmp).
+
+**Discovery:** The command failed with `bash: C:/Users/.../AppData/Local/Temp/some_script.sh: No
+such file or directory` -- Git Bash's MSYS layer auto-converts an argument that looks like an
+absolute POSIX path into a Windows path when the command being invoked (wsl.exe) is a native
+Windows binary, not an MSYS one. This happens even though the path is correct on the WSL side;
+Git Bash never gets a chance to know that. Fixed by prefixing with `MSYS_NO_PATHCONV=1`, which
+disables the auto-conversion for that one command.
+
+**Impact:** Any `wsl <cmd> <path-looking-argument>` invocation from this environment's Bash tool
+needs `MSYS_NO_PATHCONV=1 wsl ...` if the argument is a POSIX path meant for the WSL side.
+
+**Global Candidate:** Yes -- this is an MSYS/Git-Bash behavior, not project-specific, and will recur
+in any project using the Bash tool + wsl from this same host setup.
+
+---
+
+## 2026-09-21 — An unverified fix for a slow Gemini call broke it completely in prod, immediately
+
+**Context:** Investigating Submit Resolutions' Alfred

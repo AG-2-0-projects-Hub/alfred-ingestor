@@ -14,6 +14,14 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] Wire up Sentry error tracking (backend + frontend) — reuse the existing reflip pipeline/setup
+      as the template (same Sentry org, `alonso-vazquez-ng`, already has `reflip-backend`/
+      `reflip-frontend` projects; the-ingestor needs its own two). Motivated by the 2026-09-21
+      resolver call_timeout regression: it broke every `/api/resolve` call in prod immediately after
+      merge and was only found because the founder reported it live — nothing alerted us. Cheaper
+      near-term fallback discussed but not chosen: a GCP log-based alert on 500s for `/api/resolve`
+      and `/api/merge` (uses existing Cloud Logging, no new dependency, ~15 min setup, but no
+      frontend errors/grouping/session context).
 - [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
       expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
       dumps them back on the plain form with only a "Train Now" button — no way to check progress,

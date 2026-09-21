@@ -12,16 +12,17 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
 - 🔴 guide.html screenshots still broken after two rounds (crops, highlight style, wrong Knowledge-
-  tab approach, misplaced/blurry/incomplete shots) + an unexplained "Alfred is not responding" on
-  Submit Resolutions (worked on retry). Full detail + root causes + why it kept going wrong:
-  `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. **Must use
-  `FIX_VERIFY_PROTOCOL.md`.**
+  tab approach, misplaced/blurry/incomplete shots) — untouched this session. Full detail + root
+  causes + why it kept going wrong: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
+  **Must use `FIX_VERIFY_PROTOCOL.md`.**
 - 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
   worth a quick look at the delete path.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
   color/gradient bug (below) is the likely root cause.
 - 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
+- 🟡 Auth "email already registered" notice (new, this session) is deployed but not yet clicked
+  through by the founder — diagnosed + fixed from prod logs, not live-tested.
 
 ## Unresolved Decisions
 - guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
@@ -29,7 +30,44 @@ session-continuity state only: in-flight investigations and handoffs that don't 
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-21 (**Fixed the real Add Property popup-stacking bug (two distinct root
+**Last Session:** 2026-09-21 later (**First `staging->main` merge since 2026-09-07 (106 commits,
+2.5 months) — shipped to PROD, plus a same-session self-inflicted regression found live by the
+founder and fixed within the hour.**) — `main` @ `2ac9487` (merge of PR #8, on top of PR #7's
+`b9a4ed8`), prod backend redeployed twice (`alfred-backend-00022-vtk` then `-00023-9mg`), prod
+Supabase (`ylaooctefesedrecshic`) got 4 migrations applied live via MCP.
+> **✅ Pre-merge prep:** verified all 4 pending migrations were additive-only
+> (`photo_triage`/`host_is_dev_flag`/`ingest_background_worker`/`scrape_retry`), applied + verified
+> PASS on prod before merging. Confirmed the Dev/User split (`is_dev`) needs no commit-selection —
+> it's a per-account DB flag, same code ships everywhere. Confirmed Gemini model strings are plain
+> code (not env-gated), so they merge automatically.
+> **✅ Real bugs found via FMEA + prod logs, not guesses, before merging:** (1) `gemini_messenger.py`
+> was still on deprecated `gemini-3.8-flash` while every other call site had moved to `3.6` (founder:
+> "we proved 3.8 is faulty") — pinned, plus `run_health_check.py`'s `EXPECTED_MODEL`. (2) Submit
+> Resolutions' "Alfred is not responding" (worked on retry) — root-caused via `auth_logs`-style
+> Cloud Run log read: `run_resolver` had no `call_timeout`, a slow-not-stalled call just outran the
+> frontend's 60s. (3) New-account signup silently never sending a confirmation email — root-caused
+> via prod `auth_logs`: the exact email (`alonso.vazquez.v@gmail.com`) already had a confirmed
+> account from months earlier, so Supabase's `user_repeated_signup` anti-enumeration behavior sent
+> nothing (nothing to confirm) — not a broken email pipeline. Fixed with a real notice + routes into
+> the existing password-reset form (`identities.isEmpty` is the documented signal).
+> **🔴 SELF-INFLICTED PROD REGRESSION (found live by the founder within minutes of merge, fixed same
+> session):** the fix for (2) above added a 25s `call_timeout` on the theory the call might be
+> silently stalling — wrong. Cloud Run's own request timeout is 300s; nothing forced a 25s ceiling,
+> and the founder's own original report ("Submit again -> immediately trained") proved the call was
+> never truly stalled, just slower than 60s. The cap guaranteed failure on every real property.
+> Caught via live Cloud Run log read (`TimeoutError: No response after 2 attempts`, 4 consecutive
+> 500s on the founder's real property `c1f321bd-...`). Reverted the cap entirely, fixed the actual
+> latency driver (stopped sending `master_json` twice in one prompt), gave the frontend 120s instead
+> of the backend less. Also fixed the error copy (no real retry button exists on this widget).
+> Founder resubmitted the same stuck property on redeployed prod — succeeded. Full lesson logged
+> (`lessons.md` 2026-09-21, global candidate: confirm a true stall before capping a slow call).
+> **✅ Queued:** Sentry error tracking (reuse the existing reflip pipeline/org), triggered directly by
+> this regression — nothing alerted us, the founder had to report it live. `QUEUE.md`.
+> Logged: `_tests/scenarios.md` pending-intake row; 2 new `lessons.md` entries (the timeout-cap
+> lesson + a Git-Bash/MSYS path-conversion tooling gotcha hit while polling Cloud Build).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-21 (**Fixed the real Add Property popup-stacking bug (two distinct root
 causes, both live-verified on deployed staging) and scroll-to-conflicts; attempted a guide.html
 screenshot overhaul that shipped broken and had to be handed off, not fixed.**) — `staging`, commit
 `bfc34f9`. Frontend only, no backend changes.
