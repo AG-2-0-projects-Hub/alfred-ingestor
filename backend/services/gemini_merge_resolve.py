@@ -883,6 +883,15 @@ async def run_resolver(master_json: dict, resolutions: list) -> dict:
     )
     response = await genai_factory.generate_with_retry(
         client,
+        label="resolver",
+        # No timeout previously — a stalled call (no exception, no 429, just no
+        # response) would hang until the frontend's own 60s HTTP timeout gave
+        # up, with zero retry ever attempted (same failure mode fixed for
+        # ingest's per-file calls 2026-09-16). 25s x 2 attempts stays safely
+        # under that 60s ceiling while still covering this call's normal
+        # ~15-20s latency.
+        call_timeout=25,
+        attempts=2,
         model=MODEL,
         contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
         config=types.GenerateContentConfig(system_instruction=system_prompt),

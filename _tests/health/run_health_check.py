@@ -52,7 +52,7 @@ GCLOUD = str(Path.home() / "google-cloud-sdk" / "bin" / "gcloud")
 GCP_PROJECT = "alfred-prod-502215"
 GCP_REGION = "europe-west3"
 
-EXPECTED_MODEL = "gemini-3.8-flash"
+EXPECTED_MODEL = "gemini-3.6-flash"
 MODEL_CONSTANT_FILES = [
     "backend/services/gemini_client.py",
     "backend/services/gemini_messenger.py",

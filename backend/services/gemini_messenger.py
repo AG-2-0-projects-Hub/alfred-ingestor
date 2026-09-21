@@ -4,7 +4,7 @@ from google.genai import types
 
 from services import genai_factory
 
-MODEL = "gemini-3.8-flash"
+MODEL = "gemini-3.6-flash"
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 # Verbatim from "Supabase Alfred Airbnb - E - The Bot.blueprint.json"
@@ -679,7 +679,7 @@ def _sanitize_second_pass(text: str) -> str:
 
 # ─── Summarizer (knowledge base curator) ──────────────────────────────────────
 # Verbatim from "Supabase Alfred Airbnb - E - The Bot.blueprint.json" curator prompt.
-SUMMARIZER_MODEL = "gemini-3.8-flash"
+SUMMARIZER_MODEL = "gemini-3.6-flash"
 
 SUMMARIZER_PROMPT = """\
 You are a knowledge base curator for a vacation rental AI assistant. Your task is to extract structured learning data from escalated guest-host conversations that will help the AI answer similar questions in the future.

@@ -38,6 +38,13 @@ class _AuthScreenState extends State<AuthScreen> {
   /// email confirmation. The form is replaced by a "check your inbox" panel.
   String? _awaitingConfirmationFor;
 
+  /// Set when sign-up silently hit an email that's already registered.
+  /// Supabase returns the same session==null shape as a real new sign-up here
+  /// (anti-enumeration by design) and sends no email, so the generic
+  /// "check your inbox" panel would leave the host waiting for an email that
+  /// was never going to arrive.
+  String? _alreadyRegisteredEmail;
+
   /// True while showing the "forgot password" mini-form instead of the normal
   /// sign-in/sign-up form. Only ever reachable from sign-in mode.
   bool _showForgotPassword = false;
@@ -130,8 +137,20 @@ class _AuthScreenState extends State<AuthScreen> {
         // signed in — no email, no stats, and nothing loadable. Show the
         // confirmation step instead, and never navigate without a session.
         if (res.session == null) {
+          // Supabase's documented signal for "this email already has an
+          // account": identities comes back empty instead of containing the
+          // new email-provider identity. No error is thrown (anti-enumeration
+          // by design), so this is the only way to tell it apart from a real
+          // new sign-up.
+          final alreadyRegistered = res.user?.identities?.isEmpty ?? false;
           if (mounted) {
-            setState(() => _awaitingConfirmationFor = email);
+            setState(() {
+              if (alreadyRegistered) {
+                _alreadyRegisteredEmail = email;
+              } else {
+                _awaitingConfirmationFor = email;
+              }
+            });
           }
           return;
         }
@@ -480,6 +499,70 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  // ── Notice shown when sign-up hit an already-registered email ────────────
+  Widget _buildAlreadyRegistered() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Icon(Icons.info_outline, size: 44, color: context.palette.primary),
+        const SizedBox(height: 20),
+        Text(
+          'Email already registered',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 26,
+            fontWeight: FontWeight.w300,
+            color: context.palette.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Your email is already registered. If you forgot your password, '
+          'you can reset it below.',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            height: 1.5,
+            color: context.palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 28),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: () => setState(() {
+              _alreadyRegisteredEmail = null;
+              _showForgotPassword = true;
+            }),
+            child: Text(
+              'Reset password',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() {
+              _alreadyRegisteredEmail = null;
+              _isLogin = true;
+              _passwordController.clear();
+              _confirmController.clear();
+            }),
+            child: Text(
+              'Back to sign in',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.palette.primary,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── "Check your inbox" step after a password-reset email is sent ─────────
   Widget _buildResetSent() {
     return Column(
@@ -636,6 +719,7 @@ class _AuthScreenState extends State<AuthScreen> {
   // ── Login / Sign-up form ──────────────────────────────────────────────────
   Widget _buildForm() {
     if (_awaitingConfirmationFor != null) return _buildAwaitingConfirmation();
+    if (_alreadyRegisteredEmail != null) return _buildAlreadyRegistered();
     if (_resetSentTo != null) return _buildResetSent();
     if (_showForgotPassword) return _buildForgotPasswordForm();
 
