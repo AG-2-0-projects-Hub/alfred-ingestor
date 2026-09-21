@@ -112,7 +112,13 @@ class _ConflictQuestionnaireWidgetState
         data['master_json'] as Map<String, dynamic>? ?? const {},
       );
     } on ApiException catch (e) {
-      _showError(e.userMessage);
+      // RequestTimeoutException's generic "Tap retry" message assumes a
+      // dedicated retry button, which this SnackBar-only widget doesn't have
+      // — the real action is just tapping Submit Resolutions again.
+      final msg = e is RequestTimeoutException
+          ? 'Alfred took longer than usual. Tap Submit Resolutions again.'
+          : e.userMessage;
+      _showError(msg);
     } catch (e) {
       _showError('Resolve failed: $e');
     } finally {
