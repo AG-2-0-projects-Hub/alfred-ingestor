@@ -93,6 +93,11 @@ class _ConflictQuestionnaireWidgetState
       final data = await ApiClient.postJson(
         '/api/resolve/${widget.propertyId}',
         {'resolutions': resolutions},
+        // This call runs a real Gemini pass over the full master_json and can
+        // legitimately run past the default 60s on a large property — give it
+        // more room rather than showing an error for work that's still
+        // quietly succeeding server-side (Cloud Run's own timeout is 300s).
+        timeout: const Duration(seconds: 120),
       );
       widget.onAnswersSubmitted?.call();
       // Auto-apply the resolution — no separate "Update Knowledge" step.
