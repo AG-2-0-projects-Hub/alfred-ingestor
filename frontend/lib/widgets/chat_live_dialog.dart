@@ -264,53 +264,93 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       case 0:
         return const _WtStepInfo(
           'Always know who and where',
-          "This is my live view of that guest's conversation — the header "
-              "always shows the property and who's booked.",
+          TextSpan(
+              text: "This is my live view of that guest's conversation — "
+                  "the header always shows the property and who's booked."),
           hasBack: false,
         );
       case 1:
         return const _WtStepInfo(
           'Same links, right here too',
-          'Handy to resend without leaving this view.',
+          TextSpan(text: 'Handy to resend without leaving this view.'),
         );
       case 2:
         return const _WtStepInfo(
           "Right now, I'm on Autopilot",
-          "I'm handling this conversation myself. Watch what happens when a "
-              "guest asks something I'm not fully confident about →",
+          TextSpan(
+              text: "I'm handling this conversation myself. Watch what "
+                  "happens when a guest asks something I'm not fully "
+                  "confident about →"),
         );
       case 3:
         return _WtStepInfo(
           'Escalated — I flagged this for you',
-          "I switch us to Intervene automatically whenever something needs "
-              "your OK, or anything I'm not confident about. You can also "
-              "flip to Intervene yourself anytime, escalation or not.",
+          const TextSpan(children: [
+            TextSpan(text: 'I switch us to '),
+            TextSpan(
+                text: 'Intervene',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(
+                text: " automatically whenever something needs your OK, or "
+                    "anything I'm not confident about. You can also "),
+            TextSpan(
+                text: 'flip to Intervene',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(text: ' yourself anytime, escalation or not.'),
+          ]),
           onEnter: _wtTriggerEscalation,
         );
       case 4:
         return _WtStepInfo(
           'Your turn',
-          "I've drafted a reply below — hit Send first. Once it's sent, "
-              "click Mark Issue as Resolved so I can resume control — "
-              "resolving before the guest actually has an answer would "
-              "leave them hanging.",
+          const TextSpan(children: [
+            TextSpan(text: "I've drafted a reply below — hit "),
+            TextSpan(
+                text: 'Send',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(text: " first. Once it's sent, click "),
+            TextSpan(
+                text: 'Mark Issue as Resolved',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(
+                text: " so I can resume control — resolving before the "
+                    "guest actually has an answer would leave them "
+                    "hanging."),
+          ]),
           onEnter: _wtPrefillReply,
         );
       case 5:
-        return const _WtStepInfo(
+        return _WtStepInfo(
           'All yours again',
-          "Nice work — I've resumed handling this conversation myself. "
-              "Questions along the way? Check the FAQ. Want to run through "
-              "everything again sometime? The full tutorial's always in the "
-              "Host Setup Guide.",
+          TextSpan(children: [
+            const TextSpan(text: 'Nice work — Back on '),
+            const TextSpan(
+                text: 'Autopilot',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const TextSpan(
+                text: ", I've resumed handling this conversation myself. "
+                    "Questions along the way? Check the "),
+            const TextSpan(
+                text: 'FAQ',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const TextSpan(
+                text: '. Want to run through everything again sometime? '
+                    "The full tutorial's always in the Host Setup Guide. "),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Icon(Icons.help_outline_rounded,
+                  size: 14, color: context.palette.textSecondary),
+            ),
+          ]),
           hasBack: false,
         );
       default:
         return const _WtStepInfo(
           'See it from both sides',
-          "Now, go use the test links you already generated — use your "
-              "preferred channel link and talk to me as if you were the "
-              "guest, and see both sides in action.",
+          TextSpan(
+              text: "Now, go use the test links you already generated — "
+                  "use your preferred channel link and talk to me as if "
+                  "you were the guest, and see both sides in action."),
           hasBack: false,
           isLast: true,
         );
@@ -381,7 +421,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 stepIndex: step + 2,
                 stepCount: 9,
                 title: info.title,
-                body: TextSpan(text: info.body),
+                body: info.body,
                 onBack: info.hasBack ? _wtBack : null,
                 onNext: _wtHandleNext,
                 onClose: _wtFinish,
@@ -1917,7 +1957,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 /// steps (displayed as "3 of 9" .. "9 of 9" — see _wtStepInfo).
 class _WtStepInfo {
   final String title;
-  final String body;
+  final InlineSpan body;
   final VoidCallback? onEnter;
   final bool hasBack;
   final bool isLast;

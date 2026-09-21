@@ -39,6 +39,7 @@ class EditPropertyScreen extends StatefulWidget {
 
 class _EditPropertyScreenState extends State<EditPropertyScreen> {
   late final TextEditingController _nicknameController;
+  final _conflictSectionKey = GlobalKey();
   late final String _propertyId;
   late Map<String, String> _existingFiles;
   final Set<String> _deletedFiles = {};
@@ -99,6 +100,21 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
     _propertyStatus = widget.property['status'] as String?;
     _masterJson = widget.property['master_json'] as Map<String, dynamic>?;
     _subscribeToProperty();
+    // Arriving here specifically to resolve conflicts (e.g. the
+    // conflict-found popup's Resolve button) should land the host looking at
+    // the conflicts, not the top of a long form they have to scroll through
+    // themselves.
+    if (_propertyStatus == 'Conflict_Pending') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _conflictSectionKey.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeOut,
+              alignment: 0.1);
+        }
+      });
+    }
   }
 
   @override
@@ -1024,11 +1040,14 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
                       conflictReport != null &&
                       conflictReport.isNotEmpty) ...[
                     const SizedBox(height: 28),
-                    Text('Resolve Conflicts',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    Container(
+                      key: _conflictSectionKey,
+                      child: Text('Resolve Conflicts',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
                     const SizedBox(height: 12),
                     ConflictQuestionnaireWidget(
                       key: ValueKey(conflictReport.length),

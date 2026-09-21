@@ -408,9 +408,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                   builder: (_) => EditPropertyScreen(
                     property: row,
                     isDev: _isDev,
-                    onResolved: _refreshAndCheck,
+                    onResolved: () => _loadProperties(silent: true),
                   ),
-                )).then((_) => _refreshAndCheck());
+                )).then((_) => _loadProperties());
               },
             ));
       } else if (_dialogBSuccessStatuses.contains(status) &&
@@ -626,19 +626,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadProperties();
   }
 
-  // Refreshes the property list, then immediately runs the same
-  // transition-detection checks the realtime subscription/10s poll already
-  // run -- lets an action the host just took here (e.g. resolving a
-  // conflict) fire the trained/conflict popup right away instead of waiting
-  // on realtime or the next poll tick. Safe to call redundantly: both
-  // checks are transition-based against _prevPropertyStatus and no-op if
-  // realtime already handled it first.
-  Future<void> _refreshAndCheck() async {
-    await _loadProperties(silent: true);
-    final announced = _checkScrapeRetryResolved(_properties);
-    _checkTrainingCompletion(_properties, skipIds: announced);
-  }
-
   void _openDrawer(Map<String, dynamic> property) {
     showGeneralDialog(
       context: context,
@@ -655,7 +642,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         alignment: Alignment.centerRight,
         child: PropertyDetailDrawer(
           property: property,
-          onRefresh: _refreshAndCheck,
+          onRefresh: _loadProperties,
           isDev: _isDev,
         ),
       ),
