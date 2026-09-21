@@ -60,6 +60,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Add real sourced stats/fun facts to the Train Now wait popup's rotating card (currently Alfred-capability tips only, no stats — deliberately avoided fabricating numbers) (queued 2026-09-09)
 - [ ] guide.html: add a section on exporting Airbnb's listing JSON directly (the "goldmine" method), plus a simple copy-paste-into-a-doc (.txt/.docx/PDF) fallback for non-technical hosts — deferred pending the exact export steps from the founder (queued 2026-09-21)
 - [ ] Update the feedback-widget workflow (currently: `feedback_dialog.dart` inserts straight into Supabase's `feedback` table via RLS, nothing reads or surfaces it anywhere) — founder already designed a protocol for this in the reflip project that's working well there and wants to use it as inspiration here (queued 2026-09-21)
+- [ ] New-account signup never sent a confirmation email — founder tried creating a second test account (to test the first-time welcome/walkthrough flow) and never received it. Not investigated yet; likely Supabase Auth email delivery/config, not app code, but confirm before assuming (queued 2026-09-21)
 - [ ] Property/document match-check (queued 2026-09-19, deliberately parked as its own design
       problem — not part of the 2026-09-19 UI/UX batch): verify that uploaded supporting documents
       (house manual, WiFi photo, etc.) actually belong to the property they're attached to, rather

@@ -11,6 +11,11 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
 session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
+- 🔴 guide.html screenshots still broken after two rounds (crops, highlight style, wrong Knowledge-
+  tab approach, misplaced/blurry/incomplete shots) + an unexplained "Alfred is not responding" on
+  Submit Resolutions (worked on retry). Full detail + root causes + why it kept going wrong:
+  `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. **Must use
+  `FIX_VERIFY_PROTOCOL.md`.**
 - 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
   worth a quick look at the delete path.
 - 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
@@ -24,7 +29,49 @@ session-continuity state only: in-flight investigations and handoffs that don't 
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-19 (**Fixed the Step 0 hint showing on every Ready card instead of one;
+**Last Session:** 2026-09-21 (**Fixed the real Add Property popup-stacking bug (two distinct root
+causes, both live-verified on deployed staging) and scroll-to-conflicts; attempted a guide.html
+screenshot overhaul that shipped broken and had to be handed off, not fixed.**) — `staging`, commit
+`bfc34f9`. Frontend only, no backend changes.
+> **✅ Add Property popup-stacking, root-caused for real (not the "dashboard theory" from earlier
+> in this session, which was correctly ruled out at the time but turned out to be half-right for a
+> different reason).** Two independent causes, both confirmed by code and both live-verified:
+> (1) `add_property_screen.dart`'s wait dialog closed via a blind `Navigator.pop()` — if anything
+> else had been pushed on top by the time it ran, the blind pop closed that instead, leaving the
+> wait dialog stuck indefinitely (not a brief animation race, confirmed by the founder's exact
+> report: stuck until manually dismissed). Fixed via the existing `pushTrainingWaitDialog`/
+> `popTrainingWaitDialog` route-keyed helpers. (2) `dashboard_screen.dart` never stops running
+> while Add Property screen is open on top of it, and its own background "training finished"
+> watcher had zero exclusion for a property currently being created there — despite the class's
+> own comment already claiming that exclusion existed. Fixed via a new `onPropertyIdKnown`
+> callback + `_activeAddPropertyId` field. Also added scroll-to-conflicts on Add Property screen
+> (same `Scrollable.ensureVisible` pattern as Edit Property). **Live-verified 3 times against
+> deployed staging** via throwaway Playwright-driven properties (cleaned up after): clean single
+> popup at conflict-found, no ghost dialog + working auto-scroll after Resolve Conflicts, clean
+> single popup at trained. Used the project's own cheap OpenRouter vision judge
+> (`qwen/qwen3-vl-8b-instruct`) for the repetitive screenshot verification, not Claude's own vision,
+> per founder's explicit ask to save Anthropic tokens.
+> **⚠️ guide.html screenshot overhaul — shipped in the same commit, but founder's live review found
+> it badly broken: highlight boxes still cutting into fields, highlight style still not matching
+> the real widget despite being asked repeatedly, the Knowledge tab approach was wrong (should be
+> one screenshot with 3 things highlighted, not multiple near-duplicate real captures), one
+> screenshot spliced into the wrong location (root cause found: a regex splice script's "two divs
+> closing in a row" heuristic broke on the one step with an extra wrapper div), one blurry (missing
+> 2x device-scale-factor), one incomplete (cropped before reaching the actual message box/Send
+> button it was supposed to show). This was corrected/re-verified twice in-session and still
+> shipped wrong on the second round — see the process write-up in `lessons.md`'s 2026-09-21 entry
+> and the full handoff `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`
+> (FIX_VERIFY_PROTOCOL.md now mandatory for this specific follow-up).
+> **🔴 New, unexplained: Submit Resolutions threw "Alfred is not responding" on the founder's first
+> real end-to-end test (files + URL + nickname → Train Now → conflict found → Resolve → Submit).**
+> Retry succeeded instantly; a full second end-to-end attempt from a fresh property had zero errors
+> anywhere. Not investigated this session — logged in the same handoff doc, likely worth checking
+> Cloud Run cold-start timing first.
+> Logged: `_tests/scenarios.md` (2 new pending-intake rows), `QUEUE.md` (new-account signup never
+> sent a confirmation email, found live by the founder, not yet investigated).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Fixed the Step 0 hint showing on every Ready card instead of one;
 root-caused and fixed "Stop doesn't actually stop training" as two separate real bugs; built and
 live-verified a ghost-property recovery UX on top of that fix; finished Wave 4 (guide.html) with
 real screenshot fixes.**) — `staging`, commits `5469d5a`..`24b9afa` (11 commits). Frontend +

@@ -559,3 +559,39 @@ app.
 against JS-heavy/frequently-changing pages should default to a fresh fetch, not the library default,
 whenever data freshness/completeness actually matters — the cache reuse window is undocumented and
 varies by domain per Firecrawl's own tool description.
+
+---
+
+## 2026-09-21 — "Verify" was consistently the step that got skipped or done too shallowly on a whole batch of visual (guide.html screenshot) fixes
+
+**Context:** Reworked guide.html's screenshot highlight boxes/crops across the Add Property,
+Property Enhancement, and Add a Guest tabs — cropping and positioning them, matching them to the
+real in-app `WalkthroughHighlight` widget's style, and splicing new real-walkthrough captures in
+via a regex-based script.
+
+**Discovery:** The founder had to correct the same categories of mistake multiple times in a row,
+including things already explicitly agreed to and claimed fixed: highlight boxes still cut into
+the fields they're pointing at (agreed to fix, didn't re-verify after); the highlight style still
+didn't visually match the real widget (asked for repeatedly across the session, a CSS change was
+made but never re-checked against a real side-by-side afterward); a screenshot with a visibly
+cut-off message box was spliced in as final even though the crop's incompleteness was evident at
+capture time; a regex-based splice script's "two closing divs in a row" heuristic silently broke on
+the one step (out of nine) that had an extra wrapper div, inserting a screenshot *inside* a callout
+box instead of after it — the script's own success criterion was "ran without throwing," not
+"landed in the visually correct place." In every case, the actual defect would have been visible
+immediately by opening the real rendered page at full/zoomed size — the review process actually
+used (a shrunk full-page thumbnail screenshot, viewed once, in isolation, not held next to the
+original reference) was structurally incapable of catching any of it, and was trusted as sufficient
+sign-off anyway.
+
+**Impact:** `frontend/web/guide.html`. Full itemized list of what's still broken, exact root
+causes where known, and a "why this kept going wrong" section written for the next session:
+`_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. `FIX_VERIFY_PROTOCOL.md`
+made mandatory for that follow-up work specifically because of this pattern.
+
+**Global Candidate:** Yes — the general failure mode ("verify" collapsing into "looks plausible in
+isolation" instead of "matches the specific reference, at real size, after every change") applies
+to any visual/UI fix task, not just this project. Two concrete countermeasures worth carrying
+forward: prefer element-locator screenshots over hand-guessed pixel `clip` coordinates (removes an
+entire class of position-guessing bugs), and treat "I noticed this is still imperfect" during your
+own work as a stop-and-fix signal, not something to ship and let the user catch.
