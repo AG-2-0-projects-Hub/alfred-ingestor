@@ -230,7 +230,12 @@ final AppPalette _daylightPalette = AppPalette(
   borderStrong: const Color.fromRGBO(0, 0, 0, 0.18),
   textPrimary: const Color(0xFF161E29),
   textSecondary: const Color(0xFF3D4452),
-  textMuted: const Color(0xFF8A8F98),
+  // Was 0xFF8A8F98 (the same value copy-pasted into the Midnight palette
+  // below, where it's fine against a dark background) — against Daylight's
+  // light background/surface this only reached ~2.95:1 contrast, below WCAG
+  // AA's 4.5:1 for the hint/label/timestamp text it drives app-wide.
+  // Darkened specifically for this palette; ~5.4:1 against #F4F3FF.
+  textMuted: const Color(0xFF5E6470),
   success: const Color(0xFF16A875),
   successContainer: const Color.fromRGBO(22, 168, 117, 0.12),
   warning: const Color(0xFFD97706),
@@ -357,7 +362,17 @@ class AppTheme {
   static const double glassBlurSigma = 20.0;
   static const double glassBlurSigmaHeavy = 24.0;
 
-  // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — replaces Curves.easeOut/easeInOut.
+  // Scrim behind the Train Now/ingest/conflict/trained dialog sequence —
+  // was 0.65 copy-pasted at each call site (too heavy per founder feedback
+  // 2026-09-15); one shared, lighter constant now.
+  static const Color trainingBarrierColor = Color(0x59000000); // black @ 0.35
+
+  // Design-token easing: cubic-bezier(0.16, 1, 0.3, 1) — the intended
+  // standard for new UI animations (see glass_panel.dart, main.dart's
+  // AnimatedTheme). Older call sites elsewhere still use raw Curves.easeOut/
+  // easeInOut directly and haven't been migrated — this does not yet
+  // "replace" them app-wide, despite what an earlier version of this comment
+  // claimed.
   static const Cubic standardEasing = Cubic(0.16, 1.0, 0.3, 1.0);
 
   // Design-token interaction-scale: 0.97 → 1.0 on press.
@@ -394,7 +409,14 @@ class AppTheme {
         onSecondary: const Color(0xFFFFFFFF),
         secondaryContainer: p.accentContainer,
         onSecondaryContainer: p.onAccentContainer,
-        tertiary: p.auroraLavender,
+        // Was p.auroraLavender — a near-transparent decorative color (6-12%
+        // alpha) meant only for blurred background blobs. Any default
+        // Material widget that actually renders the `tertiary` role (FAB,
+        // Chip, TabBar) would have shown white onTertiary text on an
+        // almost-invisible fill. primaryDark is solid, already brand-legible
+        // against white, and reuses an existing token instead of inventing a
+        // new color.
+        tertiary: p.primaryDark,
         onTertiary: const Color(0xFFFFFFFF),
         tertiaryContainer: brightness == Brightness.dark
             ? const Color(0xFF2D1B69)

@@ -13,7 +13,7 @@ from google.genai import types
 
 from services import genai_factory
 
-MODEL = "gemini-2.5-pro"
+MODEL = "gemini-3.6-flash"
 
 # ─── Prompt A — PDF / DOCX (verbatim from blueprint Route 0) ─────────────────
 SYSTEM_INSTRUCTION_A = "You are a Data Extractor. Your job is to read documents and extract key facts for a rental property."
@@ -133,7 +133,22 @@ SYSTEM_INSTRUCTION_C = "You are a Transcription and Knowledge Extraction Special
 USER_PROMPT_C = """\
 You are an expert Knowledge Base Architect for vacation rentals. This audio recording is from a property host. Your job is to transcribe it fully and extract ALL actionable information for the property knowledge base.
 
-ANALYSIS PROCESS:
+CRITICAL: First determine whether this audio actually contains audible human speech.
+If the audio is silent, contains no discernible speech, or is too noisy/unclear to make
+out actual words, DO NOT invent or guess a transcript. Instead output ONLY:
+
+---
+document_type: "Host Audio Note"
+contains_host_voice: No
+---
+
+### Full Transcript
+[NO_SPEECH_DETECTED — audio was silent, unintelligible, or contained no discernible speech]
+
+Do this instead of the normal output below whenever you are not confident real words are
+present. Never fabricate plausible-sounding content to fill in gaps.
+
+ANALYSIS PROCESS (only if real speech IS present):
 1. Transcribe the audio verbatim
 2. Identify all distinct topics/subjects mentioned
 3. Extract specific, actionable information for each topic
@@ -145,7 +160,7 @@ OUTPUT FORMAT (Hybrid Frontmatter + Adaptive Markdown):
 document_type: "Host Audio Note"
 primary_language: [e.g., "English", "Spanish", "Mixed"]
 information_density: [High/Medium/Low]
-contains_host_voice: Yes
+contains_host_voice: [Yes/No]
 ---
 
 ### Full Transcript
@@ -238,6 +253,29 @@ def _inline_part(data: bytes, mime_type: str) -> types.Part:
     return types.Part.from_bytes(data=data, mime_type=mime_type)
 
 
+# Revised 2026-09-16, corrected same day after a code review caught the first
+# pass going too far. Original `_INGEST_CALL_TIMEOUT_S = 20` was too tight — real
+# measurement showed gemini-3.6-flash's normal successful call latency (14.9-19.1s
+# across sequential/concurrent-2/concurrent-4 patterns, real Vertex, real content)
+# already ate nearly all of that budget with near-zero margin, so the stall
+# detector was cancelling-and-restarting calls that were on track to succeed.
+#
+# The first fix removed call_timeout entirely (matching prod, which has never had
+# one here and works reliably) — but genai_factory.generate_with_retry()'s stall
+# detection (the retry-on-hang path built to fix the confirmed-live 2026-09-09
+# silent-stall incident) only engages when call_timeout is set. Removing it
+# outright didn't just widen the margin, it deleted that protection for every
+# caller of _generate() app-wide, including query_knowledge_base and the voice
+# add-knowledge path — neither of which has any other timeout at all.
+#
+# Fix: a real ceiling with real margin (35s, ~1.8x the observed 19.1s max) but
+# fewer attempts (2, not the default 4) so the worst case — 2 x 35s + ~0.5s
+# backoff ≈ 70.5s — stays comfortably under ingest.py's 90s outer per-file
+# watchdog instead of eating most of it.
+_INGEST_CALL_TIMEOUT_S = 35
+_INGEST_CALL_ATTEMPTS = 2
+
+
 async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
     client = _get_client()
     response = await genai_factory.generate_with_retry(
@@ -247,6 +285,8 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
+        call_timeout=_INGEST_CALL_TIMEOUT_S,
+        attempts=_INGEST_CALL_ATTEMPTS,
     )
     return response.text
 

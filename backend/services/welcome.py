@@ -38,9 +38,13 @@ _COUNTRY_LANG = {
 def _extract_country(master_json: dict | None) -> str | None:
     """The merge prompt nests the country under `location.address`, but older
     payloads put it directly on `location` — accept either, otherwise a Mexican
-    property silently gets greeted in English."""
-    location = (master_json or {}).get("location") or {}
-    address = location.get("address") or {}
+    property silently gets greeted in English. `address` itself is sometimes a
+    plain string (a full address line) rather than a nested object — guard
+    against that shape too instead of crashing on `.get()`."""
+    location = (master_json or {}).get("location")
+    location = location if isinstance(location, dict) else {}
+    address = location.get("address")
+    address = address if isinstance(address, dict) else {}
     for country in (address.get("country"), location.get("country")):
         if isinstance(country, str) and country.strip():
             return country.strip()

@@ -10,6 +10,9 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
+import '../utils/walkthrough_prefs.dart';
+import 'walkthrough_highlight.dart';
+import 'walkthrough_tip_panel.dart';
 
 enum _EscalationState { none, active, resolved }
 
@@ -25,6 +28,11 @@ class ChatLiveDialog extends StatefulWidget {
   // several seconds on the free tier, but the host knows the state changed
   // the instant the API returns, so we can refresh dashboard data right then.
   final VoidCallback? onResolved;
+  // True when arriving here from GenerateGuestLinkDialog's "Open Host Chat"
+  // during Part C of the post-training walkthrough (steps 1-2 happened
+  // there) — continues the same 9-step sequence as steps 3-9. See
+  // walkthrough.md.
+  final bool continueWalkthrough;
 
   const ChatLiveDialog({
     super.key,
@@ -32,6 +40,7 @@ class ChatLiveDialog extends StatefulWidget {
     required this.propertyId,
     required this.propertyName,
     this.onResolved,
+    this.continueWalkthrough = false,
   });
 
   static Future<void> show(
@@ -40,6 +49,7 @@ class ChatLiveDialog extends StatefulWidget {
     required String propertyId,
     required String propertyName,
     VoidCallback? onResolved,
+    bool continueWalkthrough = false,
   }) {
     return showGeneralDialog(
       context: context,
@@ -52,6 +62,7 @@ class ChatLiveDialog extends StatefulWidget {
         propertyId: propertyId,
         propertyName: propertyName,
         onResolved: onResolved,
+        continueWalkthrough: continueWalkthrough,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -133,19 +144,300 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   StreamSubscription<List<Map<String, dynamic>>>? _convSubscription;
 
+  // Part C steps 3-9 of the post-training walkthrough (steps 1-2 happen in
+  // GenerateGuestLinkDialog — see walkthrough.md). _wtStep is internal
+  // (0-6); the tip panel displays it offset by 2 ("3 of 9" .. "9 of 9") via
+  // WalkthroughTipPanel's own stepIndex/stepCount. Docked via a real Overlay
+  // entry, same reason as Part B and Part C steps 1-2 (see their _wtOverlay
+  // comments) — and driven by a ValueNotifier rather than
+  // OverlayEntry.markNeedsBuild(), which was confirmed unreliable there.
+  //
+  // No real guest has messaged yet at this point in the walkthrough (the
+  // booking was just created), so _conversationId is still null — the
+  // escalate/reply/resolve demo at steps 6-7 is simulated entirely locally
+  // (see _wtTriggerEscalation/_wtPrefillReply and the demo branches in
+  // _sendHostMessage/_resolveIssue) rather than hitting the real backend.
+  int? _wtStep;
+  bool _wtEscalationShown = false;
+  // Step 4 ("Your turn") is a two-phase gate: Send is the only enabled
+  // action until it's used, then the highlight moves to Mark Issue as
+  // Resolved and that becomes the only enabled action — never both at once.
+  bool _wtReplySent = false;
+  final _wtHeaderKey = GlobalKey();
+  final _wtLinksKey = GlobalKey();
+  final _wtModeKey = GlobalKey();
+  final _wtPillKey = GlobalKey();
+  final _wtResolveKey = GlobalKey();
+  final _wtSendKey = GlobalKey();
+  final _wtDockLink = LayerLink();
+  OverlayEntry? _wtOverlay;
+  final _wtStepNotifier = ValueNotifier<int?>(null);
+
   @override
   void initState() {
     super.initState();
     _loadConversation();
+    // Also re-checked here (not just at the GenerateGuestLinkDialog step that
+    // sets continueWalkthrough) in case the viewport narrowed between the two
+    // — the tip panel is hidden below this width (see the
+    // ValueListenableBuilder's own screenW < 1000 check below), so never
+    // start the walkthrough state without it: that would silently lock the
+    // chat into "Intervene" mode with injected demo messages and no visible
+    // way to progress.
+    if (widget.continueWalkthrough &&
+        MediaQuery.sizeOf(context).width >= 1000) {
+      _wtStep = 0;
+      _wtStepNotifier.value = 0;
+    }
   }
 
   @override
   void dispose() {
+    _wtOverlay?.remove();
+    _wtOverlay = null;
+    _wtStepNotifier.dispose();
     _subscription?.cancel();
     _convSubscription?.cancel();
     _hostController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _setWtStep(int? step) {
+    setState(() => _wtStep = step);
+    _wtStepNotifier.value = step;
+  }
+
+  void _wtNext() {
+    if (_wtStep == null) return;
+    if (_wtStep! >= 6) {
+      _wtFinish();
+      return;
+    }
+    final next = _wtStep! + 1;
+    _setWtStep(next);
+    _wtStepInfo(next).onEnter?.call();
+  }
+
+  void _wtBack() {
+    if (_wtStep == null || _wtStep == 0) return;
+    // Leaving step 3 ("Escalated") the way we came: undo the demo escalation
+    // it staged, so Back actually returns to step 2's exact state instead of
+    // leaving the escalated message and Intervene mode live. Re-clears
+    // _wtEscalationShown too, so re-entering step 3 later stages it fresh.
+    if (_wtStep == 3) {
+      _wtEscalationShown = false;
+      setState(() {
+        _mode = 'autopilot';
+        _escalationReason = null;
+        _requiresAttention = false;
+        _messages = _messages
+            .where((m) => m['id'] != 'wt-demo-guest' && m['id'] != 'wt-demo-ai')
+            .toList();
+      });
+    }
+    _setWtStep(_wtStep! - 1);
+  }
+
+  // Step 4 ("Your turn")'s tip-panel Next: clicking it instead of Send should
+  // still complete the step for real -- send the pre-filled reply (if not
+  // already sent) and resolve, same as the Send + Mark Issue as Resolved
+  // path, rather than just skipping ahead with the message unsent and the
+  // mode still stuck on Intervene. _resolveIssue's wasStep4 branch already
+  // advances via _wtNext() once it resets the mode, so this doesn't call it.
+  void _wtHandleNext() {
+    if (_wtStep == 4) {
+      if (!_wtReplySent) _sendHostMessage();
+      _resolveIssue();
+      return;
+    }
+    _wtNext();
+  }
+
+  void _wtFinish() {
+    _setWtStep(null);
+    WalkthroughPrefs.markGuestLinkWalkthroughSeen();
+  }
+
+  _WtStepInfo _wtStepInfo(int step) {
+    switch (step) {
+      case 0:
+        return const _WtStepInfo(
+          'Always know who and where',
+          TextSpan(
+              text: "This is my live view of that guest's conversation — "
+                  "the header always shows the property and who's booked."),
+          hasBack: false,
+        );
+      case 1:
+        return const _WtStepInfo(
+          'Same links, right here too',
+          TextSpan(text: 'Handy to resend without leaving this view.'),
+        );
+      case 2:
+        return const _WtStepInfo(
+          "Right now, I'm on Autopilot",
+          TextSpan(
+              text: "I'm handling this conversation myself. Watch what "
+                  "happens when a guest asks something I'm not fully "
+                  "confident about →"),
+        );
+      case 3:
+        return _WtStepInfo(
+          'Escalated — I flagged this for you',
+          const TextSpan(children: [
+            TextSpan(text: 'I switch us to '),
+            TextSpan(
+                text: 'Intervene',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(
+                text: " automatically whenever something needs your OK, or "
+                    "anything I'm not confident about. You can also "),
+            TextSpan(
+                text: 'flip to Intervene',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(text: ' yourself anytime, escalation or not.'),
+          ]),
+          onEnter: _wtTriggerEscalation,
+        );
+      case 4:
+        return _WtStepInfo(
+          'Your turn',
+          const TextSpan(children: [
+            TextSpan(text: "I've drafted a reply below — hit "),
+            TextSpan(
+                text: 'Send',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(text: " first. Once it's sent, click "),
+            TextSpan(
+                text: 'Mark Issue as Resolved',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(
+                text: " so I can resume control — resolving before the "
+                    "guest actually has an answer would leave them "
+                    "hanging."),
+          ]),
+          onEnter: _wtPrefillReply,
+        );
+      case 5:
+        return _WtStepInfo(
+          'All yours again',
+          TextSpan(children: [
+            const TextSpan(text: 'Nice work — Back on '),
+            const TextSpan(
+                text: 'Autopilot',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const TextSpan(
+                text: ", I've resumed handling this conversation myself. "
+                    "Questions along the way? Check the "),
+            const TextSpan(
+                text: 'FAQ',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const TextSpan(
+                text: '. Want to run through everything again sometime? '
+                    "The full tutorial's always in the Host Setup Guide. "),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Icon(Icons.help_outline_rounded,
+                  size: 14, color: context.palette.textSecondary),
+            ),
+          ]),
+          hasBack: false,
+        );
+      default:
+        return const _WtStepInfo(
+          'See it from both sides',
+          TextSpan(
+              text: "Now, go use the test links you already generated — "
+                  "use your preferred channel link and talk to me as if "
+                  "you were the guest, and see both sides in action."),
+          hasBack: false,
+          isLast: true,
+        );
+    }
+  }
+
+  // Fake, local-only escalation demo. Originally guarded on
+  // `_conversationId == null`, on the assumption no conversation would exist
+  // yet at this point — wrong: GenerateGuestLinkDialog's steps 1-2 (which run
+  // right before this) always call the real backend to create one, so that
+  // guard silently blocked the demo for every host, every time. Gated on
+  // _wtEscalationShown instead — purely about not re-injecting the fake
+  // messages if the host goes Back then Next through this step again.
+  void _wtTriggerEscalation() {
+    if (_wtEscalationShown) return;
+    _wtEscalationShown = true;
+    setState(() {
+      _mode = 'intervene';
+      _escalationReason = 'Guest asked about early check-in — outside my confidence';
+      _requiresAttention = true;
+      _messages = [
+        ..._messages,
+        <String, dynamic>{
+          'id': 'wt-demo-guest',
+          'sender_type': 'guest',
+          'content': 'Is early check-in possible tomorrow?',
+          'status': 'delivered',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+        <String, dynamic>{
+          'id': 'wt-demo-ai',
+          'sender_type': 'ai',
+          'content': "I'm not fully confident about early check-in — "
+              "flagging this for the host to confirm.",
+          'status': 'delivered',
+          'created_at': DateTime.now().toIso8601String(),
+          'is_escalated_interaction': true,
+        },
+      ];
+    });
+    _scrollToBottom();
+  }
+
+  void _wtPrefillReply() {
+    _wtReplySent = false;
+    _hostController.text =
+        "Yes, early check-in is available — I'll make sure it's ready before they arrive.";
+  }
+
+  void _ensureWtOverlayInserted() {
+    if (_wtOverlay != null) return;
+    final entry = OverlayEntry(builder: (overlayContext) {
+      return ValueListenableBuilder<int?>(
+        valueListenable: _wtStepNotifier,
+        builder: (_, step, __) {
+          final screenW = MediaQuery.of(overlayContext).size.width;
+          if (step == null || screenW < 1000) return const SizedBox.shrink();
+          final info = _wtStepInfo(step);
+          return Positioned(
+            width: 300,
+            child: CompositedTransformFollower(
+              link: _wtDockLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topRight,
+              followerAnchor: Alignment.topLeft,
+              offset: const Offset(20, 56),
+              child: WalkthroughTipPanel(
+                stepIndex: step + 2,
+                stepCount: 9,
+                title: info.title,
+                body: info.body,
+                onBack: info.hasBack ? _wtBack : null,
+                onNext: _wtHandleNext,
+                onClose: _wtFinish,
+                isLast: info.isLast,
+                pointerSide: WalkthroughPointerSide.left,
+                pointerCenter: 56,
+              ),
+            ),
+          );
+        },
+      );
+    });
+    _wtOverlay = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Overlay.of(context, rootOverlay: true).insert(entry);
+    });
   }
 
   Future<void> _loadConversation() async {
@@ -263,7 +555,22 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
         .order('created_at', ascending: true)
         .listen((data) {
           if (mounted) {
-            setState(() => _messages = data);
+            setState(() {
+              if (_wtStep != null) {
+                // A real message can land while the walkthrough demo is
+                // active — its own final step explicitly invites the host to
+                // trigger this, by opening their own guest link. Replacing
+                // _messages wholesale would silently wipe the locally
+                // injected wt-demo-* bubbles the host is mid-tutorial on, so
+                // merge instead: keep the demo messages, refresh everything
+                // real underneath them.
+                final demoMessages = _messages.where(
+                    (m) => (m['id'] as String?)?.startsWith('wt-demo-') ?? false);
+                _messages = [...data, ...demoMessages];
+              } else {
+                _messages = data;
+              }
+            });
             _scrollToBottom();
             // An escalation can land while this dialog is open. Detect it from
             // the messages themselves — scanning ALL rows, since the last one is
@@ -345,6 +652,43 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   Future<void> _resolveIssue() async {
     if (_isResolving) return;
+    // Walkthrough demo — resolve locally instead of calling the real
+    // endpoint. Gated on _wtStep alone (not _conversationId == null, which is
+    // never true here — see _wtTriggerEscalation): the walkthrough's own real
+    // "Test walkthrough" conversation always exists by this point, but the
+    // escalation it's resolving was only ever staged locally, never written.
+    if (_wtStep != null) {
+      final wasStep4 = _wtStep == 4;
+      setState(() => _isResolving = true);
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      setState(() {
+        _mode = 'autopilot';
+        _escalationReason = null;
+        _requiresAttention = false;
+        _isResolving = false;
+        _messages = [
+          ..._messages,
+          <String, dynamic>{
+            'id': 'wt-demo-resolved',
+            'sender_type': 'system',
+            'content': ChatSystemMessages.resumeAfterResolve,
+            'status': 'delivered',
+            'created_at': DateTime.now().toIso8601String(),
+          },
+        ];
+      });
+      // Resolving IS the completed action for this step — advance rather
+      // than making the host find and click a separate Next.
+      if (wasStep4) _wtNext();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Issue resolved. Alfred is back on autopilot.'),
+          backgroundColor: context.palette.success,
+        ),
+      );
+      return;
+    }
     setState(() => _isResolving = true);
     try {
       await ApiClient.postJson(
@@ -442,7 +786,28 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   Future<void> _sendHostMessage() async {
     final text = _hostController.text.trim();
-    if (text.isEmpty || _conversationId == null || _isSending) return;
+    if (text.isEmpty || _isSending) return;
+    // Walkthrough demo — simulate the send locally rather than hitting the
+    // real endpoint. Gated on _wtStep alone — see _resolveIssue's comment.
+    if (_wtStep != null) {
+      _hostController.clear();
+      setState(() {
+        if (_wtStep == 4) _wtReplySent = true;
+        _messages = [
+          ..._messages,
+          <String, dynamic>{
+            'id': 'wt-demo-host-${DateTime.now().millisecondsSinceEpoch}',
+            'sender_type': 'host',
+            'content': text,
+            'status': 'delivered',
+            'created_at': DateTime.now().toIso8601String(),
+          },
+        ];
+      });
+      _scrollToBottom();
+      return;
+    }
+    if (_conversationId == null) return;
     _hostController.clear();
 
     final optimisticId = 'local-${DateTime.now().millisecondsSinceEpoch}';
@@ -501,42 +866,58 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
   }
 
+  Widget _wtHighlight({required GlobalKey key, required bool active, required Widget child}) {
+    return WalkthroughHighlight(key: key, active: active, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: isMobile
-          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 16)
-          : const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 1320,
-          maxHeight: MediaQuery.of(context).size.height * 0.88,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                color: palette.glassTintStrong,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: palette.glassBorderStrong),
-              ),
-              child: Column(
-                children: [
-                  _buildDialogAppBar(isMobile),
-                  const Divider(height: 1),
-                  Expanded(child: _buildBody(isMobile)),
-                ],
-              ),
+    final insetPadding = isMobile
+        ? const EdgeInsets.symmetric(horizontal: 8, vertical: 16)
+        : const EdgeInsets.symmetric(horizontal: 24, vertical: 32);
+
+    // The dialog is normally centered at up to 1320px wide, which leaves too
+    // little side margin at common desktop widths to dock a 300px walkthrough
+    // panel beside it without it running off-screen. While the walkthrough is
+    // showing, shrink the card and pin it to the left instead of centering it,
+    // guaranteeing real room on the right for the panel to dock into.
+    final showWtPanel = _wtStep != null && screenW >= 1000;
+    final card = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: showWtPanel ? (screenW - 360).clamp(600, 1320) : 1320,
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: palette.glassTintStrong,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: palette.glassBorderStrong),
+            ),
+            child: Column(
+              children: [
+                _buildDialogAppBar(isMobile),
+                const Divider(height: 1),
+                Expanded(child: _buildBody(isMobile)),
+              ],
             ),
           ),
         ),
       ),
+    );
+
+    _ensureWtOverlayInserted();
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: insetPadding,
+      alignment: showWtPanel ? Alignment.centerLeft : Alignment.center,
+      child: CompositedTransformTarget(link: _wtDockLink, child: card),
     );
   }
 
@@ -557,7 +938,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       child: Row(
         children: [
           Expanded(
-            child: Column(
+            child: _wtHighlight(
+              key: _wtHeaderKey,
+              active: _wtStep == 0,
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -603,22 +987,27 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                   ],
                 ),
               ],
+              ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: modeColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: modeColor.withValues(alpha: 0.45)),
-            ),
-            child: Text(
-              modeLabel,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: modeColor,
-                letterSpacing: 0.2,
+          _wtHighlight(
+            key: _wtPillKey,
+            active: _wtStep == 2 || _wtStep == 3,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: modeColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: modeColor.withValues(alpha: 0.45)),
+              ),
+              child: Text(
+                modeLabel,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: modeColor,
+                  letterSpacing: 0.2,
+                ),
               ),
             ),
           ),
@@ -656,7 +1045,14 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           IconButton(
             icon: const Icon(Icons.close_rounded),
             tooltip: 'Close',
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () {
+              // Previously only the tip panel's own close icon called
+              // _wtFinish() — dismissing via this main close button (the more
+              // obvious one) left the walkthrough unmarked, so it re-ran on
+              // the next guest link generated.
+              if (_wtStep != null) _wtFinish();
+              Navigator.of(context).pop();
+            },
             color: palette.textMuted,
           ),
         ],
@@ -685,8 +1081,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   /// The messages area (empty state or the scrolling bubble list). Extracted so
   /// the desktop two-pane layout and the mobile stacked layout share one source.
+  List<Map<String, dynamic>> get _displayMessages => _messages;
+
   Widget _buildMessagesList() {
-    if (_messages.isEmpty) {
+    if (_displayMessages.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -705,12 +1103,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
     }
     final states = _computeEscalationWindow();
     final isEmergency = _escalationReason?.startsWith('emergency_') == true;
+    final messages = _displayMessages;
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
-      itemCount: _messages.length,
+      itemCount: messages.length,
       itemBuilder: (_, i) => _buildBubble(
-        _messages[i],
+        messages[i],
         escalationState: states[i],
         isEmergency: isEmergency,
       ),
@@ -768,8 +1167,16 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildGuestLinkSection(),
-              _buildModeToggle(),
+              _wtHighlight(
+                key: _wtLinksKey,
+                active: _wtStep == 1,
+                child: _buildGuestLinkSection(),
+              ),
+              _wtHighlight(
+                key: _wtModeKey,
+                active: _wtStep == 2 || _wtStep == 3,
+                child: _buildModeToggle(),
+              ),
               if (_mode == 'intervene' && _isEscalated) _buildResolveButton(),
               if (_mode == 'autopilot' && _escalationReason != null)
                 _buildUnresolvedBanner(),
@@ -1096,20 +1503,21 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
   // after the host's replies — NOT on the escalated reply's resolution_status
   // (that sits early in the chain and would wrongly exclude everything after it).
   List<_EscalationState> _computeEscalationWindow() {
+    final messages = _displayMessages;
     final out =
-        List<_EscalationState>.filled(_messages.length, _EscalationState.none);
+        List<_EscalationState>.filled(messages.length, _EscalationState.none);
     bool inWindow = false;
     int windowStart = -1;
-    for (int i = 0; i < _messages.length; i++) {
-      final m = _messages[i];
+    for (int i = 0; i < messages.length; i++) {
+      final m = messages[i];
       final content = m['content'];
       // Open at the escalation trigger: the guest message right before an
       // escalated reply, or the escalated reply itself. (A manual Intervene is
       // not an escalation, so it intentionally does not open a window.)
       if (!inWindow &&
           m['sender_type'] == 'guest' &&
-          i + 1 < _messages.length &&
-          _messages[i + 1]['is_escalated_interaction'] == true) {
+          i + 1 < messages.length &&
+          messages[i + 1]['is_escalated_interaction'] == true) {
         inWindow = true;
         windowStart = i;
       }
@@ -1140,8 +1548,13 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: SizedBox(
         width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _isResolving ? null : _resolveIssue,
+        child: _wtHighlight(
+          key: _wtResolveKey,
+          active: _wtStep == 4 && _wtReplySent,
+          child: ElevatedButton.icon(
+          onPressed: (_isResolving || (_wtStep == 4 && !_wtReplySent))
+              ? null
+              : _resolveIssue,
           icon: _isResolving
               ? const SizedBox(
                   width: 14,
@@ -1160,6 +1573,7 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
+          ),
           ),
         ),
       ),
@@ -1517,20 +1931,44 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            onPressed: _isSending ? null : _sendHostMessage,
-            icon: const Icon(Icons.send_rounded, size: 18),
-            style: IconButton.styleFrom(
-              backgroundColor: context.palette.primary,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: context.palette.border,
-              disabledForegroundColor: context.palette.textMuted,
+          WalkthroughHighlight(
+            key: _wtSendKey,
+            active: _wtStep == 4 && !_wtReplySent,
+            borderRadius: 22,
+            padding: 2,
+            child: IconButton(
+              onPressed: _isSending ? null : _sendHostMessage,
+              icon: const Icon(Icons.send_rounded, size: 18),
+              style: IconButton.styleFrom(
+                backgroundColor: context.palette.primary,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: context.palette.border,
+                disabledForegroundColor: context.palette.textMuted,
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+/// Copy + behaviour for one of chat_live_dialog's 7 internal walkthrough
+/// steps (displayed as "3 of 9" .. "9 of 9" — see _wtStepInfo).
+class _WtStepInfo {
+  final String title;
+  final InlineSpan body;
+  final VoidCallback? onEnter;
+  final bool hasBack;
+  final bool isLast;
+
+  const _WtStepInfo(
+    this.title,
+    this.body, {
+    this.onEnter,
+    this.hasBack = true,
+    this.isLast = false,
+  });
 }
 
 class _AudioBubble extends StatefulWidget {
@@ -1595,6 +2033,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 22,
               ),
+              tooltip: _playing ? 'Pause' : 'Play',
               color: context.palette.primary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 44, minHeight: 44),

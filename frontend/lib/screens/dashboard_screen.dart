@@ -3,11 +3,14 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
+import 'edit_property_screen.dart';
+import '../widgets/training_result_dialogs.dart';
 import '../widgets/property_expanded_view.dart';
 import '../widgets/archived_chats_dialog.dart';
 import '../widgets/chat_live_dialog.dart';
@@ -15,7 +18,10 @@ import 'add_property_screen.dart';
 import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
+import '../widgets/host_settings_dialog.dart';
 import '../services/push_notification_service.dart';
+import '../services/api_client.dart';
+import '../utils/walkthrough_prefs.dart';
 import 'auth_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -37,6 +43,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   // Host impact stats (get_host_stats RPC). Null until first load.
   Map<String, dynamic>? _hostStats;
   String? _hostAvatarUrl;
+  bool _isDev = false;
+  // Part A of the User-mode post-training walkthrough (Step 0) — the
+  // dashboard nudge shown on any Ready card. Step 0 points at both +Guest
+  // and Settings, so it only actually dismisses once BOTH the account-wide
+  // Settings walkthrough (Part B, changed 2026-09-19 — was per-property) and
+  // the global Guest Link walkthrough (Part C) have been seen — see
+  // _showStep0Hint below.
+  bool _settingsWalkthroughSeen = false;
+  bool _guestLinkWalkthroughSeen = true;
+
+  static const _readyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
 
   StreamSubscription? _convStreamSub;
   StreamSubscription? _guestStreamSub;
@@ -45,6 +62,40 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // Push-notification edge detection
   final Map<String, bool> _prevRequiresAttention = {};
+  // Scrape-quality failsafe (2026-09-17) edge detection — true while a
+  // background re-scrape is pending for that property. No push/email channel
+  // exists for hosts; this dashboard's own realtime subscription (below) is
+  // the only place a host reliably learns the retry resolved, so the toast
+  // fires here rather than on whichever screen happened to be open 5 minutes
+  // ago when the retry was scheduled.
+  final Map<String, bool> _prevScrapeRetryPending = {};
+  // Centralized "training just finished" popup (2026-09-17) — see
+  // _checkTrainingCompletion below. This dashboard is the one screen
+  // guaranteed to stay alive for as long as the app is open, even while the
+  // property drawer or EditPropertyScreen is open on top of it (both are
+  // pushed as additional routes, never replacing this one) — so it's the
+  // single owner of this popup for every flow that can finish a training/
+  // merge cycle, not just first-time property creation (which already
+  // handles its own popup locally, since it can't be navigated away from
+  // mid-run). Tracks each property's last-known status so a transition can
+  // be detected regardless of which action caused it.
+  final Map<String, String?> _prevPropertyStatus = {};
+  static const _dialogBSuccessStatuses = {'Trained', 'Merged', 'Fully_Trained'};
+  // Id of the property currently being created on an open Add Property
+  // screen, if any -- that screen already shows its own popups locally for
+  // its first training run (see its own field comment), so this background
+  // watcher must skip it entirely or the two independently show competing
+  // popups for the same event, landing on top of each other on the same
+  // root navigator. Set when Add Property screen reports its id, cleared
+  // once that screen is closed. Confirmed live 2026-09-21 -- this was the
+  // actual cause of "two stacked popups" during first-time property
+  // creation, despite this class's own field comment above already
+  // describing the intended exclusion.
+  String? _activeAddPropertyId;
+  // Serializes result popups so two properties finishing close together show
+  // one at a time instead of stacking two barrierDismissible:false dialogs.
+  final List<Future<void> Function()> _resultDialogQueue = [];
+  bool _resultDialogShowing = false;
   String _notifPermission = 'default';
   bool _showNotifChip = true;
 
@@ -55,6 +106,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _notifPermission = PushNotificationService.permissionState;
     _loadHostStats();
     _loadHostAvatar();
+    _loadWalkthroughSeenIds();
     _loadProperties().then((_) {
       if (!mounted) return;
       _subscribeRealtime();
@@ -99,7 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       final data = await Supabase.instance.client
           .from('properties')
           .select(
-              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
+              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status, ingest_heartbeat_at, scrape_retry')
           .isFilter('deleted_at', null)
           .order('created_at', ascending: false);
 
@@ -132,6 +184,22 @@ class _DashboardScreenState extends State<DashboardScreen>
         _processConversations(convRows, guestNames, hasEscalation, hasEmergency, previews);
       }
 
+      // 2026-09-18: run the same "did a job just finish" edge-detection here,
+      // not just from the realtime stream. Confirmed live (staging, isolated
+      // QA property): a plain status/scrape_retry write can arrive at the
+      // dashboard's realtime subscription anywhere from instantly to not at
+      // all -- Supabase's own free-tier realtime is already documented above
+      // as able to silently drop updates, which is exactly why this 10s poll
+      // exists for _properties in the first place. It was only ever wired to
+      // refresh the card data, leaving the completion popup as the one thing
+      // with no fallback -- a dropped realtime event meant it never fired at
+      // all, even though the card would go on to correct itself within 10s.
+      // Both check functions share their edge-detection state with the
+      // realtime path, so calling from both is safe: whichever source sees
+      // the transition first fires it, the other just finds nothing changed.
+      final announced = _checkScrapeRetryResolved(properties);
+      _checkTrainingCompletion(properties, skipIds: announced);
+
       if (mounted) {
         setState(() {
           _properties = properties;
@@ -140,6 +208,13 @@ class _DashboardScreenState extends State<DashboardScreen>
           _conversationPreviews = previews;
           _guestNamesByBooking = guestNames;
         });
+        // Piggybacks on this call's existing cadence (initial load, the 10s
+        // silent timer, post-chat-resolve refresh) instead of threading a
+        // refresh callback through every possible Guest Link/Host Chat entry
+        // point — Part C's "seen" flag can flip several dialogs deep (e.g.
+        // GenerateGuestLinkDialog → ChatLiveDialog), so catching it here is
+        // simpler than chasing every call site.
+        _loadWalkthroughSeenIds();
       }
     } catch (e) {
       // Silent refreshes must not surface SnackBar errors — they fire every
@@ -248,6 +323,160 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  // Scrape-quality failsafe (2026-09-17) — fires the "fully trained" toast
+  // the moment a background re-scrape resolves cleanly (pending -> cleared)
+  // for a property that's still in a healthy trained state. Skips the
+  // give-up case (attempts>=2, next_retry_at null) on purpose: that's a
+  // "please check your link" situation, not a success notification, and is
+  // already surfaced persistently on the property's own Overview tab rather
+  // than as a one-off toast that could be missed.
+  // Returns the property ids this pass just announced, so _checkTrainingCompletion
+  // (called right after, on the same batch) doesn't also fire a second, duplicate
+  // popup for a property whose status genuinely changed as part of the same retry
+  // (e.g. the resume_run path, which flips through "Ingesting" on its way back to
+  // Merged/Trained).
+  Set<String> _checkScrapeRetryResolved(List<Map<String, dynamic>> rows) {
+    const healthyStatuses = {'Merged', 'Trained', 'Fully_Trained'};
+    final announced = <String>{};
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      if (id == null || id == _activeAddPropertyId) continue;
+      final retry = row['scrape_retry'] as Map<String, dynamic>?;
+      // retrying==true added 2026-09-17 -- without it, a host-submitted link
+      // fix (which sets retrying on top of a prior give-up shape, so
+      // next_retry_at stays null) was never seen as "pending" here, so its
+      // clean-success case could never fire this popup either — only the
+      // fully-automatic background retry (which always sets a real future
+      // next_retry_at) could.
+      final current = retry != null &&
+          (retry['retrying'] == true ||
+              (retry['attempts'] != null && retry['next_retry_at'] != null));
+      final hadPrev = _prevScrapeRetryPending.containsKey(id);
+      final previous = _prevScrapeRetryPending[id] ?? false;
+      _prevScrapeRetryPending[id] = current;
+
+      if (!hadPrev || current || !previous) continue; // only a confirmed true->false edge
+      if (!healthyStatuses.contains(row['status'])) continue;
+
+      // 2026-09-18: this used to show a small SnackBar instead of the big
+      // "trained" popup -- a link-retry that needs no re-merge leaves the
+      // status label unchanged (e.g. "Merged" the whole time), so
+      // _checkTrainingCompletion's status-transition check never saw a
+      // change and never fired anything. This edge (scrape_retry pending ->
+      // resolved) is the one signal that's actually correct for this case,
+      // so it now drives the same popup every other completion uses.
+      final name = row['name'] as String? ?? 'Your property';
+      announced.add(id);
+      _enqueueResultDialog(() => showTrainedResultDialog(
+            context,
+            name,
+            onDismiss: () => Navigator.of(context, rootNavigator: true)
+                .popUntil((r) => r.isFirst),
+          ));
+    }
+    return announced;
+  }
+
+  // Centralized "training just finished" popup (2026-09-17) — see the field
+  // comment on _prevPropertyStatus for why this lives here and not on the
+  // screen that triggered the run. Fires the same "fully trained" or
+  // "conflicts to resolve" popup add_property_screen.dart already shows for
+  // first-time training, for every OTHER flow that can also finish one:
+  // retraining with new files, resolving conflicts, fixing a broken Airbnb
+  // link, or resuming a stalled property.
+  void _checkTrainingCompletion(List<Map<String, dynamic>> rows, {Set<String> skipIds = const {}}) {
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      if (id == null || skipIds.contains(id) || id == _activeAddPropertyId) {
+        continue;
+      }
+      final status = row['status'] as String?;
+      final hadPrev = _prevPropertyStatus.containsKey(id);
+      final previous = _prevPropertyStatus[id];
+      _prevPropertyStatus[id] = status;
+
+      // Seeding pass -- this property's first row since the dashboard
+      // subscribed (e.g. app just opened, or navigated back after this
+      // property was created elsewhere). Don't treat "already Trained
+      // before we ever looked" as "just finished".
+      if (!hadPrev) continue;
+      if (previous == status) continue; // no transition
+
+      final name = row['name'] as String? ?? '';
+      if (status == 'Conflict_Pending') {
+        _enqueueResultDialog(() => showConflictResultDialog(
+              context,
+              _conflictCountFor(row),
+              name,
+              // Clear back to the bare dashboard first (whatever screen this
+              // fired on top of -- Edit Property, an already-open drawer,
+              // anything) before going straight to Edit Property, where the
+              // conflicts are actually shown -- not the drawer, which just
+              // has its own Resolve button that routed here anyway (the
+              // redundant loop this was fixed to remove, 2026-09-21).
+              onResolve: () {
+                Navigator.of(context, rootNavigator: true)
+                    .popUntil((r) => r.isFirst);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(
+                    property: row,
+                    isDev: _isDev,
+                    onResolved: () => _loadProperties(silent: true),
+                  ),
+                )).then((_) => _loadProperties());
+              },
+            ));
+      } else if (_dialogBSuccessStatuses.contains(status) &&
+          !_dialogBSuccessStatuses.contains(previous)) {
+        // Treats Trained/Merged/Fully_Trained as one "already done" group --
+        // otherwise a background auto-remerge of an already-Trained property
+        // (safe per _SAFE_TO_AUTO_REMERGE on the backend) would flip it to
+        // "Merged" and re-fire this popup for a background action the host
+        // never asked for.
+        _enqueueResultDialog(() => showTrainedResultDialog(
+              context,
+              name,
+              caveat: _scrapeRetryCaveatFor(row['scrape_retry']),
+              onDismiss: () => Navigator.of(context, rootNavigator: true)
+                  .popUntil((r) => r.isFirst),
+            ));
+      }
+    }
+  }
+
+  int _conflictCountFor(Map<String, dynamic> row) {
+    final report = (row['master_json']
+        as Map<String, dynamic>?)?['conflict_report'] as List<dynamic>?;
+    return report?.length ?? 0;
+  }
+
+  // Mirrors add_property_screen.dart's _scrapeRetryCaveat exactly, so the
+  // caveat text is identical no matter which screen shows this popup.
+  String? _scrapeRetryCaveatFor(dynamic retryField) {
+    final retry = retryField as Map<String, dynamic>?;
+    if (retry == null || retry['attempts'] == null) return null;
+    final gaveUp = retry['next_retry_at'] == null;
+    return gaveUp
+        ? "Alfred couldn't fully read your Airbnb listing after a couple of tries — the link may be outdated or private. Check it from the property's Overview tab."
+        : "Alfred couldn't fully read your Airbnb listing this time. We'll try again automatically shortly.";
+  }
+
+  void _enqueueResultDialog(Future<void> Function() show) {
+    _resultDialogQueue.add(show);
+    _drainResultDialogQueue();
+  }
+
+  Future<void> _drainResultDialogQueue() async {
+    if (_resultDialogShowing) return;
+    _resultDialogShowing = true;
+    while (_resultDialogQueue.isNotEmpty) {
+      if (!mounted) break;
+      final show = _resultDialogQueue.removeAt(0);
+      await show();
+    }
+    _resultDialogShowing = false;
+  }
+
   void _subscribeRealtime() {
     final ids = _properties.map((p) => p['id'] as String).toList();
     if (ids.isEmpty) return;
@@ -258,6 +487,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         .inFilter('id', ids)
         .listen((rows) {
           if (!mounted) return;
+          final announced = _checkScrapeRetryResolved(rows);
+          _checkTrainingCompletion(rows, skipIds: announced);
           final byId = {for (final p in rows) p['id'] as String: p};
           final updated = _properties
               .map((p) {
@@ -328,15 +559,44 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (uid == null) return;
       final row = await Supabase.instance.client
           .from('host_profiles')
-          .select('avatar_url')
+          .select('avatar_url, is_dev')
           .eq('id', uid)
           .maybeSingle();
       if (mounted) {
-        setState(() => _hostAvatarUrl = row?['avatar_url'] as String?);
+        setState(() {
+          _hostAvatarUrl = row?['avatar_url'] as String?;
+          _isDev = row?['is_dev'] as bool? ?? false;
+        });
       }
     } catch (_) {
       // Ignore — fall back to the default person glyph.
     }
+  }
+
+  Future<void> _loadWalkthroughSeenIds() async {
+    final settingsSeen = await WalkthroughPrefs.isPostTrainingSeen();
+    final guestLinkSeen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
+    if (mounted) {
+      setState(() {
+        _settingsWalkthroughSeen = settingsSeen;
+        _guestLinkWalkthroughSeen = guestLinkSeen;
+      });
+    }
+  }
+
+  bool _showStep0Hint(Map<String, dynamic> property) {
+    if (_isDev) return false;
+    final status = property['status'] as String? ?? '';
+    if (!_readyStatuses.contains(status)) return false;
+    if (_settingsWalkthroughSeen && _guestLinkWalkthroughSeen) return false;
+    // Only the first Ready property on the dashboard shows the hint — not
+    // every Ready card. Toggling "Show walkthrough again" replays it there
+    // only, same reasoning.
+    final firstReady = _properties.firstWhere(
+      (p) => _readyStatuses.contains(p['status'] as String? ?? ''),
+      orElse: () => const <String, dynamic>{},
+    );
+    return firstReady['id'] == property['id'];
   }
 
   Widget _profileGlyph(double size, Color color) {
@@ -369,15 +629,30 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _openAddProperty() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AddPropertyScreen()),
+      MaterialPageRoute(
+        builder: (_) => AddPropertyScreen(
+          showWalkthrough: _properties.isEmpty,
+          isDev: _isDev,
+          onPropertyIdKnown: (id) => _activeAddPropertyId = id,
+        ),
+      ),
     );
+    // Add Property screen is gone now (its own local popups already handled
+    // this property's first training run start to finish) -- stop skipping
+    // it in the background watcher below and pick up its final state here.
+    _activeAddPropertyId = null;
     _loadProperties();
   }
 
   void _openDrawer(Map<String, dynamic> property) {
     showGeneralDialog(
       context: context,
-      barrierDismissible: true,
+      // Was dismissible by tapping outside -- the drawer holds editable
+      // state (the Knowledge text field, in-progress conflict-questionnaire
+      // answers) that a stray outside tap would silently discard, the same
+      // data-loss class fixed for ProfileDialog. The drawer's own explicit
+      // close (X) button is still the way out.
+      barrierDismissible: false,
       barrierLabel: 'Close',
       barrierColor: Colors.black38,
       transitionDuration: const Duration(milliseconds: 250),
@@ -386,6 +661,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: PropertyDetailDrawer(
           property: property,
           onRefresh: _loadProperties,
+          isDev: _isDev,
         ),
       ),
       transitionBuilder: (_, anim, __, child) => SlideTransition(
@@ -393,7 +669,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             .animate(CurvedAnimation(parent: anim, curve: AppTheme.standardEasing)),
         child: child,
       ),
-    );
+      // The drawer's own Part B walkthrough (User mode) may mark the shared
+      // post-training flag seen while open — refresh so Step 0's dashboard
+      // hint (Part A) stops showing for this property without a full reload.
+    ).then((_) => _loadWalkthroughSeenIds());
   }
 
   void _openExpandedView(Map<String, dynamic> property) {
@@ -407,6 +686,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         property: property,
         activeConversations: _conversationPreviews[property['id']] ?? [],
         onChatResolved: _onChatResolved,
+        isDev: _isDev,
       ),
       transitionBuilder: (_, anim, __, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -444,8 +724,63 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _openGuestLink(Map<String, dynamic> property) {
     showDialog(
       context: context,
-      builder: (_) => GenerateGuestLinkDialog(property: property),
+      builder: (_) => GenerateGuestLinkDialog(property: property, isDev: _isDev),
+    ).then((_) => _loadWalkthroughSeenIds());
+  }
+
+  // The card's × during Processing (2026-09-19) -- kills the in-flight run
+  // and wipes the property, whether it's genuinely stuck or the host just
+  // wants to abandon it. Reuses the same soft-delete endpoint the drawer's
+  // "Delete Forever" already calls; the backend clears ingest_run_id as
+  // part of that update, which is what fences out the in-flight background
+  // task (see supabase_client.soft_delete_property's comment) rather than
+  // needing an actual Cloud Tasks cancellation call. The card itself drops
+  // off this dashboard the same way any other soft-deleted property already
+  // does (D5), via the existing realtime stream -- no extra wiring needed.
+  Future<void> _deleteProcessingProperty(Map<String, dynamic> property) async {
+    final name = property['name'] as String? ?? 'this property';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.palette.surface,
+        title: const Text('Stop and delete this property?'),
+        content: Text(
+          'This cancels training on "$name" right now and permanently deletes '
+          "it — including anything already uploaded. You'll need to add it "
+          'again from scratch. This can\'t be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('Delete Forever'),
+          ),
+        ],
+      ),
     );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final token = Supabase.instance.client.auth.currentSession?.accessToken;
+      await ApiClient.postJson(
+        '/api/property/${property['id']}/soft-delete',
+        const {},
+        bearer: token,
+      );
+    } catch (e) {
+      if (mounted) {
+        final msg = e is ApiException ? e.userMessage : '$e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Delete failed: $msg'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _openArchivedChats(Map<String, dynamic> property) {
@@ -606,6 +941,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                     icon: _profileGlyph(22, palette.textSecondary),
                     onPressed: _openProfile,
                   ),
+                IconButton(
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  onPressed: () => HostSettingsDialog.show(context)
+                      .then((_) => _loadWalkthroughSeenIds()),
+                ),
+                IconButton(
+                  tooltip: 'Host setup guide',
+                  icon: const Icon(Icons.help_outline_rounded, size: 18),
+                  onPressed: () => launchUrl(
+                    Uri.base.resolve('guide.html'),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                ),
                 IconButton(
                   tooltip: 'Send feedback',
                   icon: const Icon(Icons.feedback_outlined, size: 18),
@@ -918,6 +1267,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     onAddProperty: _openAddProperty,
                     onArchivedChats: () => _openArchivedChats(item),
                     onCalendar: () => _openCalendar(item),
+                    onDeleteProcessing: () => _deleteProcessingProperty(item),
+                    showStep0Hint: _showStep0Hint(item),
                   );
             return _StaggeredEntry(
               delayMs: (index * 40).clamp(0, 240),
@@ -991,6 +1342,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onAddProperty: _openAddProperty,
                   onArchivedChats: () => _openArchivedChats(item),
                   onCalendar: () => _openCalendar(item),
+                  onDeleteProcessing: () => _deleteProcessingProperty(item),
+                  showStep0Hint: _showStep0Hint(item),
                 );
           return _StaggeredEntry(
             delayMs: (index * 50).clamp(0, 400),

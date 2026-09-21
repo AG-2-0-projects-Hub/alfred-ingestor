@@ -20,7 +20,6 @@ class AuroraBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final screenW = MediaQuery.of(context).size.width;
     // Mobile: lighter blur + dimmer aurora so mid-tier devices stay smooth.
     final isMobile = screenW < 600;
@@ -59,11 +58,16 @@ class AuroraBackground extends StatelessWidget {
           size: 600,
           intensity: blobIntensity,
         ),
-        if (!reduceMotion)
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-            child: const SizedBox.expand(),
-          ),
+        // Was gated on MediaQuery.disableAnimations (prefers-reduced-motion)
+        // — but blur is a static visual treatment, not motion, and this
+        // widget has no blob animation to actually reduce. That conflated
+        // "less motion" with "less blur", producing an unintended visual
+        // change (hard-edged, unblurred blobs) for anyone who just wants
+        // less motion. Blur now always renders.
+        BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+          child: const SizedBox.expand(),
+        ),
         child,
       ],
     );

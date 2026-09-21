@@ -113,6 +113,63 @@ def save_scraped_markdown(property_id: str, scraped_markdown: str) -> None:
     ).eq("id", property_id).execute()
 
 
+def save_photo_triage(
+    property_id: str, curated_photos: list[dict], rejected_photos: list[dict]
+) -> None:
+    """Write the two-phase photo triage results to the property row. Non-fatal
+    if it fails — the scraper wraps triage in try/except and simply never
+    calls this on error, leaving both columns at their `[]` default."""
+    client = get_client()
+    client.table("properties").update(
+        {
+            "curated_photos": curated_photos,
+            "rejected_photos": rejected_photos,
+            "updated_at": _now(),
+        }
+    ).eq("id", property_id).execute()
+
+
+# ── Scrape-quality retry (failsafe) ─────────────────────────────────────────
+# Added 2026-09-17 after a real incident (Firecrawl cache serving an
+# incomplete Airbnb page indefinitely — root-caused and fixed directly in
+# scraper/main.py). This is the failsafe layer for whatever *other* cause
+# might one day produce the same "Low completeness" signal. See
+# migrations/2026-09-17_scrape_retry.sql for the column's shape.
+
+def set_scrape_retry(property_id: str, data: dict) -> None:
+    """Write the scrape_retry bookkeeping dict wholesale — callers always
+    pass the complete intended shape (schedule a retry, or record a give-up),
+    never a partial patch, so there's no read-modify-write race to guard."""
+    client = get_client()
+    client.table("properties").update(
+        {"scrape_retry": data, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
+def get_property_for_scrape_retry(property_id: str) -> dict | None:
+    """Fetch fields needed by the background/manual scrape-retry worker."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select(
+            "name, status, airbnb_url, ingest_run_id, scraped_markdown, "
+            "ingested_markdown, curated_photos, master_json"
+        )
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def update_airbnb_url(property_id: str, airbnb_url: str) -> None:
+    """Host-triggered fix for a link the give-up state flagged as unreadable."""
+    client = get_client()
+    client.table("properties").update(
+        {"airbnb_url": airbnb_url, "updated_at": _now()}
+    ).eq("id", property_id).execute()
+
+
 def append_ingested_markdown(property_id: str, new_markdown: str) -> None:
     """Fetch existing ingested_markdown, append new_markdown, and save back."""
     client = get_client()
@@ -151,6 +208,159 @@ def update_file_fingerprints(property_id: str, fingerprints: dict) -> None:
     client.table("properties").update(
         {"file_fingerprints": fingerprints, "updated_at": _now()}
     ).eq("id", property_id).execute()
+
+
+# ── Ingest worker (Cloud Tasks background jobs) ─────────────────────────────
+# Added 2026-09-16, Phase 2 of Train Now reliability. See
+# migrations/2026-09-16_ingest_background_worker.sql for the three RPC
+# functions wrapped below — they exist because concurrent per-file workers
+# need an atomic read-modify-write on the ingest_files jsonb column; a plain
+# postgrest UPDATE can't express that the way it can a single conditional
+# field (see claim_merge, which doesn't need an RPC for that reason).
+
+def begin_ingest_run(
+    property_id: str,
+    run_id: str,
+    file_states: dict[str, str],
+    expected_run_id: str | None = None,
+) -> bool:
+    """Mint a fresh run: status -> Ingesting, set the fencing token (any
+    in-flight task carrying the OLD run_id becomes a no-op the moment it next
+    calls an RPC), seed ingest_files with each file's starting state
+    ('pending' or 'skipped' — computed by the caller via hash_guard before
+    this call), stamp a heartbeat so it doesn't read as stale immediately.
+
+    expected_run_id (2026-09-19): ingest_worker.run_start calls this a SECOND
+    time, after the scrape completes, to re-seed ingest_files with the real
+    per-file plan — that call was completely unconditional (no ingest_run_id
+    check at all), so a Stop click landing mid-scrape got silently undone the
+    instant the scrape finished: this write blindly resurrected the original
+    run_id and flipped status back to Ingesting, and the pipeline carried on
+    to a real merge minutes later with no further host action (found live,
+    the actual mechanism behind "Stop appeared to work but training
+    continued anyway" — claim_merge's own fencing was necessary but not
+    sufficient, since the row was never really cancelled to begin with by the
+    time file/merge work ran). The initial call from the /ingest dispatcher
+    and resume_run's call are deliberately starting a run, not continuing an
+    existing one — they pass None (unconditional, unchanged). Returns
+    whether the write matched -- always True when expected_run_id is None.
+    """
+    client = get_client()
+    files = {name: {"state": state} for name, state in file_states.items()}
+    query = (
+        client.table("properties")
+        .update({
+            "status": "Ingesting",
+            "ingest_run_id": run_id,
+            "ingest_files": files,
+            "ingest_stage": "processing",
+            "ingest_heartbeat_at": _now(),
+            "updated_at": _now(),
+        })
+        .eq("id", property_id)
+    )
+    if expected_run_id is not None:
+        query = query.eq("ingest_run_id", expected_run_id)
+    result = query.execute()
+    return bool(result.data)
+
+
+def get_ingest_run(property_id: str) -> dict | None:
+    """Everything a worker task or the /resume endpoint needs to act on a run."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .select(
+            "id, owner_id, name, status, airbnb_url, ingest_run_id, ingest_files, "
+            "ingest_heartbeat_at, ingest_stage, file_fingerprints, scraped_markdown, "
+            "ingested_markdown, master_json, scrape_retry"
+        )
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
+def touch_ingest_heartbeat(property_id: str, run_id: str, stage: str | None = None) -> None:
+    """Cheap liveness signal for a step that isn't a per-file claim (e.g. mid-
+    scrape, before any file work has started) — keeps the watchdog from
+    mistaking a slow-but-alive step for a dead one."""
+    client = get_client()
+    row: dict = {"ingest_heartbeat_at": _now()}
+    if stage:
+        row["ingest_stage"] = stage
+    client.table("properties").update(row) \
+        .eq("id", property_id).eq("ingest_run_id", run_id).execute()
+
+
+def claim_ingest_file(property_id: str, run_id: str, filename: str) -> bool:
+    """Atomically mark one file 'running' + bump its attempt count. False means
+    this task's run_id no longer matches the row — a zombie task from a run
+    that Resume/watchdog already superseded. The caller must then do nothing."""
+    client = get_client()
+    result = client.rpc("ingest_claim_file", {
+        "p_property_id": property_id, "p_run_id": run_id, "p_filename": filename,
+    }).execute()
+    return bool(result.data)
+
+
+def record_ingest_file_result(
+    property_id: str, run_id: str, filename: str, state: str,
+    markdown: str | None = None, fingerprint_size: int | None = None,
+    error: str | None = None,
+) -> bool:
+    """Atomically persist one file's TERMINAL outcome ('done' or 'failed') —
+    markdown concat + fingerprint write + per-file state, one statement, so
+    concurrent file workers can't lose-update each other the way the old
+    sequential-only append_ingested_markdown/update_file_fingerprints could.
+    Only call this on a terminal result; a transient failure that Cloud Tasks
+    will retry should NOT write here (see ingest_worker.py) — the next claim's
+    bumped attempt count is what the UI's "Retrying (n)" reads."""
+    if state not in ("done", "failed"):
+        raise ValueError(f"record_ingest_file_result: invalid state {state!r}")
+    client = get_client()
+    result = client.rpc("ingest_record_file_result", {
+        "p_property_id": property_id, "p_run_id": run_id, "p_filename": filename,
+        "p_state": state, "p_markdown": markdown,
+        "p_fingerprint_size": fingerprint_size, "p_error": error,
+    }).execute()
+    return bool(result.data)
+
+
+def maybe_complete_ingest(property_id: str, run_id: str) -> str | None:
+    """Atomically flip status Ingesting -> Ingested/Ingest_Error once every
+    entry in ingest_files is terminal. Every file-worker calls this after its
+    own file finishes; the DB-side WHERE-guarded UPDATE means only the one
+    that actually observes zero remaining pending/running files gets a
+    non-None return — that's the signal to enqueue the merge task, so exactly
+    one merge gets enqueued no matter how many workers finish at once."""
+    client = get_client()
+    result = client.rpc("ingest_maybe_complete", {
+        "p_property_id": property_id, "p_run_id": run_id,
+    }).execute()
+    return result.data
+
+
+def claim_merge(property_id: str, run_id: str) -> bool:
+    """Atomically flip Ingested -> Merging. No RPC needed — a single
+    conditional field UPDATE is already atomic under Postgres's own row lock,
+    unlike the jsonb read-modify-write functions above. A retried/duplicate
+    merge task loses this race and does nothing; True means THIS call won it.
+
+    Fenced on ingest_run_id (2026-09-19) — this used to check status alone,
+    so a Stopped run's already-in-flight file completion could still claim
+    and run a full merge minutes after cancel_initial_ingest_run cleared the
+    row, silently overwriting the cancellation (found live: Stop appeared to
+    work, the property kept training in the background anyway)."""
+    client = get_client()
+    result = (
+        client.table("properties")
+        .update({"status": "Merging", "updated_at": _now()})
+        .eq("id", property_id).eq("status", "Ingested").eq("ingest_run_id", run_id)
+        .execute()
+    )
+    return bool(result.data)
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────
@@ -246,7 +456,7 @@ def get_property_for_merge(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("status, scraped_markdown, ingested_markdown, master_json")
+        .select("status, scraped_markdown, ingested_markdown, master_json, curated_photos")
         .eq("id", property_id)
         .maybe_single()
         .execute()
@@ -259,15 +469,33 @@ def save_merge_result(
     master_json_dict: dict,
     status: str,
     conflict_status: str,
-) -> None:
-    """Write master_json, status, and Conflict_status after a successful merge."""
+    expected_run_id: str | None = None,
+) -> bool:
+    """Write master_json, status, and Conflict_status after a successful merge.
+
+    expected_run_id (2026-09-19): the background merge-step task passes the
+    run_id it was claimed under so this final write is fenced too, not just
+    claim_merge's entry -- a Gemini merge call can run for many seconds after
+    claim_merge succeeds, wide enough for a Stop click to land mid-call and
+    clear ingest_run_id before this write commits. None (the host-triggered
+    /merge endpoint's own call, which has no run_id concept) keeps the prior
+    unconditional behavior. Returns whether the write actually matched a row
+    -- always True when expected_run_id is None."""
     client = get_client()
-    client.table("properties").update({
-        "master_json": master_json_dict,
-        "status": status,
-        "Conflict_status": conflict_status,
-        "updated_at": _now(),
-    }).eq("id", property_id).execute()
+    query = (
+        client.table("properties")
+        .update({
+            "master_json": master_json_dict,
+            "status": status,
+            "Conflict_status": conflict_status,
+            "updated_at": _now(),
+        })
+        .eq("id", property_id)
+    )
+    if expected_run_id is not None:
+        query = query.eq("ingest_run_id", expected_run_id)
+    result = query.execute()
+    return bool(result.data)
 
 
 def get_property_for_resolve(property_id: str) -> dict | None:
@@ -894,6 +1122,15 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
     # delete the host sees is durable even if a later best-effort step fails.
     # NOTE: learned_knowledge is NOT NULL — clear it to [] (an empty array),
     # never None, or the whole update is rejected and nothing gets deleted.
+    #
+    # ingest_run_id is cleared here too (2026-09-19, host-triggered delete
+    # during Processing) -- every ingest_worker.py RPC is scoped
+    # `WHERE ingest_run_id = <the id it was dispatched with>` and silently
+    # no-ops otherwise (see that file's "Task fencing" docstring), so clearing
+    # it is what stops an in-flight background task from writing a real
+    # result into this row after it's already supposed to be gone. No Cloud
+    # Tasks cancellation API call needed -- the fencing design already makes
+    # a zombie task harmless.
     client.table("properties").update({
         "master_json": None,
         "ingested_markdown": None,
@@ -905,6 +1142,16 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
         "status": "deleted",
         "deleted_at": _now(),
         "updated_at": _now(),
+        "ingest_run_id": None,
+        # NOT NULL, like learned_knowledge above -- {} (empty jsonb object),
+        # never None, or the whole update is rejected (confirmed live:
+        # postgrest.exceptions.APIError 23502 on a real staging call).
+        "ingest_files": {},
+        "ingest_heartbeat_at": None,
+        "ingest_stage": None,
+        # NOT NULL too -- same fix as ingest_files above (confirmed live,
+        # same 23502 error class, one column at a time).
+        "scrape_retry": {},
     }).eq("id", property_id).execute()
 
     # Anonymize guests — keep the rows (FK + chat linkage) but strip the
@@ -922,6 +1169,51 @@ def soft_delete_property(property_id: str, owner_id: str) -> str:
 
     # Remove all stored files for the property (best-effort).
     _delete_property_storage(property_id)
+    return "ok"
+
+
+def cancel_initial_ingest_run(property_id: str, owner_id: str) -> str:
+    """Host-triggered Stop during a property's FIRST training run (Add
+    Property screen only -- never a retrain/resolve, both of which already
+    have master_json and so fail the guard below). Unlike soft_delete_property,
+    this deliberately does NOT touch name, airbnb_url, file_fingerprints, or
+    storage -- the host stays on the same form with what they already typed
+    and uploaded, ready to hit Train Now again.
+
+    Clearing ingest_run_id is what makes the in-flight background task a
+    no-op the next time it calls any ingest_worker.py RPC (see that file's
+    "Task fencing" docstring) -- no Cloud Tasks cancellation API needed.
+
+    Returns "ok", "not_found", "forbidden", or "already_trained" (refused --
+    this property has real content; only soft-delete or the drawer's own
+    controls apply once it's past its first run).
+    """
+    client = get_client()
+    existing = (
+        client.table("properties")
+        .select("id, owner_id, master_json")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    if existing is None or existing.data is None:
+        return "not_found"
+    if existing.data.get("owner_id") != owner_id:
+        return "forbidden"
+    if existing.data.get("master_json") is not None:
+        return "already_trained"
+
+    client.table("properties").update({
+        "status": None,
+        "ingest_run_id": None,
+        # NOT NULL -- see soft_delete_property's comment on the same column.
+        "ingest_files": {},
+        "ingest_heartbeat_at": None,
+        "ingest_stage": None,
+        "ingested_markdown": None,
+        "scraped_markdown": None,
+        "updated_at": _now(),
+    }).eq("id", property_id).execute()
     return "ok"
 
 

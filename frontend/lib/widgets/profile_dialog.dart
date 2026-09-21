@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -26,6 +25,10 @@ class ProfileDialog extends StatefulWidget {
   static Future<void> show(BuildContext context, {required int propertyCount}) {
     return showDialog<void>(
       context: context,
+      // Was dismissible by tapping outside with no unsaved-changes guard — a
+      // host who edited name/nickname/bio and tapped outside lost every edit
+      // silently, with none of the affordance a labeled Cancel button gives.
+      barrierDismissible: false,
       builder: (_) => ProfileDialog(propertyCount: propertyCount),
     );
   }
@@ -40,6 +43,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _bioController = TextEditingController();
   String? _avatarUrl;
   bool _loading = true;
+  bool _loadError = false;
   bool _saving = false;
   bool _uploading = false;
   bool _deleting = false;
@@ -63,12 +67,15 @@ class _ProfileDialogState extends State<ProfileDialog> {
   }
 
   Future<void> _load() async {
+    if (mounted) setState(() => _loadError = false);
     try {
       final row = await _db
           .from('host_profiles')
           .select('display_name, nickname, bio, avatar_url')
           .eq('id', _uid ?? '')
           .maybeSingle();
+      // row == null here is a clean "no profile row yet" — expected for a
+      // first-time host, not an error. Start blank.
       if (row != null) {
         _nameController.text = row['display_name'] as String? ?? '';
         _nicknameController.text = row['nickname'] as String? ?? '';
@@ -76,7 +83,11 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _avatarUrl = row['avatar_url'] as String?;
       }
     } catch (_) {
-      // First-time host with no row yet, or a transient read error — start blank.
+      // A real failure (network, RLS) is NOT the same as "no row yet" — that
+      // distinction matters because this used to render the same blank form
+      // either way, and Save would then upsert blanks over any real existing
+      // profile data. Surface a retry state instead.
+      if (mounted) setState(() => _loadError = true);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -98,7 +109,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
       // Brokered through the backend (service role): the Flutter web client
       // can't satisfy the host_avatars storage RLS write policy directly, so the
       // backend validates the host token and writes under the host's uid folder.
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+      final backendUrl = ApiClient.backendUrl;
       final token = _db.auth.currentSession?.accessToken;
       final req = http.MultipartRequest(
         'POST', Uri.parse('$backendUrl/api/host/avatar'),
@@ -114,10 +125,18 @@ class _ProfileDialogState extends State<ProfileDialog> {
       } else {
         throw Exception('${resp.statusCode}: ${resp.body}');
       }
-    } catch (e) {
+    } on ConfigurationException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload photo: $e')),
+          SnackBar(content: Text(e.userMessage)),
+        );
+      }
+    } catch (e) {
+      // Matches _confirmDeleteAccount's friendly-message pattern below,
+      // instead of interpolating the raw exception into the SnackBar.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to upload photo. Please try again.')),
         );
       }
     } finally {
@@ -147,7 +166,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save profile: $e')),
+          const SnackBar(content: Text('Failed to save profile. Please try again.')),
         );
       }
     } finally {
@@ -173,7 +192,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 padding: EdgeInsets.all(32),
                 child: Center(child: CircularProgressIndicator()),
               )
-            : SingleChildScrollView(
+            : _loadError
+                ? _buildLoadError(palette)
+                : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -181,35 +202,48 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     Center(child: _buildAvatar(palette)),
                     const SizedBox(height: 20),
                     _label('Name', palette),
-                    TextField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(
-                        hintText: 'Your name',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    // Semantics wraps here associate the visible label above
+                    // with the field for a screen reader -- previously only
+                    // the (non-semantic) hintText and a separate Text widget
+                    // existed, with no programmatic link between them.
+                    Semantics(
+                      label: 'Name',
+                      child: TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          hintText: 'Your name',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
                     _label('Nickname', palette),
-                    TextField(
-                      controller: _nicknameController,
-                      decoration: const InputDecoration(
-                        hintText: 'What guests should call you',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    Semantics(
+                      label: 'Nickname',
+                      child: TextField(
+                        controller: _nicknameController,
+                        decoration: const InputDecoration(
+                          hintText: 'What guests should call you',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
                     _label('Short bio', palette),
-                    TextField(
-                      controller: _bioController,
-                      minLines: 2,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.newline,
-                      decoration: const InputDecoration(
-                        hintText: 'A sentence or two about you',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    Semantics(
+                      label: 'Short bio',
+                      child: TextField(
+                        controller: _bioController,
+                        minLines: 2,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: 'A sentence or two about you',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -224,14 +258,15 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     OutlinedButton.icon(
                       onPressed: _deleting ? null : _confirmDeleteAccount,
                       icon: Icon(Icons.delete_forever_outlined,
-                          size: 16, color: Colors.red.shade700),
+                          size: 16, color: palette.danger),
                       label: Text(
                         _deleting ? 'Deleting…' : 'Delete account',
-                        style: TextStyle(color: Colors.red.shade700),
+                        style: TextStyle(color: palette.danger),
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red.shade700,
-                        side: BorderSide(color: Colors.red.shade300),
+                        foregroundColor: palette.danger,
+                        side: BorderSide(
+                            color: palette.danger.withValues(alpha: 0.5)),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -251,7 +286,13 @@ class _ProfileDialogState extends State<ProfileDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: (_saving || _loading || _deleting) ? null : _save,
+          // _uploading added: without it, Save could commit while an avatar
+          // upload was still in flight, persisting a profile that doesn't
+          // reflect the photo the host just picked. _loadError added: don't
+          // let a failed load's blank fields overwrite real existing data.
+          onPressed: (_saving || _loading || _deleting || _uploading || _loadError)
+              ? null
+              : _save,
           child: _saving
               ? const SizedBox(
                   width: 16,
@@ -295,11 +336,44 @@ class _ProfileDialogState extends State<ProfileDialog> {
       final msg = e is ApiException ? e.userMessage : '$e';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: Colors.red.shade700,
+          backgroundColor: context.palette.danger,
           content: Text('Could not delete your account: $msg'),
         ),
       );
     }
+  }
+
+  Widget _buildLoadError(AppPalette palette) {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 32, color: palette.danger),
+          const SizedBox(height: 12),
+          Text(
+            "Couldn't load your profile.",
+            style: GoogleFonts.plusJakartaSans(
+              fontWeight: FontWeight.w600,
+              color: palette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Check your connection and try again.',
+            style: GoogleFonts.inter(fontSize: 12, color: palette.textMuted),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton(
+            onPressed: () {
+              setState(() => _loading = true);
+              _load();
+            },
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildAvatar(AppPalette palette) {
@@ -317,23 +391,38 @@ class _ProfileDialogState extends State<ProfileDialog> {
               ? Icon(Icons.person_rounded, size: 44, color: palette.primary)
               : null,
         ),
-        Material(
-          color: palette.primary,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: _uploading ? null : _pickAvatar,
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: _uploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.camera_alt_rounded,
-                      size: 16, color: Colors.white),
+        // The visual badge stays small (~28px) — only the tap target grows,
+        // to the ~44px minimum touch-target guidance. Previously they were
+        // the same size, at the corner of a larger avatar where mis-taps
+        // were easy.
+        SizedBox(
+          width: 40,
+          height: 40,
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: _uploading ? null : _pickAvatar,
+              child: Center(
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                      color: palette.primary, shape: BoxShape.circle),
+                  child: Center(
+                    child: _uploading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.camera_alt_rounded,
+                            size: 16, color: Colors.white),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -419,7 +508,7 @@ class _DeleteAccountConfirmDialogState
     return AlertDialog(
       backgroundColor: palette.surface,
       title: Row(children: [
-        Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+        Icon(Icons.warning_amber_rounded, color: palette.danger),
         const SizedBox(width: 8),
         const Flexible(child: Text('Delete account')),
       ]),
@@ -464,7 +553,7 @@ class _DeleteAccountConfirmDialogState
           onPressed:
               _matches ? () => Navigator.of(context).pop(true) : null,
           style: FilledButton.styleFrom(
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: palette.danger,
             disabledBackgroundColor: palette.border,
           ),
           child: const Text('Delete my account'),

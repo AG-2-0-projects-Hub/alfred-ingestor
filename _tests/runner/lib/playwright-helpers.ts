@@ -26,6 +26,28 @@ export const DASHBOARD = {
   // Empty-state "Add Your First Property" FilledButton (centred in body)
   addPropertyX:  0.5,
   addPropertyY:  0.58,
+  // Top-bar "Settings" gear icon (2026-09-19) -- sits between Profile and
+  // the "?" host-guide icon. Measured from a real 1440x900 screenshot.
+  settingsIconX: 0.830,
+  settingsIconY: 0.031,
+} as const;
+
+// First property card in the grid (top-left slot), wide viewport. Measured
+// from a real 1440x900 screenshot with a single card present.
+export const CARD1 = {
+  // Anywhere on the photo/body -- not the action buttons below.
+  bodyX:     0.110,
+  bodyY:     0.267,
+  guestX:    0.057,
+  detailsX:  0.117,
+  actionsY:  0.601,
+} as const;
+
+// Standard Material AppBar back-arrow (top-left leading icon) -- same
+// position on every screen that uses a plain AppBar(leading: BackButton()).
+export const APPBAR = {
+  backX: 0.0194,
+  backY: 0.0311,
 } as const;
 
 // Add-property screen — single-column centred form (maxWidth 760px)

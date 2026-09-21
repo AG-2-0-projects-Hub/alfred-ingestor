@@ -2,29 +2,33 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'voice_recorder.dart';
 import 'file_status_list.dart';
 import 'conflict_questionnaire.dart';
 import 'generate_guest_link_dialog.dart';
-import '../screens/host_panel_screen.dart';
+import 'archived_chats_dialog.dart';
 import '../screens/edit_property_screen.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/setup_status.dart';
+import '../utils/walkthrough_prefs.dart';
 import 'setup_status_banner.dart';
+import 'training_wait_dialog.dart';
+import 'walkthrough_highlight.dart';
+import 'walkthrough_tip_panel.dart';
 
 class PropertyDetailDrawer extends StatefulWidget {
   final Map<String, dynamic> property;
   final VoidCallback onRefresh;
+  final bool isDev;
 
   const PropertyDetailDrawer({
     super.key,
     required this.property,
     required this.onRefresh,
+    this.isDev = false,
   });
 
   @override
@@ -34,6 +38,9 @@ class PropertyDetailDrawer extends StatefulWidget {
 class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  // Kept in sync with _tabController's length via _syncTabControllerForConflict
+  // — see that method for why this can't just be recomputed inline in build().
+  bool _hasConflict = false;
   late Map<String, dynamic> _property;
   String? _heroUrl;
   bool _heroLoaded = false;
@@ -76,21 +83,223 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   // showing stale status / banner state.
   StreamSubscription<List<Map<String, dynamic>>>? _propStream;
 
+  // Part B of the User-mode post-training walkthrough — rebuilt 2026-09-11
+  // using a real Overlay entry (see _wtOverlay below) instead of nesting the
+  // tip panel inside this drawer's showGeneralDialog route, which is the one
+  // structural difference from the two panels (dashboard Step 0, Add
+  // Property) that never hit the still-unexplained text rendering bug the
+  // old inline-docked version had. Step 1 (of 5) was verified live via
+  // Playwright before the rest were added — see walkthrough.md for the copy.
+  int? _wtStep;
+  static const _wtStepCount = 5;
+  static const _wtReadyStatuses = {'Trained', 'Active', 'Resolved', 'Merged'};
+  final _wtDrawerKey = GlobalKey();
+  final _wtManageKey = GlobalKey();
+  final _wtAddKnowledgeKey = GlobalKey();
+  final _wtLearningKey = GlobalKey();
+  final _wtChatKey = GlobalKey();
+  final _wtDockLink = LayerLink();
+  OverlayEntry? _wtOverlay;
+  // Drives the overlay entry's content directly, instead of relying on
+  // OverlayEntry.markNeedsBuild() — confirmed unreliable here: the highlight
+  // below (plain setState) updated correctly on Next/Back, but the overlay's
+  // own text stayed stale even after markNeedsBuild() calls and a 3s wait.
+  // A ValueListenableBuilder inside the entry is the documented-safe pattern.
+  final _wtStepNotifier = ValueNotifier<int?>(null);
   @override
   void initState() {
     super.initState();
     _property = Map<String, dynamic>.from(widget.property);
-    final hasConflict = _property['Conflict_status'] == 'pending';
+    _hasConflict = _property['Conflict_status'] == 'pending';
+    // Dev: Overview, Files, Knowledge(, Resolve). User: Overview, Knowledge(,
+    // Resolve) — the Files tab folds into Overview's file summary card instead.
     _tabController = TabController(
-      length: hasConflict ? 4 : 3,
+      length: (widget.isDev ? 3 : 2) + (_hasConflict ? 1 : 0),
       vsync: this,
     );
     _loadHeroUrl();
     _subscribeProperty();
+    // Guaranteed fresh fetch on open, independent of realtime's connection
+    // timing -- see the comment on _refreshProperty itself for why this was
+    // added 2026-09-17.
+    _refreshProperty();
+    _maybeStartWalkthrough();
   }
+
+  Future<void> _maybeStartWalkthrough() async {
+    if (widget.isDev) return;
+    final status = _property['status'] as String? ?? '';
+    if (!_wtReadyStatuses.contains(status)) return;
+    final seen = await WalkthroughPrefs.isPostTrainingSeen();
+    if (seen || !mounted) return;
+    // The tip panel explaining each highlighted step is hidden below this
+    // width (see _ensureWtOverlayInserted's own screenW < 1000 check) — never
+    // start the walkthrough state at all on a narrow viewport, rather than
+    // starting it with highlighted/locked UI and no visible explanation or
+    // way to progress.
+    if (MediaQuery.sizeOf(context).width < 1000) return;
+    _setWtStep(0);
+  }
+
+  // Single point of mutation for _wtStep — keeps the highlight (plain
+  // setState, drives the normal widget tree) and the docked panel's own
+  // ValueNotifier (drives the Overlay entry, see _wtStepNotifier) in sync.
+  void _setWtStep(int? step) {
+    setState(() => _wtStep = step);
+    _wtStepNotifier.value = step;
+  }
+
+  // (tab index, anchor key, title, body) for each of the 5 steps — tab index
+  // is User mode's own numbering (Overview=0, Knowledge=1; there's no Files
+  // tab to account for here since that only exists in Dev mode).
+  (int, GlobalKey, String, String) _wtStepInfo(int step) {
+    final name = _property['name'] as String? ?? 'this property';
+    switch (step) {
+      case 0:
+        return (
+          0,
+          _wtDrawerKey,
+          "I've learned $name — here's what's next",
+          "This is where you'll come back anytime: add more detail, see what I "
+              "picked up on my own, or ask me something to check my work.",
+        );
+      case 1:
+        return (
+          0,
+          _wtManageKey,
+          'Add or swap files anytime',
+          "Tap Manage to upload more — a new house manual, an updated WiFi "
+              "photo, anything. I'll fold it in without starting over.",
+        );
+      case 2:
+        return (
+          1,
+          _wtAddKnowledgeKey,
+          'Tell me something directly',
+          "Type it, or record a voice note — parking rules, a fix for the "
+              "shower, whatever's easiest. I'll add it to what I already know.",
+        );
+      case 3:
+        return (
+          1,
+          _wtLearningKey,
+          'I flag what I learn on my own',
+          "Every real guest conversation teaches me something — I'll surface "
+              "it here for your OK before it sticks.",
+        );
+      default:
+        return (
+          1,
+          _wtChatKey,
+          'Double-check me anytime',
+          "Ask me something here, the same way a guest would. It's the "
+              "fastest way to see exactly what I'd tell them — before they ever ask.",
+        );
+    }
+  }
+
+  void _wtGoToStep(int step) {
+    _setWtStep(step);
+    final (tabIndex, key, _, _) = _wtStepInfo(step);
+    _tabController.animateTo(tabIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+      }
+    });
+  }
+
+  void _wtNext() {
+    if (_wtStep == null) return;
+    if (_wtStep! >= _wtStepCount - 1) {
+      _wtFinish();
+    } else {
+      _wtGoToStep(_wtStep! + 1);
+    }
+  }
+
+  void _wtBack() {
+    if (_wtStep == null || _wtStep == 0) return;
+    _wtGoToStep(_wtStep! - 1);
+  }
+
+  void _wtFinish() {
+    _setWtStep(null);
+    WalkthroughPrefs.markPostTrainingSeen();
+  }
+
+  // Inserts the docked tip panel as a real Overlay entry
+  // (Overlay.of(context, rootOverlay: true)) rather than nesting it inside
+  // this drawer's own showGeneralDialog route — see the class-level comment
+  // on _wtStep for why. Inserted once and left in place (its own
+  // ValueListenableBuilder decides what to render, including hiding itself
+  // entirely) rather than inserted/removed per step change — simpler, and
+  // sidesteps needing OverlayEntry.markNeedsBuild() at all. Desktop-only
+  // (matches the removed version's gate); narrow viewports just get the
+  // highlight with no panel, a known gap carried over from before, not fixed
+  // by this rebuild.
+  void _ensureWtOverlayInserted() {
+    if (_wtOverlay != null) return;
+    final entry = OverlayEntry(builder: (overlayContext) {
+      return ValueListenableBuilder<int?>(
+        valueListenable: _wtStepNotifier,
+        builder: (_, step, __) {
+          final screenW = MediaQuery.of(overlayContext).size.width;
+          if (step == null || screenW < 1000) return const SizedBox.shrink();
+          final (_, _, title, body) = _wtStepInfo(step);
+          return Positioned(
+            width: 300,
+            child: CompositedTransformFollower(
+              link: _wtDockLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topLeft,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(-20, 56),
+              child: WalkthroughTipPanel(
+                stepIndex: step,
+                stepCount: _wtStepCount,
+                title: title,
+                body: TextSpan(text: body),
+                onBack: step > 0 ? _wtBack : null,
+                onNext: _wtNext,
+                onClose: _wtFinish,
+                isLast: step == _wtStepCount - 1,
+                pointerSide: WalkthroughPointerSide.right,
+                pointerCenter: 56,
+              ),
+            ),
+          );
+        },
+      );
+    });
+    _wtOverlay = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Overlay.of(context, rootOverlay: true).insert(entry);
+    });
+  }
+
+  Widget _wtHighlight({required int step, required GlobalKey key, required Widget child}) {
+    return WalkthroughHighlight(
+      key: key,
+      active: _wtStep == step,
+      child: child,
+    );
+  }
+
+  // The walkthrough tip panel that used to render here was removed — see
+  // walkthrough.md for its full copy/structure, kept for a future rebuild.
 
   @override
   void dispose() {
+    _wtOverlay?.remove();
+    _wtOverlay = null;
+    _wtStepNotifier.dispose();
     _tabController.dispose();
     _knowledgeController.dispose();
     _kbChatController.dispose();
@@ -115,8 +324,32 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           if (!mounted || rows.isEmpty) return;
           setState(() {
             _property = <String, dynamic>{..._property, ...rows.first};
+            _syncTabControllerForConflict(
+                _property['Conflict_status'] == 'pending');
           });
         });
+  }
+
+  // TabController.length is immutable once created, but the tab count
+  // depends on _hasConflict, which can flip live — either because this
+  // drawer's own Resolve tab just cleared it (_onResolved) or because the
+  // realtime subscription above replaced _property with a row where it
+  // changed (resolved/created elsewhere). Without this, TabBar/TabBarView
+  // throw a tab-count assertion the instant the tab list and the controller's
+  // length disagree. Must be called from inside the same setState that
+  // changes Conflict_status so the rebuild sees the new controller and the
+  // new tab list together.
+  void _syncTabControllerForConflict(bool newHasConflict) {
+    if (newHasConflict == _hasConflict) return;
+    final newLength = (widget.isDev ? 3 : 2) + (newHasConflict ? 1 : 0);
+    final oldController = _tabController;
+    _tabController = TabController(
+      length: newLength,
+      vsync: this,
+      initialIndex: oldController.index.clamp(0, newLength - 1),
+    );
+    oldController.dispose();
+    _hasConflict = newHasConflict;
   }
 
   Future<void> _loadHeroUrl() async {
@@ -129,14 +362,32 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     if (mounted) setState(() => _heroLoaded = true);
   }
 
+  // Was dead code (flutter analyze: unused_element) until 2026-09-17 --
+  // wired into initState below. Root cause of a real live-found bug: this
+  // drawer only ever trusted whatever snapshot the dashboard happened to
+  // hand it in widget.property, self-correcting only once _subscribeProperty
+  // below's realtime channel delivered its first event -- a real timing gap
+  // (dashboard's own async refresh after returning from EditPropertyScreen,
+  // or the realtime channel's own connection handshake) that let a
+  // freshly-reopened drawer briefly show a fully-resolved property as still
+  // "Conflict_Pending" with the stale Resolve banner/tab still active.
   Future<void> _refreshProperty() async {
     try {
       final data = await Supabase.instance.client
           .from('properties')
-          .select('id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status')
+          .select(
+              'id, name, status, airbnb_url, created_at, master_json, file_fingerprints, Conflict_status, scrape_retry')
           .eq('id', _property['id'] as String)
           .single();
-      if (mounted) setState(() => _property = data);
+      if (mounted) {
+        setState(() {
+          // Merge, not replace -- this select is a narrow column list, and
+          // _property holds other fields (ingest_heartbeat_at, curated_photos,
+          // etc.) that a wholesale replace would silently drop.
+          _property = <String, dynamic>{..._property, ...data};
+          _syncTabControllerForConflict(_property['Conflict_status'] == 'pending');
+        });
+      }
       widget.onRefresh();
     } catch (_) {}
   }
@@ -150,45 +401,37 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _knowledgeError = null;
     });
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    // Was a raw http.post with a dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000'
+    // fallback (bypassing ApiClient's fail-loud config guard) and no timeout —
+    // ApiClient.postJson resolves BACKEND_URL itself and times out/retries.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/add-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'property_id': _property['id'],
-          'text': text,
-        }),
+      final data = await ApiClient.postJson(
+        '/api/ingest/add-knowledge',
+        {'property_id': _property['id'], 'text': text},
+        bearer: token,
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final updatedJson = data['master_json'];
-        if (mounted) {
-          setState(() {
-            _knowledgeController.clear();
-            _knowledgeSuccess = true;
-            _knowledgeError = null;
-            if (updatedJson != null) {
-              _property['master_json'] = updatedJson;
-            }
-          });
-          Future.delayed(const Duration(seconds: 4), () {
-            if (mounted) setState(() => _knowledgeSuccess = false);
-          });
-        }
-      } else {
-        setState(() => _knowledgeError =
-            'Failed (${response.statusCode}): ${response.body}');
+      final updatedJson = data['master_json'];
+      if (mounted) {
+        setState(() {
+          _knowledgeController.clear();
+          _knowledgeSuccess = true;
+          _knowledgeError = null;
+          if (updatedJson != null) {
+            _property['master_json'] = updatedJson;
+          }
+        });
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted) setState(() => _knowledgeSuccess = false);
+        });
       }
+    } on ApiException catch (e) {
+      setState(() => _knowledgeError = e.userMessage);
     } catch (e) {
-      setState(() => _knowledgeError = 'Error: $e');
+      setState(() =>
+          _knowledgeError = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _addingKnowledge = false);
     }
@@ -215,54 +458,48 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   }
 
   Future<void> _triggerVoiceIngest(String filename) async {
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
+    // Was a raw http.post with the same BACKEND_URL-fallback + no-timeout
+    // pattern as _addKnowledge above — same ApiClient.postJson fix.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/add-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
+      final data = await ApiClient.postJson(
+        '/api/ingest/add-knowledge',
+        {
           'property_id': _property['id'],
           'storage_path': '${_property['id']}/user_uploads/$filename',
-        }),
+        },
+        bearer: token,
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final updatedJson = data['master_json'];
-        if (mounted) {
-          setState(() {
-            final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
-            if (idx >= 0) {
-              _voiceStatuses[idx] = {
-                'file': filename,
-                'status': 'done',
-                'message': '',
-              };
-            }
-            if (updatedJson != null) {
-              _property['master_json'] = updatedJson;
-            }
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
-            if (idx >= 0) {
-              _voiceStatuses[idx] = {
-                'file': filename,
-                'status': 'error',
-                'message': 'Processing failed',
-              };
-            }
-          });
-        }
+      final updatedJson = data['master_json'];
+      if (mounted) {
+        setState(() {
+          final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
+          if (idx >= 0) {
+            _voiceStatuses[idx] = {
+              'file': filename,
+              'status': 'done',
+              'message': '',
+            };
+          }
+          if (updatedJson != null) {
+            _property['master_json'] = updatedJson;
+          }
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          final idx = _voiceStatuses.indexWhere((e) => e['file'] == filename);
+          if (idx >= 0) {
+            _voiceStatuses[idx] = {
+              'file': filename,
+              'status': 'error',
+              'message': e.userMessage,
+            };
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -272,7 +509,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             _voiceStatuses[idx] = {
               'file': filename,
               'status': 'error',
-              'message': 'Error: $e',
+              'message': 'Something went wrong. Please try again.',
             };
           }
         });
@@ -284,7 +521,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final q = _kbChatController.text.trim();
     if (q.isEmpty || _kbQuerying) return;
 
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
 
@@ -294,30 +530,33 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _kbChatController.clear();
     });
 
+    // Was a raw http.post with the same BACKEND_URL-fallback + no-timeout
+    // pattern as _addKnowledge above — same ApiClient.postJson fix.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/ingest/query-knowledge'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'property_id': _property['id'],
-          'question': q,
-        }),
+      final data = await ApiClient.postJson(
+        '/api/ingest/query-knowledge',
+        {'property_id': _property['id'], 'question': q},
+        bearer: token,
       );
       if (mounted) {
-        final answer = response.statusCode == 200
-            ? (jsonDecode(response.body) as Map<String, dynamic>)['answer'] as String? ?? ''
-            : 'Error (${response.statusCode}): ${response.body}';
+        final answer = data['answer'] as String? ?? '';
         setState(() {
           _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': answer};
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': e.userMessage};
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _kbHistory[_kbHistory.length - 1] = {'q': q, 'a': 'Error: $e'};
+          _kbHistory[_kbHistory.length - 1] = {
+            'q': q,
+            'a': 'Something went wrong. Please try again.',
+          };
         });
       }
     } finally {
@@ -330,6 +569,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       _property['status'] = status;
       _property['master_json'] = masterJson;
       _property['Conflict_status'] = null;
+      _syncTabControllerForConflict(false);
     });
     widget.onRefresh();
   }
@@ -485,29 +725,39 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
   }
 
   Future<void> _discardLearned(int index) async {
+    // Previously had no confirmation at all — one accidental tap permanently
+    // threw away a real, auto-detected suggestion with no undo (unlike
+    // Accept, which gets a grace-period Undo). Now routed through the same
+    // confirm dialog the Vault's own delete already uses, for consistency.
+    final confirmed = await _confirmDelete(
+      'Discard this suggestion?',
+      "Alfred picked this up from a real guest conversation. Discarding it "
+          "can't be undone — Alfred won't suggest it again.",
+      confirmLabel: 'Discard',
+    );
+    if (!confirmed) return;
     final updated = List<Map<String, dynamic>>.from(_learnedKnowledge)
       ..removeAt(index);
     await _writeLearned(updated);
   }
 
-  Future<bool> _confirmDelete(String question) async {
+  Future<bool> _confirmDelete(String title, String body,
+      {String confirmLabel = 'Delete'}) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete this entry?'),
-        content: Text(
-          'This permanently removes it from $question learned knowledge. '
-          'Alfred will no longer use it to answer guests.',
-        ),
+        title: Text(title),
+        content: Text(body),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            style:
+                FilledButton.styleFrom(backgroundColor: context.palette.danger),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: Text(confirmLabel),
           ),
         ],
       ),
@@ -615,7 +865,12 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                                             size: 18, color: Colors.red.shade600),
                                         onPressed: () async {
                                           if (await _confirmDelete(
-                                              'this property’s')) {
+                                            'Delete this entry?',
+                                            "This permanently removes it from "
+                                                "this property's learned "
+                                                "knowledge. Alfred will no "
+                                                "longer use it to answer guests.",
+                                          )) {
                                             _beginVaultDelete(key,
                                                 onChange: safeRefresh);
                                           }
@@ -664,11 +919,14 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
 
   @override
   Widget build(BuildContext context) {
-    final hasConflict = _property['Conflict_status'] == 'pending';
+    // Reads the field kept in sync by _syncTabControllerForConflict, not a
+    // fresh recompute — build() must agree with _tabController.length, and
+    // those two are set together at every Conflict_status mutation site.
+    final hasConflict = _hasConflict;
     final screenW = MediaQuery.of(context).size.width;
     final drawerW = screenW < 600 ? screenW : 440.0;
 
-    return Material(
+    final drawer = Material(
       elevation: 0,
       color: context.palette.surface,
       child: DecoratedBox(
@@ -686,7 +944,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 controller: _tabController,
                 tabs: [
                   const Tab(text: 'Overview'),
-                  const Tab(text: 'Files'),
+                  if (widget.isDev) const Tab(text: 'Files'),
                   const Tab(text: 'Knowledge'),
                   if (hasConflict)
                     Tab(
@@ -707,7 +965,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                   controller: _tabController,
                   children: [
                     _buildOverviewTab(),
-                    _buildFilesTab(),
+                    if (widget.isDev) _buildFilesTab(),
                     _buildKnowledgeTab(),
                     if (hasConflict) _buildResolveTab(),
                   ],
@@ -718,6 +976,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           ),
         ),
       ),
+    );
+
+    _ensureWtOverlayInserted();
+    if (_wtStep == null) return drawer;
+    return CompositedTransformTarget(
+      link: _wtDockLink,
+      child: _wtHighlight(step: 0, key: _wtDrawerKey, child: drawer),
     );
   }
 
@@ -782,6 +1047,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           IconButton(
             icon: Icon(Icons.close_rounded,
                 color: Colors.white, size: 20),
+            tooltip: 'Close',
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
@@ -796,6 +1062,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     final setupStep = nextStepFor(
       status,
       hasMasterJson: _property['master_json'] != null,
+      isDev: widget.isDev,
     );
 
     return SingleChildScrollView(
@@ -810,9 +1077,15 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
               onAction: () {
                 final nav = Navigator.of(context);
                 final refresh = widget.onRefresh;
-                nav.pop();
-                nav.push(MaterialPageRoute(
-                  builder: (_) => EditPropertyScreen(property: _property),
+                // pushReplacement, not pop()+push(): closing the drawer's own
+                // dialog route and opening EditPropertyScreen must be one
+                // atomic swap, or the drawer route can survive underneath and
+                // reappear (stale) when EditPropertyScreen is later popped.
+                nav.pushReplacement(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(
+                    property: _property,
+                    isDev: widget.isDev,
+                  ),
                 )).then((_) => refresh());
               },
             ),
@@ -831,13 +1104,102 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             ),
           ),
           const SizedBox(height: 16),
-          _infoRow('Status', status),
+          // Scrape-quality failsafe (2026-09-17): status may genuinely be
+          // Trained/Merged underneath, but a real unresolved issue (an
+          // unreadable Airbnb link) exists -- this row must not read as
+          // "all done" while that's true, same reasoning as the dashboard
+          // card's badge override. _scrapeLinkRetrying takes priority since
+          // there's nothing to flag while Alfred is already re-checking.
+          _infoRow(
+            'Status',
+            _scrapeLinkRetrying
+                ? 'Processing'
+                : _scrapeLinkNeedsAttention
+                    ? 'Needs Attention'
+                    : status.isEmpty
+                        ? 'Training incomplete'
+                        : status,
+          ),
           if (airbnbUrl.isNotEmpty)
             _airbnbUrlRow(airbnbUrl),
           if (createdAt.isNotEmpty)
             _infoRow('Added', _formatDate(createdAt)),
           const SizedBox(height: 8),
           _buildWelcomeLanguageSetting(),
+          if (!widget.isDev) ...[
+            const SizedBox(height: 16),
+            _buildFilesSummaryCard(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // User-mode stand-in for the Files tab (Dev keeps that tab as-is). Files
+  // rarely change once a property is trained, so this stays a single summary
+  // row rather than the always-visible list Dev sees — "Manage" opens the
+  // same Edit Property screen the Files tab's own button already used.
+  Widget _buildFilesSummaryCard() {
+    final fingerprints =
+        _property['file_fingerprints'] as Map<String, dynamic>? ?? {};
+    final count = fingerprints.length;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.palette.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: context.palette.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.folder_outlined,
+                size: 17, color: context.palette.primary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              count == 0
+                  ? 'No files yet'
+                  : '$count ${count == 1 ? 'file' : 'files'} on record',
+              style: GoogleFonts.inter(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: context.palette.textPrimary,
+              ),
+            ),
+          ),
+          _wtHighlight(
+            step: 1,
+            key: _wtManageKey,
+            child: OutlinedButton(
+              onPressed: () {
+                final nav = Navigator.of(context);
+                final refresh = widget.onRefresh;
+                // pushReplacement, not pop()+push() -- see the matching
+                // comment on the SetupStatusBanner action above.
+                nav.pushReplacement(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(
+                    property: _property,
+                    isDev: widget.isDev,
+                  ),
+                )).then((_) => refresh());
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                foregroundColor: context.palette.primary,
+                side: BorderSide(color: context.palette.primaryContainer, width: 1.5),
+                textStyle: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              child: const Text('Manage'),
+            ),
+          ),
         ],
       ),
     );
@@ -889,6 +1251,175 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
     );
   }
 
+  // "+ Show walkthrough again" moved to the dashboard's top-right Settings
+  // menu (2026-09-19) — it always acted account-wide even when it lived
+  // here, so it belongs with the other account-level controls, not inside
+  // one property's drawer. See dashboard_screen.dart.
+
+  // Scrape-quality failsafe (2026-09-17) — true once the background retry has
+  // exhausted itself (see migrations/2026-09-17_scrape_retry.sql). Alfred
+  // trained fine on the uploaded files, but couldn't confirm the Airbnb
+  // listing after two tries; the host needs a way to fix/re-check the link,
+  // which the URL row otherwise has no edit affordance for at all.
+  bool get _scrapeLinkNeedsAttention {
+    final retry = _property['scrape_retry'] as Map<String, dynamic>?;
+    return retry != null && retry['attempts'] != null && retry['next_retry_at'] == null;
+  }
+
+  bool get _scrapeLinkRetrying =>
+      (_property['scrape_retry'] as Map<String, dynamic>?)?['retrying'] == true;
+
+  // 'unreachable' (the fetch itself failed) vs 'low_completeness' (the page
+  // loaded but was empty/wrong) read differently to a host — the former
+  // reads as "this link is broken", the latter as "loaded but incomplete".
+  // Founder-specified copy (2026-09-19): this leads the sentence that's
+  // followed by ": $currentUrl" in _showFixLinkDialog, not a standalone line.
+  String get _scrapeLinkIssueReason {
+    final retry = _property['scrape_retry'] as Map<String, dynamic>?;
+    final reason = retry?['reason'] as String?;
+    return reason == 'unreachable'
+        ? "The current link doesn't seem to work"
+        : "Alfred couldn't fully read this link";
+  }
+
+  // The specific route the wait dialog below is pushed as -- closed via
+  // popTrainingWaitDialog (removeRoute), not a blind Navigator.pop(), since
+  // dashboard_screen.dart can independently push its own result dialog on
+  // the same root navigator; a blind pop() here could close that one instead
+  // and strand this one on screen.
+  Route<void>? _retryWaitDialogRoute;
+
+  Future<void> _retryScrapeLink(String newUrl) async {
+    // Founder feedback, live-tested: submitting a fix previously gave zero
+    // feedback beyond a brief message, then the screen just sat there with
+    // no signal anything was happening. Same wait-dialog experience as the
+    // original Train Now flow, reused rather than duplicated — this only
+    // spans the dispatch call itself (a sub-second POST); the dashboard's
+    // "Processing" badge (driven by scrape_retry.retrying) carries the
+    // actual in-flight signal after this closes.
+    if (mounted) {
+      _retryWaitDialogRoute = pushTrainingWaitDialog(
+        context,
+        builder: (_) => const TrainingWaitDialog(
+          headline: 'Alfred is retraining with your new link',
+          subtext: 'This only takes a moment. Check the dashboard for the result.',
+        ),
+      );
+    }
+    final session = Supabase.instance.client.auth.currentSession;
+    try {
+      await ApiClient.postJson(
+        '/api/ingest/${_property['id']}/retry-scrape',
+        {'airbnb_url': newUrl},
+        bearer: session?.accessToken,
+      );
+      if (mounted) {
+        // Awaited -- popTrainingWaitDialog's route stays on the stack for a
+        // ~200ms fade before it's actually removed (see its own doc comment).
+        // Firing this drawer's own Navigator.pop() before that finishes made
+        // pop() close whatever's CURRENTLY topmost, which was still the
+        // fading wait dialog, not the drawer -- confirmed live (2026-09-19)
+        // as the cause of both the abrupt cut and the drawer never closing.
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Retrying — Alfred will check the listing again shortly.")),
+        );
+        // Founder feedback, 2026-09-17: return straight to the dashboard on
+        // a successful dispatch instead of leaving the host sitting on this
+        // drawer — the dashboard's own card/badge and (once training
+        // actually finishes) the trained/conflict popup are what carry the
+        // rest of the signal from here. Only on success: an error leaves the
+        // host in place so they can see the message and retry.
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.userMessage)));
+      }
+    } catch (e) {
+      if (mounted) {
+        await popTrainingWaitDialog(context, _retryWaitDialogRoute);
+        _retryWaitDialogRoute = null;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not retry. Please try again.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showFixLinkDialog(String currentUrl) async {
+    // Deliberately opens empty, not pre-filled with the URL that just
+    // failed — pre-filling it invites a blind Retry tap without the host
+    // actually checking/fixing anything. The current (possibly broken) URL
+    // is shown as a hint instead, for reference only.
+    final controller = TextEditingController();
+    // Retry is only enabled once the host has actually typed/pasted
+    // something — even re-pasting the exact same URL is a deliberate act
+    // that means "I checked it, try again", unlike a blank submit which
+    // would silently reuse the old (possibly still-broken) link with no
+    // signal the host looked at it at all.
+    final newUrl = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Submit a working Airbnb link'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Founder-specified copy (2026-09-19): the reason and the
+              // current link collapse into one sentence, not two separate
+              // lines as before.
+              Text('$_scrapeLinkIssueReason: $currentUrl',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              const Text(
+                'Verify the new link loads correctly in your browser, then paste it below.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Airbnb URL',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+                onChanged: (_) => setDialogState(() {}),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              // Same format guard as the Add Property URL field — without it,
+              // gibberish input still enabled Retry and burned a real
+              // resume/re-scrape cycle on something that was never going to
+              // work (confirmed live: typing "eewfaf" enabled Retry).
+              onPressed: controller.text.trim().toLowerCase().contains('airbnb.')
+                  ? () => Navigator.of(ctx).pop(controller.text.trim())
+                  : null,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (newUrl != null && newUrl.isNotEmpty) {
+      await _retryScrapeLink(newUrl);
+    }
+  }
+
   Widget _airbnbUrlRow(String url) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -927,6 +1458,20 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                     size: 12,
                     color: Theme.of(context).colorScheme.primary,
                   ),
+                  if (_scrapeLinkNeedsAttention && !_scrapeLinkRetrying) ...[
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: '$_scrapeLinkIssueReason. Tap to fix it.',
+                      child: InkWell(
+                        onTap: () => _showFixLinkDialog(url),
+                        child: Icon(
+                          Icons.error_outline_rounded,
+                          size: 24,
+                          color: context.palette.warning,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -950,9 +1495,13 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             onPressed: () {
               final nav = Navigator.of(context);
               final refresh = widget.onRefresh;
-              nav.pop();
-              nav.push(MaterialPageRoute(
-                builder: (_) => EditPropertyScreen(property: _property),
+              // pushReplacement, not pop()+push() -- see the matching
+              // comment on the SetupStatusBanner action in _buildOverviewTab.
+              nav.pushReplacement(MaterialPageRoute(
+                builder: (_) => EditPropertyScreen(
+                  property: _property,
+                  isDev: widget.isDev,
+                ),
               )).then((_) => refresh());
             },
             icon: Icon(Icons.edit_outlined, size: 16),
@@ -999,43 +1548,49 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Master JSON viewer
-          Text('Master JSON',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          if (prettyJson != null)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 300),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
-                  borderRadius: BorderRadius.circular(8)),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  prettyJson,
-                  style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      height: 1.5,
-                      color: Color(0xFFD4D4D4)),
+          if (widget.isDev) ...[
+            // Master JSON viewer
+            Text('Master JSON',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            if (prettyJson != null)
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(8)),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    prettyJson,
+                    style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        height: 1.5,
+                        color: Color(0xFFD4D4D4)),
+                  ),
                 ),
-              ),
-            )
-          else
-            Text('No master JSON yet.',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              )
+            else
+              Text('No master JSON yet.',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
 
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 16),
-          Text('Add New Knowledge',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+          ],
+          _wtHighlight(
+            step: 2,
+            key: _wtAddKnowledgeKey,
+            child: Text('Add New Knowledge',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+          ),
           const SizedBox(height: 12),
 
           // Text input
@@ -1121,32 +1676,36 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.bolt_rounded, size: 15, color: context.palette.accent),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Automated Learning',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: _showKnowledgeVault,
-                      icon: const Icon(Icons.inventory_2_outlined, size: 15),
-                      label: Text(_vaultLearned.isEmpty
-                          ? 'Vault'
-                          : 'Vault (${_vaultLearned.length})'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: context.palette.textSecondary,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        textStyle: GoogleFonts.inter(
-                            fontSize: 12, fontWeight: FontWeight.w600),
+                _wtHighlight(
+                  step: 3,
+                  key: _wtLearningKey,
+                  child: Row(
+                    children: [
+                      Icon(Icons.bolt_rounded, size: 15, color: context.palette.accent),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Automated Learning',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
-                    ),
-                  ],
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _showKnowledgeVault,
+                        icon: const Icon(Icons.inventory_2_outlined, size: 15),
+                        label: Text(_vaultLearned.isEmpty
+                            ? 'Vault'
+                            : 'Vault (${_vaultLearned.length})'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: context.palette.textSecondary,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          textStyle: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1346,17 +1905,21 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           const SizedBox(height: 16),
 
           // Knowledge base chat
-          Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded,
-                  size: 15, color: context.palette.accent),
-              const SizedBox(width: 6),
-              Text('Ask the Knowledge Base',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-            ],
+          _wtHighlight(
+            step: 4,
+            key: _wtChatKey,
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded,
+                    size: 15, color: context.palette.accent),
+                const SizedBox(width: 6),
+                Text('Ask the Knowledge Base',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ],
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1511,14 +2074,16 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             icon: Icon(Icons.delete_forever_outlined, size: 16),
             label: const Text('Delete Property'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.red.shade700,
-              side: BorderSide(color: Colors.red.shade300),
+              foregroundColor: context.palette.danger,
+              side: BorderSide(color: context.palette.danger.withValues(alpha: 0.5)),
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Deletes this property entry.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            // Was "Deletes this property entry." — understated the actual
+            // severity of the confirm dialog it triggers, below.
+            'Permanently deletes this property and all its training data.',
+            style: TextStyle(fontSize: 11, color: context.palette.textMuted),
           ),
         ],
       ),
@@ -1609,7 +2174,6 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
         key: ValueKey(conflictReport.length),
         propertyId: _property['id'] as String,
         conflictReport: conflictReport,
-        backendUrl: dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000',
         onResolved: _onResolved,
       ),
     );
@@ -1631,7 +2195,8 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 showDialog(
                   context: context,
                   builder: (_) =>
-                      GenerateGuestLinkDialog(property: _property),
+                      GenerateGuestLinkDialog(
+                          property: _property, isDev: widget.isDev),
                 );
               },
               icon: Icon(Icons.link, size: 16),
@@ -1643,10 +2208,17 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
             child: FilledButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => HostPanelScreen(
-                        propertyId: _property['id'] as String),
+                // Was HostPanelScreen (plain Material colors, no glass
+                // treatment, missing guest-link/archive context) — reuses the
+                // same themed conversation-list dialog "Chat History" already
+                // used correctly elsewhere, just scoped to active
+                // conversations instead of archived ones.
+                showDialog(
+                  context: context,
+                  builder: (_) => ArchivedChatsDialog(
+                    propertyId: _property['id'] as String,
+                    propertyName: _property['name'] as String? ?? 'Property',
+                    showArchived: false,
                   ),
                 );
               },

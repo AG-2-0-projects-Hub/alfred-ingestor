@@ -1,21 +1,24 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
+import 'walkthrough_highlight.dart';
+import 'walkthrough_tip_panel.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../utils/walkthrough_prefs.dart';
 
 class GenerateGuestLinkDialog extends StatefulWidget {
   final Map<String, dynamic> property;
   final VoidCallback? onCreated;
+  final bool isDev;
 
   const GenerateGuestLinkDialog({
     super.key,
     required this.property,
     this.onCreated,
+    this.isDev = false,
   });
 
   @override
@@ -28,49 +31,150 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   bool _loading = false;
   Map<String, dynamic>? _result; // {booking_id, guest_chat_url, host_chat_url}
 
+  // Part C steps 1-2 of the post-training walkthrough (steps 3-9 continue in
+  // ChatLiveDialog once "Open Host Chat" is used — see walkthrough.md).
+  // Fires once ever, across all properties, on the first-ever guest link
+  // generated. Docked via a real Overlay entry for the same reason as Part B
+  // (property_detail_drawer.dart's _wtOverlay) — never nest the tip panel
+  // inside this dialog's own showDialog route.
+  bool _wtActive = false;
+  final _wtDockLink = LayerLink();
+  OverlayEntry? _wtOverlay;
+  final _wtStepNotifier = ValueNotifier<int?>(null);
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeStartWalkthrough();
+  }
+
+  Future<void> _maybeStartWalkthrough() async {
+    if (widget.isDev) return;
+    final seen = await WalkthroughPrefs.isGuestLinkWalkthroughSeen();
+    if (seen || !mounted) return;
+    // The tip panel explaining each step is hidden below this width (see the
+    // ValueListenableBuilder's own screenW < 1000 check below) — never start
+    // the walkthrough at all on a narrow viewport, rather than disabling
+    // Cancel/Done with no visible explanation of why.
+    if (MediaQuery.sizeOf(context).width < 1000) return;
+    setState(() {
+      _wtActive = true;
+      _nameController.text = 'Test walkthrough';
+    });
+    _wtStepNotifier.value = 0;
+  }
+
+  void _wtClose() {
+    setState(() => _wtActive = false);
+    _wtStepNotifier.value = null;
+  }
+
+  void _wtNext() {
+    if (_result == null) {
+      _generate();
+    } else {
+      _openHostChat();
+    }
+  }
+
+  void _ensureWtOverlayInserted() {
+    if (_wtOverlay != null) return;
+    final entry = OverlayEntry(builder: (overlayContext) {
+      return ValueListenableBuilder<int?>(
+        valueListenable: _wtStepNotifier,
+        builder: (_, step, __) {
+          final screenW = MediaQuery.of(overlayContext).size.width;
+          if (step == null || screenW < 1000) return const SizedBox.shrink();
+          return Positioned(
+            width: 300,
+            child: CompositedTransformFollower(
+              link: _wtDockLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topRight,
+              followerAnchor: Alignment.topLeft,
+              // 26, not 20: step 2's WalkthroughHighlight wrap adds 6px of
+              // its own padding around the target box, which had eaten into
+              // the tail's clearance without anyone re-tuning this offset.
+              offset: const Offset(26, 0),
+              child: WalkthroughTipPanel(
+                stepIndex: step,
+                stepCount: 9,
+                title: step == 0 ? 'Generate a guest link' : null,
+                body: step == 0
+                    ? const TextSpan(
+                        text: "I've filled in a test name — hit Generate Link and "
+                            "I'll create real links you can use to message me "
+                            "myself, as a guest.")
+                    : TextSpan(children: [
+                        const TextSpan(
+                            text: "You have up to three ways to reach your guest — "
+                                "web chat, WhatsApp, or Telegram. Send whichever you "
+                                "or your guest prefers; it's the same "),
+                        const TextSpan(
+                            text: 'Me',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const TextSpan(
+                            text: " either way, already briefed on this stay. One "
+                                "more thing to show you first →"),
+                      ]),
+                onNext: _wtNext,
+                onClose: _wtClose,
+                isLast: false,
+                pointerSide: WalkthroughPointerSide.left,
+                pointerCenter: 28,
+              ),
+            ),
+          );
+        },
+      );
+    });
+    _wtOverlay = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Overlay.of(context, rootOverlay: true).insert(entry);
+    });
+  }
+
   @override
   void dispose() {
+    _wtOverlay?.remove();
+    _wtOverlay = null;
+    _wtStepNotifier.dispose();
     _nameController.dispose();
     super.dispose();
   }
 
   Future<void> _generate() async {
     setState(() => _loading = true);
-    final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
+    // Was a raw http.post with a dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000'
+    // fallback (bypassing ApiClient's fail-loud config guard) and no timeout —
+    // ApiClient.postJson resolves BACKEND_URL itself and times out/retries.
     try {
-      final response = await http.post(
-        Uri.parse('$backendUrl/api/guests'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
+      final data = await ApiClient.postJson(
+        '/api/guests',
+        {
           'property_id': widget.property['id'],
           'guest_name': _nameController.text.trim().isEmpty
               ? 'Guest'
               : _nameController.text.trim(),
-        }),
+        },
+        bearer: token,
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (mounted) setState(() => _result = data);
-        widget.onCreated?.call();
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Error ${response.statusCode}: ${response.body}'),
-                backgroundColor: context.palette.danger),
-          );
-        }
+      if (mounted) setState(() => _result = data);
+      if (_wtActive) _wtStepNotifier.value = 1;
+      widget.onCreated?.call();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage), backgroundColor: context.palette.danger),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
+              content: const Text('Something went wrong. Please try again.'),
               backgroundColor: context.palette.danger),
         );
       }
@@ -90,20 +194,77 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final bookingId = _result!['booking_id'] as String;
     final propertyId = widget.property['id'] as String;
     final propertyName = widget.property['name'] as String? ?? '';
+    final continueWalkthrough = _wtActive;
     Navigator.of(context).pop();
     ChatLiveDialog.show(
       context,
       bookingId: bookingId,
       propertyId: propertyId,
       propertyName: propertyName,
+      continueWalkthrough: continueWalkthrough,
     );
   }
+
+  // During the walkthrough, only the intended next action is clickable —
+  // the alternate escape hatch (Cancel / Done) is disabled so a first-time
+  // host goes through the full sequence instead of bailing out early.
+  List<Widget> get _actions => _result == null
+      ? [
+          TextButton(
+            onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          WalkthroughHighlight(
+            active: _wtActive,
+            child: FilledButton(
+              onPressed: _loading ? null : _generate,
+              child: _loading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
+                  : const Text('Generate Link'),
+            ),
+          ),
+        ]
+      : [
+          WalkthroughHighlight(
+            active: _wtActive,
+            child: TextButton(
+              onPressed: _openHostChat,
+              child: const Text('Open Host Chat'),
+            ),
+          ),
+          FilledButton(
+            onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
+        ];
+
+  String get _titleText => _result != null
+      ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
+      : 'New Guest Link';
 
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    return AlertDialog(
+
+    // The LayerLink target must wrap a tightly-sized widget, not the whole
+    // AlertDialog — Dialog's own build() internally expands to fill the
+    // entire route (to center its card), so a target wrapping the whole
+    // AlertDialog reports the FULL SCREEN as its box, anchoring the docked
+    // panel off past the viewport edge. Wrapping just `content` (a real,
+    // dialog-sized widget) gives a sane box to anchor beside instead.
+    final content = CompositedTransformTarget(
+      link: _wtDockLink,
+      child: _result == null
+          ? _buildStep1(isMobile)
+          : WalkthroughHighlight(active: _wtActive, child: _buildStep2(isMobile)),
+    );
+
+    final dialog = AlertDialog(
       insetPadding: isMobile
           ? const EdgeInsets.symmetric(horizontal: 12, vertical: 24)
           : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -113,53 +274,34 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
           isMobile ? 14 : 16, 8, isMobile ? 14 : 16, isMobile ? 14 : 12),
       actionsOverflowDirection: VerticalDirection.up,
       actionsOverflowButtonSpacing: isMobile ? 8 : null,
-      title: Text(_result != null
-          ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
-          : 'New Guest Link'),
-      content: _result == null ? _buildStep1(isMobile) : _buildStep2(isMobile),
-      actions: _result == null
-          ? [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: _loading ? null : _generate,
-                child: _loading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: Colors.white))
-                    : const Text('Generate Link'),
-              ),
-            ]
-          : [
-              TextButton(
-                onPressed: _openHostChat,
-                child: const Text('Open Host Chat'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Done'),
-              ),
-            ],
+      title: Text(_titleText),
+      content: content,
+      actions: _actions,
     );
+
+    _ensureWtOverlayInserted();
+    return dialog;
   }
 
   Widget _buildStep1(bool isMobile) {
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
-      child: TextField(
-        controller: _nameController,
-        decoration: const InputDecoration(
-          labelText: 'Guest name (optional)',
-          hintText: 'e.g. Maria Garcia',
-          border: OutlineInputBorder(),
-        ),
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _generate(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Guest name (optional)',
+              hintText: 'e.g. Maria Garcia',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _generate(),
+          ),
+        ],
       ),
     );
   }
@@ -169,6 +311,26 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     final hostUrl = _result!['host_chat_url'] as String;
     final telegramUrl = _result!['telegram_link'] as String?;
     final whatsappUrl = _result!['whatsapp_link'] as String?;
+    final guestRows = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _urlRow('Guest link (web)', guestUrl),
+        // WhatsApp before Telegram: it is the primary channel for the
+        // Mexico/LATAM beta, and the first link a host sees is the one they
+        // send. The link carries a PREFILLED message holding the booking id —
+        // that text is how the guest gets connected, so it must not be edited
+        // away (see routers/whatsapp.py).
+        if (whatsappUrl != null && whatsappUrl.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _urlRow('Guest link (WhatsApp)', whatsappUrl),
+        ],
+        if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _urlRow('Guest link (Telegram)', telegramUrl),
+        ],
+      ],
+    );
 
     return SizedBox(
       width: isMobile ? double.maxFinite : 360,
@@ -176,20 +338,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _urlRow('Guest link (web)', guestUrl),
-          // WhatsApp before Telegram: it is the primary channel for the
-          // Mexico/LATAM beta, and the first link a host sees is the one they
-          // send. The link carries a PREFILLED message holding the booking id —
-          // that text is how the guest gets connected, so it must not be edited
-          // away (see routers/whatsapp.py).
-          if (whatsappUrl != null && whatsappUrl.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _urlRow('Guest link (WhatsApp)', whatsappUrl),
-          ],
-          if (telegramUrl != null && telegramUrl.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _urlRow('Guest link (Telegram)', telegramUrl),
-          ],
+          guestRows,
           const SizedBox(height: 16),
           _urlRow('Host link', hostUrl),
         ],

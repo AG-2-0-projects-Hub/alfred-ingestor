@@ -21,7 +21,8 @@ class ConversationPill extends StatefulWidget {
 
   Color _statusColor(BuildContext ctx) {
     final reason = conv['escalation_reason'] as String?;
-    if (reason != null && reason.startsWith('emergency_')) return ctx.palette.danger;
+    if (reason != null && reason.startsWith('emergency_'))
+      return ctx.palette.danger;
     if (conv['requires_attention'] == true) return ctx.palette.warning;
     return ctx.palette.success;
   }
@@ -82,122 +83,139 @@ class _ConversationPillState extends State<ConversationPill>
     return Opacity(
       opacity: pending ? 0.6 : 1.0,
       child: MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: pad,
-          margin: const EdgeInsets.symmetric(vertical: 3),
-          decoration: BoxDecoration(
-            color: statusColor.withValues(alpha: _hovered ? 0.18 : 0.10),
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        cursor: SystemMouseCursors.click,
+        // Was a bare GestureDetector — opening a guest chat from here is a
+        // primary dashboard action, so it needs real button semantics and
+        // keyboard reach, not just a mouse/touch target.
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: statusColor.withValues(alpha: _hovered ? 0.6 : 0.35),
-              width: 1,
-            ),
-            boxShadow: isUnread
-                ? [BoxShadow(color: statusColor.withValues(alpha: 0.35), blurRadius: 8)]
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: widget.compact ? 18 : 24,
-                height: widget.compact ? 18 : 24,
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.25),
-                  shape: BoxShape.circle,
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: pad,
+              margin: const EdgeInsets.symmetric(vertical: 3),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: _hovered ? 0.18 : 0.10),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: statusColor.withValues(alpha: _hovered ? 0.6 : 0.35),
+                  width: 1,
                 ),
-                child: Center(
-                  child: Text(
-                    guestName.isNotEmpty ? guestName[0].toUpperCase() : '?',
-                    style: GoogleFonts.inter(
-                      fontSize: widget.compact ? 9 : 11,
-                      fontWeight: FontWeight.w700,
-                      color: statusColor,
-                    ),
-                  ),
-                ),
+                boxShadow: isUnread
+                    ? [
+                        BoxShadow(
+                            color: statusColor.withValues(alpha: 0.35),
+                            blurRadius: 8)
+                      ]
+                    : null,
               ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  guestName,
-                  style: GoogleFonts.inter(
-                    fontSize: widget.compact ? 11 : 13,
-                    color: context.palette.textPrimary,
-                    fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (pending && widget.showPendingLabel) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: context.palette.textMuted.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'Awaiting reply',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: context.palette.textMuted,
-                    ),
-                  ),
-                ),
-              ],
-              if (isIntervene) ...[
-                const SizedBox(width: 8),
-                Tooltip(
-                  message: 'Host is replying live',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: widget.compact ? 18 : 24,
+                    height: widget.compact ? 18 : 24,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(4),
+                      color: statusColor.withValues(alpha: 0.25),
+                      shape: BoxShape.circle,
                     ),
-                    child: Text(
-                      'Live',
-                      style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.primary,
+                    child: Center(
+                      child: Text(
+                        guestName.isNotEmpty ? guestName[0].toUpperCase() : '?',
+                        style: GoogleFonts.inter(
+                          fontSize: widget.compact ? 9 : 11,
+                          fontWeight: FontWeight.w700,
+                          color: statusColor,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-              if (isUnread) ...[
-                const SizedBox(width: 6),
-                AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (_, __) {
-                    return Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: statusColor.withValues(alpha: 0.5 + 0.5 * _pulse.value),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      guestName,
+                      style: GoogleFonts.inter(
+                        fontSize: widget.compact ? 11 : 13,
+                        color: context.palette.textPrimary,
+                        fontWeight:
+                            isUnread ? FontWeight.w600 : FontWeight.w500,
                       ),
-                    );
-                  },
-                ),
-              ],
-            ],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (pending && widget.showPendingLabel) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color:
+                            context.palette.textMuted.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Awaiting reply',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: context.palette.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (isIntervene) ...[
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: 'Host is replying live',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Live',
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (isUnread) ...[
+                    const SizedBox(width: 6),
+                    AnimatedBuilder(
+                      animation: _pulse,
+                      builder: (_, __) {
+                        return Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: statusColor.withValues(
+                                alpha: 0.5 + 0.5 * _pulse.value),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 }

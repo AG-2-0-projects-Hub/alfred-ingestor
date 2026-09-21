@@ -13,11 +13,21 @@ if (result.error) {
   process.exit(1);
 }
 
+// Vision judge (screenshot-judge.ts) reads OPENROUTER_API_KEY from the shared root-level
+// key (~/AG_master_files/_scripts/.env), the same one graphify's semantic pipeline uses —
+// deliberately not a separate per-project test key (2026-09-16 decision). dotenv.config()
+// never overwrites an already-set var, so this is additive/safe if both happen to define it.
+config({ path: resolve(__dirname, '../../../../../_scripts/.env') });
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) {
     console.error(`Missing required env var: ${name}`);
-    console.error(`Check _tests/fixtures/.env.test`);
+    console.error(
+      name === 'OPENROUTER_API_KEY'
+        ? `Check the shared ~/AG_master_files/_scripts/.env (not .env.test)`
+        : `Check _tests/fixtures/.env.test`,
+    );
     process.exit(1);
   }
   return value;
@@ -37,6 +47,7 @@ export const env = {
   testHostEmail: required('TEST_HOST_EMAIL'),
   testHostPassword: required('TEST_HOST_PASSWORD'),
   geminiApiKey: required('GEMINI_API_TEST_KEY'),
+  openrouterApiKey: required('OPENROUTER_API_KEY'),
   vercelBypassToken: optional('VERCEL_BYPASS_TOKEN'),
 };
 

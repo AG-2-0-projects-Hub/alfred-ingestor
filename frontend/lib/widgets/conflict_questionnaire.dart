@@ -1,20 +1,19 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
+import '../services/api_client.dart';
+import '../theme/app_theme.dart';
 
 class ConflictQuestionnaireWidget extends StatefulWidget {
   const ConflictQuestionnaireWidget({
     super.key,
     required this.propertyId,
     required this.conflictReport,
-    required this.backendUrl,
     required this.onResolved,
     this.onAnswersSubmitted,
   });
 
   final String propertyId;
   final List<dynamic> conflictReport;
-  final String backendUrl;
   final void Function(String status, Map<String, dynamic> masterJson) onResolved;
   // Fires once the resolutions are saved server-side (before the host clicks
   // "Update Knowledge"). Lets the parent retitle its status badge to reflect
@@ -53,7 +52,10 @@ class _ConflictQuestionnaireWidgetState
     super.dispose();
   }
 
-  bool get _hasCompleteAnswer => _selectedValues.entries.any((e) {
+  // Was .any — enabled submit once a single conflict was answered, silently
+  // submitting the rest unresolved while the parent screen's success dialog
+  // implied full resolution either way. Requires every conflict answered now.
+  bool get _hasCompleteAnswer => _selectedValues.entries.every((e) {
         final selected = e.value;
         if (selected == null) return false;
         if (selected != 'other') return true;
@@ -81,25 +83,31 @@ class _ConflictQuestionnaireWidgetState
 
     setState(() => _isSubmitting = true);
     try {
-      final response = await http.post(
-        Uri.parse('${widget.backendUrl}/api/resolve/${widget.propertyId}'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'resolutions': resolutions}),
+      // ApiClient.postJson resolves BACKEND_URL itself and applies a real
+      // timeout + one transient-failure retry — previously this widget took a
+      // raw backendUrl string (one caller had it falling back to
+      // 'http://localhost:8000' if unset) and called http.post directly with
+      // no timeout at all, so a cold-starting backend could leave a host
+      // stuck on "Saving..." during onboarding's conflict-resolution step
+      // with no way out.
+      final data = await ApiClient.postJson(
+        '/api/resolve/${widget.propertyId}',
+        {'resolutions': resolutions},
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        widget.onAnswersSubmitted?.call();
-        // Auto-apply the resolution — no separate "Update Knowledge" step.
-        // The parent updates status + master_json and shows the completion
-        // popup directly. This widget is torn down on the resulting rebuild.
-        widget.onResolved(
-          data['status'] as String,
-          data['master_json'] as Map<String, dynamic>,
-        );
-        return;
-      } else {
-        _showError('Resolve failed (${response.statusCode}): ${response.body}');
-      }
+      widget.onAnswersSubmitted?.call();
+      // Auto-apply the resolution — no separate "Update Knowledge" step.
+      // The parent updates status + master_json and shows the completion
+      // popup directly. This widget is torn down on the resulting rebuild.
+      // Defensive: the backend now always includes master_json (fixed
+      // 2026-09-15 — a duplicate/retried resolve call used to omit it
+      // entirely and crash this cast), but don't let a future gap here take
+      // the whole flow down again.
+      widget.onResolved(
+        data['status'] as String,
+        data['master_json'] as Map<String, dynamic>? ?? const {},
+      );
+    } on ApiException catch (e) {
+      _showError(e.userMessage);
     } catch (e) {
       _showError('Resolve failed: $e');
     } finally {
@@ -110,7 +118,7 @@ class _ConflictQuestionnaireWidgetState
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+        SnackBar(content: Text(msg), backgroundColor: context.palette.danger));
   }
 
   @override
@@ -164,11 +172,12 @@ class _ConflictQuestionnaireWidgetState
         (item['options'] as List).map((o) => o.toString()).toList();
     final selected = _selectedValues[id];
 
+    final palette = context.palette;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        border: Border.all(color: Colors.orange.shade200),
+        color: palette.warningContainer,
+        border: Border.all(color: palette.warning.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -176,13 +185,17 @@ class _ConflictQuestionnaireWidgetState
         children: [
           Text(
             question,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: palette.textPrimary,
+            ),
           ),
           if (contextText.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
               contextText,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              style: GoogleFonts.inter(fontSize: 13, color: palette.textSecondary),
             ),
           ],
           const SizedBox(height: 12),
@@ -191,7 +204,8 @@ class _ConflictQuestionnaireWidgetState
               value: option,
               groupValue: selected,
               onChanged: (v) => setState(() => _selectedValues[id] = v),
-              title: Text(option, style: const TextStyle(fontSize: 14)),
+              title: Text(option,
+                  style: GoogleFonts.inter(fontSize: 14, color: palette.textPrimary)),
               contentPadding: EdgeInsets.zero,
               dense: true,
             ),

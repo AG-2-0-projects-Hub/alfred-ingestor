@@ -302,8 +302,24 @@ async def process_guest_message(
 
     # (property_data was fetched above, before the first write, so the
     # deleted-listing guard could run ahead of it.)
-    if not property_data or not property_data.get("master_json"):
+    if not property_data:
         raise HTTPException(status_code=404, detail="Property data not found")
+    if not property_data.get("master_json"):
+        # create_guest blocks link creation until the property is trained, but
+        # this is the safety net for a link generated before that guard existed,
+        # or shared before Merge ran. The guest's message is already stored
+        # above — reply instead of leaving them with silence and a 404 they
+        # never see.
+        notice = guardrails.not_yet_trained_reply(guest.get("preferred_language"))
+        await asyncio.to_thread(
+            supabase_client.insert_message, conversation["id"], "ai", notice
+        )
+        return {
+            "reply": notice,
+            "requires_escalation": False,
+            "conversation_id": conversation["id"],
+            "mode": conversation.get("mode") or "autopilot",
+        }
 
     # Attach the guest's media (if any) to the first pass, with a short text
     # anchor so a caption-less photo/voice note still has a prompt. An album is
@@ -865,6 +881,12 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
     prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
+    if not prop.get("master_json"):
+        raise HTTPException(
+            status_code=422,
+            detail="This property hasn't finished training yet — merge it "
+                   "before creating a guest link.",
+        )
 
     slug = _slugify(prop.get("name") or "property")
     frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0].strip().rstrip("/")

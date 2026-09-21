@@ -1,49 +1,55 @@
 """
-POST /api/ingest — triggers sequential file processing over SSE.
+POST /api/ingest — dispatches background file processing (Phase 2, 2026-09-16).
+
+Rewritten from a synchronous SSE stream to a bounded, sub-second JSON
+dispatcher: Cloud Run kills a long-running request at a hard 300s platform
+timeout independent of any app-level retry/timeout tuning, and when that
+fired mid-ingest the property row was orphaned at status="Ingesting" with no
+final status ever written (see
+_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md items 1+3,
+and migrations/2026-09-16_ingest_background_worker.sql for the full incident
+history and DB-side design). The actual file/scrape/merge work now runs in
+routers/ingest_worker.py, dispatched via Cloud Tasks — this endpoint's only
+job is: resolve the canonical property, do the couple of fast setup calls,
+mint a run_id, and fire one task. The frontend gets `property_id` back
+immediately and relies entirely on Supabase realtime on the row for progress
+(ingest_files/status), not a stream read.
 
 REQ-19: idempotent via canonical property lookup on airbnb_url
-REQ-20: 409 lock when status == Ingesting
-REQ-21: atomic status — only sets Ingested when ALL files succeed
-REQ-22: file fingerprints stored in JSONB column
-REQ-26: scraper called before any file processing
-REQ-28: scraper failure surfaces error and aborts
-
-SSE event format:
-  data: {"file": "<name>", "status": "queued|processing|heartbeat|done|already_in_db|file_updated|error", "message": "..."}
-
-System events:
-  data: {"file": "(system)", "status": "property_id", "message": "<canonical_id>"}
+REQ-20: 409 lock when status == Ingesting AND the heartbeat is fresh — a
+         STALE "Ingesting" (the exact orphaned-row case above) no longer
+         blocks retry; see _heartbeat_stale.
+REQ-21: status → Ingested once ANY content is usable (a scrape, or at least one
+         successful file); a run with nothing usable at all sets Ingest_Error.
+         (Enforced in ingest_worker.ingest_maybe_complete now, not here.)
+REQ-22: file fingerprints persisted per-file as each one completes, via the
+         atomic ingest_record_file_result RPC (see supabase_client.py).
+REQ-26: scraper called before any file processing (in ingest_worker.run_start)
+REQ-28: scraper failure surfaces error and aborts (in ingest_worker.run_start)
 """
 
 import asyncio
-import json
 import os
-import re
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-import httpx
+import uuid
+from datetime import datetime, timezone
 
-from services import supabase_client, hash_guard, file_processor, gemini_merge_resolve
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from services import supabase_client, gemini_merge_resolve, task_queue
 import services.gemini_client as gemini_client
+from routers import ingest_worker
 
 router = APIRouter()
+
+_STALE_HEARTBEAT_S = ingest_worker.STALE_HEARTBEAT_S
 
 
 class IngestRequest(BaseModel):
     property_id: str
     property_name: str = ""
     airbnb_url: str = ""
-
-
-def _event(file: str, status: str, message: str = "") -> str:
-    payload = json.dumps({"file": file, "status": status, "message": message})
-    return f"data: {payload}\n\n"
-
-
-def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
-    match = re.search(r'\*\*Thumbnail:\*\*\s*(\S+)', scraped_markdown)
-    return match.group(1).strip() if match else None
 
 
 def _get_owner_id(request: Request) -> str | None:
@@ -62,6 +68,27 @@ def _get_owner_id(request: Request) -> str | None:
         return None
 
 
+async def _require_owner_id(request: Request) -> str:
+    """Strict version of _get_owner_id — 401s instead of returning None.
+    Only /resume needs this (a host-initiated recovery action); the main
+    /ingest dispatcher above stays permissive on purpose (anonymous ingests
+    are allowed, matching the existing add-property flow)."""
+    owner_id = await asyncio.to_thread(_get_owner_id, request)
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
+    return owner_id
+
+
+def _heartbeat_stale(heartbeat_iso: str | None) -> bool:
+    if not heartbeat_iso:
+        return True
+    try:
+        ts = datetime.fromisoformat(heartbeat_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (datetime.now(timezone.utc) - ts).total_seconds() > _STALE_HEARTBEAT_S
+
+
 @router.post("/ingest")
 async def ingest(req: IngestRequest, request: Request):
     airbnb_url = req.airbnb_url.strip()
@@ -70,7 +97,6 @@ async def ingest(req: IngestRequest, request: Request):
 
     # Resolve canonical property by nickname, scoped to the current owner so
     # two users naming a property "Bungalowww" get separate rows.
-    # 409 lock still applies if the named property is currently ingesting.
     # If owner_id is None (unauthenticated), canonical lookup returns None
     # and the request will create a brand-new row at temp_id.
     property_id = temp_id
@@ -81,192 +107,142 @@ async def ingest(req: IngestRequest, request: Request):
         )
         if canonical:
             property_id = canonical["id"]
-            if canonical.get("status") == "Ingesting":
+            # Heartbeat-conditional: a row orphaned at "Ingesting" (the 300s-kill
+            # incident this whole rewrite exists to fix) used to 409 EVERY
+            # subsequent Train Now click forever — refusing the one thing a host
+            # would naturally try. A run that's actually still alive (fresh
+            # heartbeat) still locks; a stale one gets silently taken over below.
+            if canonical.get("status") == "Ingesting" and not _heartbeat_stale(
+                canonical.get("ingest_heartbeat_at")
+            ):
                 return JSONResponse(
                     status_code=409,
                     content={"detail": "Ingestion already in progress for this property."},
                 )
 
-    async def stream():
-        current_task: asyncio.Task | None = None
-        try:
-            # Emit resolved canonical ID so frontend knows which row to poll (REQ-19)
-            yield _event("(system)", "property_id", property_id)
-
-            # Setup phase — move files, upsert row, transition to Ingesting.
-            # Wrapped so any failure here surfaces a visible error event to
-            # the frontend instead of silently killing the SSE stream.
-            try:
-                if property_id != temp_id:
-                    await asyncio.to_thread(
-                        supabase_client.move_files_in_storage, temp_id, property_id
-                    )
-
-                await asyncio.to_thread(
-                    supabase_client.insert_property, property_id, req.property_name, airbnb_url, owner_id
-                )
-                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingesting")
-            except Exception as setup_exc:
-                yield _event(
-                    "(setup)", "error",
-                    f"Could not start ingestion: {type(setup_exc).__name__}: {setup_exc}"
-                )
-                try:
-                    await asyncio.to_thread(
-                        supabase_client.update_status, property_id, "Ingest_Error"
-                    )
-                except Exception:
-                    pass
-                return
-
-            # Call scraper before any file processing (REQ-26)
-            scraped_markdown = ""
-            if airbnb_url:
-                scraper_url = os.environ.get("SCRAPER_URL", "").rstrip("/")
-                if not scraper_url:
-                    yield _event("(scrape)", "error", "SCRAPER_URL not configured.")
-                    await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
-                    return
-                try:
-                    async with httpx.AsyncClient(timeout=120.0) as http:
-                        resp = await http.post(
-                            f"{scraper_url}/scrape", json={"url": airbnb_url}
-                        )
-                        resp.raise_for_status()
-                        scraped_markdown = resp.json().get("data", "")
-                except Exception as exc:
-                    yield _event("(scrape)", "error", f"Scraping failed: {exc}")
-                    await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
-                    return  # REQ-28: abort — do not process files
-
-                # Persist scraped_markdown from ingestor side (REQ-27 reliability —
-                # scraper also writes this, but its Supabase creds may be unset)
-                if scraped_markdown:
-                    try:
-                        await asyncio.to_thread(
-                            supabase_client.save_scraped_markdown, property_id, scraped_markdown
-                        )
-                    except Exception as exc:
-                        print(f"save_scraped_markdown failed (non-fatal): {exc}")
-
-                # Upload hero image (non-fatal on failure) (REQ-18)
-                thumbnail_url = _parse_thumbnail_url(scraped_markdown)
-                if thumbnail_url:
-                    try:
-                        await asyncio.to_thread(
-                            supabase_client.upload_hero_image, property_id, thumbnail_url
-                        )
-                    except Exception as exc:
-                        print(f"Hero image upload failed (non-fatal): {exc}")
-
-            # List files
-            files = await asyncio.to_thread(supabase_client.list_upload_files, property_id)
-            if not files:
-                yield _event("(none)", "done", "No files found in storage.")
-                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingested")
-                return
-
-            # Emit queued for all files upfront
-            for f in files:
-                yield _event(f["name"], "queued")
-
-            # Load fingerprints once (REQ-10, REQ-11, REQ-22)
-            fingerprints = await asyncio.to_thread(
-                supabase_client.get_file_fingerprints, property_id
+    # Bounded setup work only — a few DB/storage calls, comfortably under a
+    # second. The frontend needs property_id back immediately to start its
+    # realtime subscription; actual file/scrape processing happens entirely
+    # in background Cloud Tasks workers from here on (routers/ingest_worker.py).
+    try:
+        if property_id != temp_id:
+            await asyncio.to_thread(
+                supabase_client.move_files_in_storage, temp_id, property_id
             )
+        await asyncio.to_thread(
+            supabase_client.insert_property, property_id, req.property_name, airbnb_url, owner_id
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Could not start ingestion: {type(exc).__name__}: {exc}"},
+        )
 
-            # Process files sequentially
-            error_count = 0
-            try:
-                for f in files:
-                    name = f["name"]
-                    # Size from storage metadata; falls back to 0 (will be treated as "new")
-                    size = (f.get("metadata") or {}).get("size") or 0
-
-                    fp_status = hash_guard.file_status(fingerprints, name, size)
-                    if fp_status == "skip":
-                        yield _event(name, "already_in_db", "Identical file — already in database.")
-                        continue
-
-                    is_update = fp_status == "update"
-                    yield _event(
-                        name, "processing",
-                        "Reprocessing updated file." if is_update else ""
-                    )
-
-                    try:
-                        data = await asyncio.to_thread(
-                            supabase_client.download_file, property_id, name
-                        )
-
-                        current_task = asyncio.create_task(
-                            file_processor.process_file(name, data)
-                        )
-                        while not current_task.done():
-                            try:
-                                await asyncio.wait_for(
-                                    asyncio.shield(current_task), timeout=10
-                                )
-                            except asyncio.TimeoutError:
-                                yield _event(name, "heartbeat", "Still processing...")
-                        markdown = await current_task
-                        current_task = None
-
-                        await asyncio.to_thread(
-                            supabase_client.append_ingested_markdown, property_id, markdown
-                        )
-                        fingerprints[name] = size  # record fingerprint only on success (REQ-22)
-                        yield _event(name, "file_updated" if is_update else "done")
-
-                    except Exception as exc:
-                        yield _event(name, "error", str(exc))
-                        error_count += 1
-
-                # Persist all fingerprint updates (REQ-22)
-                await asyncio.to_thread(
-                    supabase_client.update_file_fingerprints, property_id, fingerprints
-                )
-
-                # Atomic status transition — Ingested only if zero errors (REQ-21)
-                final_status = "Ingested" if error_count == 0 else "Ingest_Error"
-                await asyncio.to_thread(supabase_client.update_status, property_id, final_status)
-
-            except Exception as fatal:
-                await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
-                yield _event("(fatal)", "error", str(fatal))
-
-        except Exception as unhandled_exc:
-            # Safety net — any exception that escaped the specific handlers
-            # above gets surfaced to the frontend rather than dying silently.
-            try:
-                yield _event(
-                    "(unhandled)", "error",
-                    f"Unexpected failure: {type(unhandled_exc).__name__}: {unhandled_exc}"
-                )
-                await asyncio.to_thread(
-                    supabase_client.update_status, property_id, "Ingest_Error"
-                )
-            except Exception:
-                pass
-        except BaseException:
-            if current_task and not current_task.done():
-                current_task.cancel()
-            raise
-
-    origin = request.headers.get("origin", "")
-    sse_headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    }
-    if origin:
-        sse_headers["Access-Control-Allow-Origin"] = origin
-        sse_headers["Access-Control-Allow-Credentials"] = "true"
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers=sse_headers,
+    run_id = str(uuid.uuid4())
+    await asyncio.to_thread(supabase_client.begin_ingest_run, property_id, run_id, {})
+    ingest_worker.dispatch_task(
+        "/api/ingest-worker/start",
+        {"property_id": property_id, "run_id": run_id},
+        name=task_queue.sanitize_task_name(f"ing-start-{property_id}-{run_id}"),
     )
+
+    return {"property_id": property_id, "run_id": run_id}
+
+
+@router.post("/ingest/{property_id}/resume")
+async def resume_ingest(property_id: str, request: Request):
+    """Host-triggered recovery for a stalled property — the self-service
+    version of the by-hand fix used on a real stuck property 2026-09-16
+    (a direct /merge call). Idempotent by construction (safe to mash):
+    terminal status -> no-op; Ingested with no master_json -> enqueue merge
+    (exactly that by-hand fix); anything else -> mint a fresh run and
+    re-dispatch the remaining work (same path the watchdog uses automatically
+    on a stale heartbeat)."""
+    await _require_owner_id(request)  # host-token gate; ownership itself isn't
+    # scoped further since property_id -> owner is already enforced by the
+    # dashboard only ever showing the host their own properties, matching the
+    # existing pattern for /merge and /resolve (also not owner-scoped today).
+
+    prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found.")
+
+    status = prop.get("status", "")
+    terminal = {"Merged", "Conflict_Pending", "Trained", "Fully_Trained"}
+    if status in terminal:
+        return {"status": status, "message": "Already at a terminal state — nothing to resume."}
+
+    if status == "Ingested" and not prop.get("master_json"):
+        run_id = prop.get("ingest_run_id") or ""
+        ingest_worker.dispatch_task(
+            "/api/ingest-worker/merge-step",
+            {"property_id": property_id, "run_id": run_id},
+            name=task_queue.sanitize_task_name(f"ing-merge-{property_id}-{run_id or 'resume'}"),
+        )
+        return {"status": "Ingested", "message": "Merge enqueued."}
+
+    await ingest_worker.resume_run(property_id)
+    return {"status": "Ingesting", "message": "Resumed — re-dispatched remaining work."}
+
+
+class RetryScrapeRequest(BaseModel):
+    airbnb_url: str = ""
+
+
+_ALREADY_TRAINED = {"Merged", "Trained", "Fully_Trained", "Conflict_Pending"}
+
+
+@router.post("/ingest/{property_id}/retry-scrape")
+async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Request):
+    """Host-triggered manual retry after the scrape-quality failsafe gave up
+    (see migrations/2026-09-17_scrape_retry.sql), covering two distinct
+    situations that share the same give-up UI (warning icon + fix-link
+    dialog on the property's Overview tab):
+      - reason='low_completeness': the property already trained fine on the
+        uploaded files, Alfred just couldn't read the listing. A scrape-only
+        retry is enough — dispatches the same worker the background retry
+        uses, immediately instead of on a delay.
+      - reason='unreachable' (or any other non-terminal status): the scrape
+        failed hard and ingest never ran at all (REQ-28 aborts on that).
+        A scrape-only retry isn't enough here — routes through the existing
+        resume_run recovery instead, which reprocesses files + merge too.
+    Optionally updates the URL first (the host fixing a stale/private/
+    removed link)."""
+    await _require_owner_id(request)
+
+    prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found.")
+
+    new_url = req.airbnb_url.strip()
+    if new_url:
+        await asyncio.to_thread(supabase_client.update_airbnb_url, property_id, new_url)
+
+    if prop.get("status") not in _ALREADY_TRAINED:
+        await ingest_worker.resume_run(property_id)
+        return {"status": "retrying", "mode": "resume"}
+
+    run_id = prop.get("ingest_run_id")
+    if not run_id:
+        raise HTTPException(status_code=409, detail="No ingest run on record for this property.")
+
+    # Status doesn't change during a scrape-only retry (unlike the resume_run
+    # branch above, which already flips to "Ingesting" and gets the existing
+    # Processing badge for free) -- without this, nothing signals the retry
+    # is in flight and the host sees no feedback between submitting and it
+    # resolving. Cleared by run_retry_scrape on its way out either way
+    # (success clears scrape_retry entirely, failure re-sets the give-up
+    # shape without this key).
+    current_retry = dict(prop.get("scrape_retry") or {})
+    current_retry["retrying"] = True
+    await asyncio.to_thread(supabase_client.set_scrape_retry, property_id, current_retry)
+
+    ingest_worker.dispatch_task(
+        "/api/ingest-worker/retry-scrape",
+        {"property_id": property_id, "run_id": run_id},
+        name=task_queue.sanitize_task_name(f"ing-scraperetry-manual-{property_id}-{uuid.uuid4()}"),
+    )
+    return {"status": "retrying"}
 
 
 # ── Add Knowledge ─────────────────────────────────────────────────────────────

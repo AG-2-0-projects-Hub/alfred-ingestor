@@ -12,8 +12,20 @@ class ThemeController extends ChangeNotifier {
     final raw = prefs.getString(_key);
     if (raw == 'dark') {
       _mode = ThemeMode.dark;
-    } else {
+    } else if (raw == 'light') {
       _mode = ThemeMode.light;
+    } else {
+      // No saved preference yet (first-ever load) — previously always
+      // defaulted to light regardless of the host's OS/browser preference,
+      // a jarring light flash for a dark-mode system before the toggle even
+      // exists to fix it. This is a one-time default, not continuous
+      // system-tracking — the manual toggle still fully overrides it and is
+      // what gets persisted from here on.
+      final platformBrightness =
+          WidgetsBinding.instance.platformDispatcher.platformBrightness;
+      _mode = platformBrightness == Brightness.dark
+          ? ThemeMode.dark
+          : ThemeMode.light;
     }
     notifyListeners();
   }

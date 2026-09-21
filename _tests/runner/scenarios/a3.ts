@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { judgeScreenshot } from '../lib/gemini-judge.ts';
+import { judgeScreenshot } from '../lib/screenshot-judge.ts';
 import { hydratePage, loginAs, VP, AUTH } from '../lib/playwright-helpers.ts';
 import { env } from '../lib/env.ts';
 import type { ScenarioResult } from '../run.ts';

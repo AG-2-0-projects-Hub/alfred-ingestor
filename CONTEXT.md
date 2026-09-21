@@ -1,6 +1,556 @@
 # Session Context
+
+*`## Pending`/`## Unresolved Decisions` below are the small, current state — read in full every
+session. Below that is the session log: prepend-only (newest `**Last Session:**` block on top,
+the previous one renamed `**Prior Session:**` and pushed down) — read further into it only for
+depth on a specific past decision. See this project's `CLAUDE.md` "Session End / Wrap-up" for
+the refresh rule that keeps `## Pending` from re-bloating.*
+
 **Created:** 2026-04-14
-**Last Session:** 2026-09-03 continued (**🎉 WHATSAPP IS LIVE IN PROD — full rollout completed end-to-end, confirmed working twice by the founder** — `main` @ `5f86ccd`, prod Cloud Run backend redeployed with all WhatsApp config, Meta webhook verified, real messages flowing.
+
+## Pending
+**Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
+session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
+- 🔴 guide.html screenshots still broken after two rounds (crops, highlight style, wrong Knowledge-
+  tab approach, misplaced/blurry/incomplete shots) + an unexplained "Alfred is not responding" on
+  Submit Resolutions (worked on retry). Full detail + root causes + why it kept going wrong:
+  `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. **Must use
+  `FIX_VERIFY_PROTOCOL.md`.**
+- 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
+  worth a quick look at the delete path.
+- 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
+  color/gradient bug (below) is the likely root cause.
+- 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
+- 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
+
+## Unresolved Decisions
+- guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
+  canvas-rendered file picker didn't respond to Playwright's native file-chooser intercept or a
+  synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
+  different method (e.g. founder uploads real files and sends a screenshot to work from)?
+
+**Last Session:** 2026-09-21 (**Fixed the real Add Property popup-stacking bug (two distinct root
+causes, both live-verified on deployed staging) and scroll-to-conflicts; attempted a guide.html
+screenshot overhaul that shipped broken and had to be handed off, not fixed.**) — `staging`, commit
+`bfc34f9`. Frontend only, no backend changes.
+> **✅ Add Property popup-stacking, root-caused for real (not the "dashboard theory" from earlier
+> in this session, which was correctly ruled out at the time but turned out to be half-right for a
+> different reason).** Two independent causes, both confirmed by code and both live-verified:
+> (1) `add_property_screen.dart`'s wait dialog closed via a blind `Navigator.pop()` — if anything
+> else had been pushed on top by the time it ran, the blind pop closed that instead, leaving the
+> wait dialog stuck indefinitely (not a brief animation race, confirmed by the founder's exact
+> report: stuck until manually dismissed). Fixed via the existing `pushTrainingWaitDialog`/
+> `popTrainingWaitDialog` route-keyed helpers. (2) `dashboard_screen.dart` never stops running
+> while Add Property screen is open on top of it, and its own background "training finished"
+> watcher had zero exclusion for a property currently being created there — despite the class's
+> own comment already claiming that exclusion existed. Fixed via a new `onPropertyIdKnown`
+> callback + `_activeAddPropertyId` field. Also added scroll-to-conflicts on Add Property screen
+> (same `Scrollable.ensureVisible` pattern as Edit Property). **Live-verified 3 times against
+> deployed staging** via throwaway Playwright-driven properties (cleaned up after): clean single
+> popup at conflict-found, no ghost dialog + working auto-scroll after Resolve Conflicts, clean
+> single popup at trained. Used the project's own cheap OpenRouter vision judge
+> (`qwen/qwen3-vl-8b-instruct`) for the repetitive screenshot verification, not Claude's own vision,
+> per founder's explicit ask to save Anthropic tokens.
+> **⚠️ guide.html screenshot overhaul — shipped in the same commit, but founder's live review found
+> it badly broken: highlight boxes still cutting into fields, highlight style still not matching
+> the real widget despite being asked repeatedly, the Knowledge tab approach was wrong (should be
+> one screenshot with 3 things highlighted, not multiple near-duplicate real captures), one
+> screenshot spliced into the wrong location (root cause found: a regex splice script's "two divs
+> closing in a row" heuristic broke on the one step with an extra wrapper div), one blurry (missing
+> 2x device-scale-factor), one incomplete (cropped before reaching the actual message box/Send
+> button it was supposed to show). This was corrected/re-verified twice in-session and still
+> shipped wrong on the second round — see the process write-up in `lessons.md`'s 2026-09-21 entry
+> and the full handoff `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`
+> (FIX_VERIFY_PROTOCOL.md now mandatory for this specific follow-up).
+> **🔴 New, unexplained: Submit Resolutions threw "Alfred is not responding" on the founder's first
+> real end-to-end test (files + URL + nickname → Train Now → conflict found → Resolve → Submit).**
+> Retry succeeded instantly; a full second end-to-end attempt from a fresh property had zero errors
+> anywhere. Not investigated this session — logged in the same handoff doc, likely worth checking
+> Cloud Run cold-start timing first.
+> Logged: `_tests/scenarios.md` (2 new pending-intake rows), `QUEUE.md` (new-account signup never
+> sent a confirmation email, found live by the founder, not yet investigated).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Fixed the Step 0 hint showing on every Ready card instead of one;
+root-caused and fixed "Stop doesn't actually stop training" as two separate real bugs; built and
+live-verified a ghost-property recovery UX on top of that fix; finished Wave 4 (guide.html) with
+real screenshot fixes.**) — `staging`, commits `5469d5a`..`24b9afa` (11 commits). Frontend +
+backend; backend redeployed twice (`alfred-backend-staging-00026-szv`, `-00027-vmw`), Vercel
+auto-deployed each frontend push.
+> **✅ Step 0 hint scope bug**: `_showStep0Hint` gated only on status + global seen-flags, not card
+> position, so it rendered on every Ready card instead of one. Now only the first Ready property in
+> dashboard order shows it.
+> **✅ "Stop doesn't stop" — two real, unrelated fencing gaps, found by direct code trace, not
+> guessing.** (1) `claim_merge`/`save_merge_result` checked `status` alone, never `ingest_run_id` —
+> an already-in-flight file completion after Stop could still claim and finish a merge. (2) The
+> actual mechanism behind what the founder saw live: `ingest_worker.run_start`'s *second*
+> `begin_ingest_run` call (re-seeding `ingest_files` after the scrape completes) was completely
+> unconditional — a Stop landing mid-scrape got silently undone the instant the scrape returned,
+> resurrecting the cancelled run with no further host action. Both fenced with the same
+> `expected_run_id` pattern already used elsewhere. Verified via a direct DB-level test of the exact
+> fencing query, then 4 live end-to-end Playwright runs against redeployed staging (added a new 25s
+> post-Stop re-check to D8 specifically to catch the delayed resurrection), plus manual re-checks
+> minutes later confirming no resurrection.
+> **✅ Ghost-property recovery UX** (founder decision: Resume-or-delete, not auto-delete on Stop) —
+> built on reused infrastructure, not new UI: `setup_status.dart`'s `nextStepFor` gained a "Training
+> incomplete" case so the existing `SetupStatusBanner` renders it in both the drawer and Edit
+> Property; `property_card.dart` recognizes the same state on the dashboard card (Resume Training +
+> a red delete x, reusing the existing soft-delete confirm dialog); `edit_property_screen.dart`
+> routes Resume to the same `_startIngest()` every other resume path already uses. Live-verified the
+> full chain end-to-end, including capturing the real `/api/ingest` network call Resume Training
+> fires.
+> **✅ Wave 4 (guide.html), finished**: "What trains Alfred best" split into Gold-for-Alfred/
+> Also-helps tiers, mirrored into the in-app tips (`add_property_screen.dart`/
+> `add_property_walkthrough_panel.dart`); Step 2/4 screenshots fixed (stale dev-mode "INGEST NOW"
+> composite removed; Step 4 widened to show real context, with a highlight glow around Train Now
+> matching the in-app walkthrough's own style); Property Enhancement screenshots recaptured at 2x
+> DPI with a capped display width (were stretched full-width from a low-res capture, blurry);
+> "Guest Experience" tab renamed "Add a Guest" and expanded 3→4 steps (added Autopilot/Intervene,
+> enriched the resolve flow) to better reflect the real in-app 9-step walkthrough's depth.
+> Logged: `_tests/scenarios.md` (D8 rewritten + extended, ghost-property row updated to confirmed
+> fact, tips-restructure row); `QUEUE.md` item #13 added (approved during FMEA, never actually
+> queued until now).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Closed out the completion-popup-polish handoff (`HANDOFF_completion-
+popup-polish_2026-09-19.md`) from earlier today — all 6 items shipped and founder-live-verified on
+real properties (Bungalow, Sta Prsca), plus root-caused and fixed the two bugs the handoff left
+unconfirmed.**) — `staging`, commit `f872c5d` (items 1/2/5/6 + the drawer/wait-dialog race fix); a
+fade-in add-on landed via a parallel session's `754400a` (with credit) rather than a separate
+commit here — see below. Vercel auto-deployed, no backend changes.
+> **✅ Items 1/2/5/6 shipped as specified.** Settings button glows (warning color) when the
+> scrape-link failsafe flags a property; fix-link dialog copy collapsed to founder's exact wording,
+> kept per-reason (`unreachable` vs `low_completeness`); conflict popup now titles on the property
+> name with the conflict count moved to a pill below it, matching the trained popup (design
+> pre-approved via artifact); Edit Property's dead "Resolve" button (confirmed no-op —
+> `_handleNextStepAction` has no case for `Conflict_Pending`) removed and its banner reworded —
+> the drawer's own separate, *working* Resolve button was left untouched.
+> **✅ Root-caused items 3/4 by live reproduction, not another guess.** A throwaway Playwright script
+> against staging (isolated QA property) found `page.getByText` returns nothing — this app is
+> CanvasKit, coordinate-click only — and a stale Retry-button coordinate silently missed 3 runs in a
+> row until a fresh-screenshot-then-measure pass caught it. Screenshot polling only produced 1-8
+> frames per 2-3s attempt (150ms-1.2s per call, too coarse); switched to Playwright `recordVideo` +
+> `ffmpeg` frame extraction for true ~40ms granularity, which proved both bugs directly on video: the
+> wait dialog vanished inside a single 40ms frame (no fade at all), and the drawer stayed open
+> through the entire capture window.
+> **✅ Actual root cause:** `Navigator.of(context, rootNavigator: true).pop()` fired synchronously
+> right after `popTrainingWaitDialog`, before that function's 200ms fade-then-`removeRoute` had
+> actually removed the wait-dialog route — so `pop()` closed the still-fading wait dialog instead of
+> the drawer. Fixed by making `popTrainingWaitDialog` return an awaitable `Future<void>`, and
+> awaiting it (with a `mounted` re-check after) in all three branches of `_retryScrapeLink`.
+> **✅ Founder live-verified everything post-fix**, including seeding a real conflict on "Sta Prsca"
+> (direct DB write, restored after) to check the conflict-popup name/pill and the reworded banner.
+> **✅ Also added a matching fade-IN** for the wait dialog (founder noticed the fade-out but no
+> entrance) — same 200ms `AnimatedOpacity`, self-owned rather than relying on `DialogRoute`'s default
+> transition. Left uncommitted at session end for scope reasons; a parallel session (`the-ingestor-60`)
+> picked it up off the shared working tree and folded it into its own `754400a` with explicit credit
+> in that commit's message — confirmed via `git show`, so no separate commit was needed here.
+> Logged: `_tests/scenarios.md` pending-intake row (grouped with B16/B17); `lessons.md`/
+> `lessons_index.md` entry on the Playwright video-capture + fresh-screenshot-measurement technique
+> (flagged as a global candidate).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-19 (**Closed out the scrape-retry-UI handoff from 2026-09-17 for real —
+root-caused two genuine, separate bugs behind "the training-finished popup sometimes just doesn't
+show," fixed both, and had the founder live-verify both outcomes end-to-end on real properties
+(Bungalow: retry → real conflict → resolve → immediate popup → clean dashboard; Sta Prsca: retry →
+clean, no conflict → immediate popup → clean dashboard). Also fully closed the drawer-navigation
+bug from 2026-09-17 (`pushReplacement` fix) — B15 already covered the pure-navigation case;
+confirmed no regression under the fuller live flow too.**) — `staging`, commits `5938718` (drawer
+`pushReplacement` fix + B15), `f21ca07`+`d3e17d4`+`4b22e12` (popup-signal fix + polling fallback +
+B16 scenario), Vercel auto-deployed each push, no backend changes.
+> **✅ Bug 1 — popup wired to the wrong signal.** A clean link-retry never changes the property's
+> coarse status label, so the status-transition check that triggered the popup never fired; it used
+> to show a small SnackBar instead, driven by the one field that *does* correctly track this
+> (`scrape_retry`). Re-wired that signal to fire the same big popup everywhere else uses.
+> **✅ Bug 2 — the real reason it felt random all day: Supabase realtime can silently drop an
+> update.** Proved this empirically (the same controlled DB-write test passed/failed at random
+> purely on realtime timing, including for an *unmodified* status-transition code path). The
+> dashboard already had a 10s polling fallback for exactly this reason, documented in its own code
+> comment — but it only ever refreshed card data, never the popup checks. Wired both check
+> functions into that same poll. This was the actual root cause; bug 1 alone would not have fixed it.
+> **✅ New scenarios B16 (automated) + B17 (founder live pass, `layer: 4`).** Reinforced this
+> project's existing manual-pass convention (scenario A1) — a founder's own confirmed live run is a
+> real PASS, logged as such, no Playwright required.
+> **🟡 Found live, not yet fixed:** the wait dialog/toast can disappear abruptly instead of fading
+> (likely the drawer's own close racing the fade), and the drawer sometimes doesn't auto-close after
+> a dispatch succeeds despite the code intending to — both handed off with hypotheses, unconfirmed.
+> **🟡 Also handed off (design pre-approved):** conflict popup needs the property name in its title,
+> matching the trained popup's format — see the published comparison artifact linked in the handoff doc.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-17 (**Founder hit a rough stretch of live-testing today — real bugs found
+and fixed, but process discipline (FMEA before code, verifying before claiming "fixed") eroded
+enough across sessions that the founder had to chase it prompt by prompt. Rather than another
+promise, built a mechanically-enforced protocol: `FIX_VERIFY_PROTOCOL.md`. Scoped narrowly —
+this session did NOT touch the scrape-retry bug investigation itself (a separate, possibly
+parallel-session-owned uncommitted change to `property_detail_drawer.dart` was found in the
+working tree, explicitly left alone — not this session's work, not verified, not committed).**
+— `staging`, docs/tooling only, no deploy.
+> **✅ Root-caused why the standing QA rules keep eroding, not just apologized for it.** They live
+> as prose in `CLAUDE.md` — nothing structurally stops a session from skipping FMEA or claiming a
+> fix works without proof, unlike e.g. `git push`, which is blocked by an actual tool-permission
+> rule. Long context makes the erosion worse (already known from a prior session), but the root
+> issue is that "remember to do it" was never backed by a mechanical check.
+> **✅ Built `FIX_VERIFY_PROTOCOL.md`** — opt-in (founder says "fix X with FIX_VERIFY_PROTOCOL.md"),
+> not a silent default. Sequence: real FMEA (state × surface × data-delivery-path, including
+> whether automated coverage exists) → propose → explicit approval → implement → verify for real
+> (frontend changes require *creating* a real Playwright scenario under `_tests/runner/scenarios/`,
+> not just reusing one if it happens to exist; backend-only changes need a real DB/API/log check) →
+> commit message must carry a `Protocol: FIX_VERIFY` + `Verified:` trailer → only then say "fixed."
+> **✅ Made it mechanically enforced, not just documented** — new `_scripts/wrap_up.sh` check: any
+> commit carrying the `Protocol: FIX_VERIFY` trailer fails the session if it lacks a real
+> `Verified:` line, or if it touched `frontend/lib/**` without a matching new/changed scenario file
+> in the same commit. Live-tested all 3 reachable states via throwaway empty commits (no-opt-in
+> PASS, missing-`Verified:` FAIL correctly naming the commit, present-`Verified:` PASS), cleanly
+> reverted — the 4th branch (frontend-without-scenario) verified by code inspection only, reusing
+> the same `git diff-tree` pattern the existing QA gate already uses successfully.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-16→17 (**Closed out the Train Now completion-signal handoff from the prior
+session — root-caused it to a genuine dialog/Navigator race (not the async architecture) and
+live-verified the fix. Then, testing that fix, the founder hit a completely different real bug
+(wrong property name, missing hero image, no conflicts detected) that was live-investigated down to
+Firecrawl serving a stale, incomplete cached scrape of the Airbnb page — fixed at the source, plus a
+failsafe layer built collaboratively with the founder for any other cause of the same signal.** —
+`staging`, 4 commits (`9b9dbeb`..`31c65e4`); Cloud Run `alfred-scraper-staging` + `alfred-backend-
+staging` redeployed (backend twice); migration `2026-09-17_scrape_retry.sql` applied to staging.
+> **✅ Training-wait dialog bug, root-caused and fixed for real.** Two prior sessions' fixes (polling
+> backstop, wiring dialogs to the auto-merge path) both turned out correct but insufficient — the
+> actual bug: `_applyPropertyRow` pushed the conflict/trained popup as fire-and-forget `showDialog`,
+> which stacks the route synchronously; `_startIngest`'s `finally` block then did a blind
+> `Navigator.pop()` once the flow completer resolved, which always removes whatever is topmost — the
+> just-pushed result dialog, not the wait dialog underneath it. Fixed by deferring the result dialog
+> until the wait dialog is actually popped. Also fixed in the same pass: Train Now staying clickable
+> after training finished, and a raw `"Status: Ingesting"` leak to non-dev users. Live-verified by
+> the founder on staging: "finally!"
+> **✅ Real bug found retesting the fix, root-caused with hard evidence, not guessed.** The retest
+> landed on a wrong placeholder property name, no hero image, and zero conflicts detected — on the
+> SAME Airbnb URL that had worked cleanly ~10 times before. Reproduced the exact failure with a
+> standalone Firecrawl call bypassing all app code: the default (cached) fetch returned only Airbnb
+> nav chrome; the identical call with `maxAge:0` returned the full real listing. Firecrawl had cached
+> an incomplete pre-hydration snapshot and kept serving it indefinitely — confirmed on a second,
+> unrelated property (Bungalow) hitting the identical symptom the same day, ruling out a one-URL
+> fluke. Fixed at the source (`scraper/main.py` now always passes `max_age=0`, plus one inline retry
+> on Low completeness) and **live-verified twice**: a direct call to the redeployed scraper on the
+> previously-failing URL came back High completeness with real photos; a full real Train Now retest
+> landed `Trained` with the correct name and 7 real photos merged into `master_json.media.gallery`.
+> **✅ Built a failsafe layer collaboratively, then extended it after founder pushback.** For any
+> *other* cause of a degraded scrape (not just the cache bug above): one inline retry, then a
+> 5-minute background re-scrape + re-merge (new `scrape_retry` field, never Conflict_Pending to avoid
+> clobbering a host's in-progress conflict review), a dashboard "fully trained" toast on success (no
+> push channel exists — reuses the existing realtime pattern), and a give-up state after 2 attempts
+> that surfaces a warning icon + fix-and-retry dialog on the previously-display-only Airbnb URL row.
+> The founder then asked what happens with a link that's unreachable from the start — that case
+> wasn't covered (it hit the older `Ingest_Error` status with no fix-UI at all) — extended the same
+> give-up machinery to cover it too, routing through the existing `resume_run` recovery instead of a
+> scrape-only retry since ingest never actually ran. Caught and fixed one real bug in review before
+> shipping: a successful retry never cleared a stale give-up flag from an earlier failed run.
+> **Process note:** the founder explicitly corrected a premature "here's the fix" without live
+> verification mid-session — response was to actually reproduce bugs with real evidence (direct
+> Firecrawl calls, DB queries, live redeploys + re-tests) before claiming anything fixed, and to keep
+> proposing/confirming wording and UX details (dialog pre-fill, retry-button gating, exact copy)
+> rather than shipping a first draft. Also revised the wait-dialog fix wording three rounds on the
+> exact caveat text shown to hosts, each round concrete/specific about what was wrong.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-16 (**Continued Train Now reliability work: live-tested Phase 2 for
+real, found and fixed 2 live bugs (a Gemini audio-transcription hallucination on silent input, and
+a realtime-subscription gap that left the wait dialog stuck), designed a real QA-curation
+protocol together, rewrote `CLAUDE.md`/`QUICKSTART.md` to be fully current — then found the
+post-merge completion signal is STILL unreliable even after fixing it twice, handed off fresh
+with hard evidence rather than a third guess.** — `staging` @ **`6333721`**, 5 commits
+(`5332597`..`6333721`); Cloud Run `alfred-backend-staging` redeployed once (audio fix).
+> **✅ Audio hallucination, confirmed and fixed.** A muted external mic recorded true digital
+> silence (verified via `ffmpeg`/`webrtcvad`, independently cross-checked) — Gemini's ingest
+> prompt fabricated a fully detailed, plausible fake transcript anyway (a fake door code reached a
+> real guest-facing conflict question). Root cause: the prompt's template hardcoded
+> `contains_host_voice: Yes` with no `No` option. A VAD-based pre-filter (`ffmpeg`/`pydub`/
+> `webrtcvad`) was prototyped first but rejected — it couldn't reliably separate real loud traffic
+> noise from speech even at max aggressiveness. The founder's own simpler proposal (tell the model
+> to say it doesn't know, don't pre-filter) won on real 3-file test data and shipped instead —
+> zero new dependencies. This exact "test a competing idea for real before defending what's
+> already underway" pattern got promoted to root `CLAUDE.md` §3 at the founder's request.
+> **✅ Stuck-tab bug fixed once, found to still recur.** Realtime alone silently failed to deliver
+> a single update to the tab that clicked Train Now (confirmed via direct DB query: backend fully
+> correct, a second tab showed the real state immediately). Added an 8s polling backstop as
+> redundancy — but the SAME class of stuck-dialog bug still happened on a later real test, even
+> after hard-refresh and a fresh incognito window (ruling out caching). Real Supabase `edge_logs`
+> pulled for the failing window prove the poll itself is firing correctly and getting healthy 200
+> responses — the remaining bug is client-side Dart logic, not network/data delivery. See the
+> handoff doc above; two smaller confirmed-but-unfixed bugs found in the same testing (a raw
+> `"Ingesting"` status leak, Train Now staying clickable post-completion) are in there too.
+> **✅ Built the Critical Path QA concept together.** The prior "full suite" (7 scenarios) turned
+> out to be automated by build-order, not criticality — the actual core Train Now flow wasn't even
+> in it. Hand-picked 9 scenarios by real blast radius instead (auth, core ingest, guest chat,
+> security) as the actual `staging → main` merge gate; `CLAUDE.md` now proactively offers to run it
+> before a merge instead of requiring it be asked for by name.
+> **✅ `CLAUDE.md`/`QUICKSTART.md` audited and corrected** — found 3 real stale/contradictory
+> entries in `CLAUDE.md` (Shell Execution Environment described a pre-2026-07-28 environment that
+> hadn't been true all session; the Stack/Data Schema header still described the pre-Phase-2
+> SSE+BackgroundTasks system; a line claimed inheritance from `GEMINI.md`, which root `CLAUDE.md`
+> explicitly says Claude Code never reads). `QUICKSTART.md` was rewritten from scratch — it
+> described a `/qa-full`/`/qa-changed-since` slash-command system and an `ag-switch` session-start
+> flow that don't exist/apply anymore.
+> **⚠️ One real secret-exposure incident:** `SUPABASE_SERVICE_ROLE_KEY` (staging) printed in full
+> via a plain `grep` against `backend/.env`, despite this exact failure class already being
+> documented with a structural fix in place from a prior session. Logged as a recurrence, not a
+> new rule — the gap was execution under task pressure, not missing policy. Queued for rotation
+> alongside the other exposed credentials in `QUEUE.md`.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-15→16 (**Root-caused and substantially fixed the Train Now reliability
+crisis. Fixed 3 stacked frontend bugs in first-time Add Property (dropped-connection recovery,
+premature dialog-close, raw status leak). Root-caused the real Gemini problem — `gemini-3.8-flash`
+was a ~2-week-old model with thin quota, the 20s/90s retry-timeout architecture was undersized for
+real call latency, and staging fires ~2x the concurrent Gemini calls prod does per property (a
+legitimate merge/photo-triage feature addition). Swapped training-only Gemini calls to
+`gemini-3.6-flash`, live-verified via a real 10-file scrape+ingest+merge run: 100% success.** —
+`staging`, 4 commits (`9defe1b`, `13757b7`, `1381848`, `889e83f`); Cloud Run
+`alfred-backend-staging` + `alfred-scraper-staging` both redeployed for the model swap.
+> **✅ 3 frontend bugs fixed, `add_property_screen.dart`** — it never got the realtime-row-watch
+> fix `edit_property_screen.dart` received earlier the same day. Dropped SSE connections left the
+> screen dead with zero backstop (fixed: watch the row from click time, not the first server
+> event); the wait dialog closed before merge even started once merge moved off the request's own
+> completion (fixed with a `Completer` that waits for the real end of the chain); the dashboard
+> badge leaked the raw word "Ingested" to end users (fixed).
+> **✅ Root-caused the Gemini reliability problem via standalone smoke-test scripts against real
+> Vertex, real content, zero app code** — not guessed. `gemini-3.8-flash` (GA ~2026-09-02) hit real
+> 429s after 2 sequential calls with zero concurrency; most models tested routinely take 15-30s+ per
+> call against a 20s-per-attempt timeout that cancels-and-restarts instead of flagging slow;
+> staging's merge+scraper make ~2x prod's Gemini call count per property. Swapped
+> ingest/merge/resolve/scraper-photo-triage to `gemini-3.6-flash` (12/12 successes, most consistent
+> model tested) — chat deliberately untouched.
+> **✅ Found the exact "stuck forever, zero error" mechanism** via `gcloud logging read` +
+> `gcloud run services describe`: Cloud Run kills `/ingest` at a hard 300s timeout regardless of
+> remaining work, and nothing in the app catches that specific teardown to write a final status.
+> Not yet fixed — anchor evidence for the plan's recovery-path item.
+> **✅ Live-verified the full pipeline end-to-end**: uploaded 10 real test files (incl. the
+> long-failing docx) to a fresh property, ran the real scrape→ingest→merge chain on
+> `gemini-3.6-flash`: 10/10 files succeeded, merge succeeded, landed on a legitimate
+> `Conflict_Pending` with 2 real data conflicts — assigned to the founder's real account.
+> **🔴→ self-caught process gaps:** skipped the QA-scenario-logging rule mid-session (corrected,
+> logged retroactively); shipped one real regression (dialog-close timing) inside a fix meant to
+> prevent that exact bug class (self-caught and fixed same session); briefly mis-stated a Cloud Run
+> *maximum-allowed* timeout as a proposal, alarming the founder before self-correcting.
+> **⚠️ One credential-hygiene incident:** a live, short-lived (expires within the hour) Google
+> Cloud OAuth access token was echoed into tool output via an unredacted `gcloud` command — flagged
+> immediately; no rotation needed, it self-expires and isn't a static key.
+> **📋 Wrote a self-contained handoff plan**, `_Context/Train_Now_Reliability_and_QA_Process_Plan_
+> 2026-09-15.md` (gitignored, local-only) — 9 items: the still-open UX gaps, 2 new process
+> protocols (lightweight FMEA before code, a QA-logging backstop in `wrap_up.sh`), QA-replay
+> scoping, the retry-timeout redesign, and the full prod-vs-staging differential audit. Every claim
+> is cited to how it was verified, or explicitly flagged as unconfirmed — the founder required this
+> after finding stale/contradictory claims in an earlier draft.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-15 (**Fixed the 6 retrain-flow/UX regressions the founder found after the
+2026-09-14→15 mitigation pass, then found + fixed 2 more real bugs live-testing on a real property —
+all shipped to `staging`, live-verified. Root-caused (not yet fixed) the recurring Gemini docx
+timeout as Vertex AI Dynamic Shared Quota contention, not file size.** — `staging`, 2 commits
+(`f43bdef` the 6 fixes, `d848b5e` the 2 follow-on fixes); Cloud Run `alfred-backend-staging`
+redeployed once (rev 00012) for the `merge_resolve.py` fix.
+> **✅ 6 fixes for the retrain-an-already-trained-property flow**, which never got the same
+> User-mode simplification Add Property already had: auto-chain ingest→merge for non-dev (no more
+> "Merge Now"/"Ingesting" leaking through), property card keeps +Guest/Settings during a retrain
+> (was dropping to a bare "Details" button), a real backend bug where `/api/resolve`'s idempotent
+> branch omitted `master_json` and crashed Submit Resolutions on a retried call, a confirmation
+> before merging past a permanently-failed file, lighter Train-Now-dialog vignette (one shared
+> constant, was 5 copy-pasted 0.65-alpha literals), and new upload types (.json/.txt "chat
+> exports") — the founder's own next idea, to feed Alfred real conversation history.
+> **✅ Live-verified directly against staging**, not just `flutter analyze`: hit `/api/resolve`
+> twice on a real Trained property to reproduce and confirm the exact crash+fix; drove a real
+> retrain through a Playwright + CORS-bypass-proxy harness (staging's CORS only allows the real
+> Vercel origin) confirming the vignette, wording, and upload-type fixes live; confirmed via `curl`
+> that the deployed Vercel bundle actually contains the new strings.
+> **🔴→✅ Founder live-tested a real retrain (`Dos rios`) and hit 2 more real bugs**, found and
+> fixed same-session: (1) the edit screen only knew a run had finished when its own HTTP call
+> resolved — a dropped connection left it stuck on "Processing" forever even though the backend had
+> actually finished (confirmed: property was `Ingested` in the DB, screen never noticed). Fixed by
+> watching the property row live (same realtime pattern the dashboard card already used) instead of
+> trusting one request. (2) A file's status label showed "Timeout — try again" the moment this
+> browser stopped watching it, even though the backend kept retrying and later succeeded — read as
+> a permanent failure to the host. Fixed: no per-file failure label until the whole run has
+> genuinely concluded; only a real final verdict, once.
+> **✅ Root-caused the Gemini docx timeout, wrong on the first pass, corrected under founder
+> pushback (see below).** Original theory (payload too large for a 20s timeout) was wrong — real
+> extraction showed only ~5,200 tokens of text; founder caught this before it was accepted. Real
+> evidence found: an explicit `429 RESOURCE_EXHAUSTED` from Vertex AI landed seconds after the
+> docx's own stall, and the model in use (`gemini-3.8-flash`) isn't in this project's static
+> per-model quota list at all — confirmed via web search it's on Google's Dynamic Shared Quota
+> (no fixed per-project ceiling to request an increase on). **Not fixed yet** — deliberately handed
+> off to a fresh session with a full self-contained prompt rather than rushed.
+> **🔴 Exposed 2 Vercel account tokens** via a broken ad-hoc `grep|sed` redaction (5th such incident
+> this project in a week) — logged to `QUEUE.md`, structural fix (real parser, never redact-after)
+> written up in `lessons.md` and flagged as a Global Candidate.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-14→15 (**Full pre-beta UX/accessibility/correctness/deploy audit (57
+findings, published as an artifact) → 6-phase mitigation plan, implemented, live-verified against
+staging, and code-reviewed.** — `staging`, 8 commits (`9ee94e4`..`3e23660`), each phase pushed as
+its own separate `git push` so bisection never needs a redeploy. Full detail, every bug found/fixed,
+the scope correction made mid-plan, and a reusable tooling discovery (session-injection + manual
+InputEvent dispatch to reliably drive this app's Flutter-web login/forms from headless Playwright,
+since `keyboard.type` doesn't reliably reach Flutter's canvas here) are in
+`_Context/Pre_Beta_Mitigation_Report_2026-09-14.md` — read that before this terse summary if you
+need depth; this entry stays short on purpose.
+> **✅ Audit → plan → execute → verify → review, in one continuous session.** Critical/High fixes:
+> app-wide crash on a missing Supabase env var (now a legible fallback screen); a `TabController`
+> crash on conflict-resolve; the in-app "Host Chat" button opening a legacy unstyled screen (fixed
+> — `/chat-live`/`/host-panel` routes deliberately left alone, see report §3); an uncancellable
+> ~3.5min Train Now modal (added "Continue in background"); a stuck-file retry trap; no favicon +
+> a 404'ing `manifest.json`; all 7 of the audit's `BACKEND_URL`-fail-loud-guard bypass sites (now
+> all route through `ApiClient.postJson`); 3 onboarding walkthroughs silently breaking below
+> ~1000px width; keyboard-inaccessible primary navigation; a voice-recorder rewrite (was crash-prone
+> `dart:html`/`record`, now the same native MediaRecorder+WAV pipeline `chat_screen.dart` already
+> used for guests — same audio-quality bug class, host side had never been fixed).
+> **✅ Live-verified on the real staging site**, not just `flutter analyze`/`build` — logged in as
+> the existing QA test account via session injection, drove login, dashboard, the drawer, Host Chat,
+> dark mode, the Profile dialog, and a full real Train Now run including a real voice recording via
+> Chromium's fake-mic device. Cleaned up the one throwaway test property created for that run.
+> **✅ `/code-review` caught 4 real bugs** the audit missed: a voice-note "Undo" snackbar that could
+> silently overwrite a *newer* recording if re-recorded within the undo window; a mic-left-open
+> risk in the recorder if disposed mid-permission-prompt; a disposed-callback ordering bug in the
+> same file; and `PropertyDetailDrawer` still had the exact barrier-dismiss data-loss bug just
+> fixed for `ProfileDialog`, not applied there. All 4 fixed, verified, pushed (`3e23660`).
+> **🔴 New bug found by the founder live-testing 2026-09-15, added to `QUEUE.md`:** User (non-Dev)
+> mode's Add Property screen should show a single "Train Now" button, currently shows "Ingest"
+> instead — not investigated this session.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-14 continuation (**Walkthrough Fix 1 (pointer/notch) shipped and founder-verified live across all 4 panels, after 4 rounds of real bugs found via live testing, not just compiling — plus a full single-actionable-option audit/fix on the 9-step Guest-Link/Host-Chat sequence.** — `staging` @ `9ab4c34`, pushed across 4 commits (`aeba3ee`, `d09f36b`, `c797c2e`, `9ab4c34`). Frontend-only; Vercel auto-deploys, no manual deploy needed.
+> **✅ Fix 1 shipped correctly this time**: single-shape `Path` clip (rounded rect + tail cut into one edge) via a new opt-in `clipper` param on `GlassPanel`, deliberately avoiding the `ClipPath`+`BackdropFilter`+`CustomPaint` combo suspected of causing the prior session's underline regression — used only `ClipPath`+`BackdropFilter` (the same combo every other panel already used safely via `ClipRRect`). Confirmed via live browser testing (not just screenshots) across every panel; no underline bug recurred anywhere.
+> **🔴→✅ Real, structural bug found and fixed: dashboard Step 0's tip was rendered via a raw `Overlay.insert()`, in the same shared layer dialogs use for their own modal content** — so which one ended up "in front" depended on manually-managed insertion timing, not anything guaranteed, and it intermittently rendered undimmed on top of an open dialog. Root cause wasn't list-reconciliation (a stable-`ValueKey` fix was tried and reverted — didn't help, added complexity for nothing). Real fix: build Step 0's tip as a normal `Positioned`/`CompositedTransformFollower` inside the property card's own `Stack` (`clipBehavior: Clip.none` lets it hang below the fixed-height grid cell) instead of a separate Overlay — the same structural guarantee the card itself already had for free, since dialogs are strictly-ordered separate routes. Removed the `WalkthroughActivity` flag mechanism entirely (an earlier, fragile attempt at the same problem that depended on the dashboard happening to rebuild).
+> **✅ Single-actionable-option audit, founder-directed, Guest-Link/Host-Chat's 9 steps only** (Settings drawer explicitly excluded — informative-only, no clickthrough required): step 1 disables Cancel + highlights Generate Link; step 2 disables Done + highlights Open Host Chat and the links box; step 7 (Send/Resolve) now gates Resolve disabled+unhighlighted until Send is used, then hands off the highlight and enabled state together, and clicking Resolve now auto-advances the walkthrough instead of requiring a separate Next click.
+> **🔴→✅ Found + fixed a real, pre-existing, unrelated bug**: property card's action row (calendar/history icons) overflowed by 10px — confirmed via the unmodified code in a debug build (only visible in debug, release silently strips the overflow indicator, which is why it went unnoticed). Trimmed `_CardAction` padding 10px→5px.
+> **Process note — founder caught two wrong "it's ready" claims this session** before they were shippable: a pointer/target-box mismatch from an unrelated highlight-wrap change, and Step 0 rendering on top of the dialog. Founder's explicit standing rule going forward, reinforced hard this session: never say something is verified without an actual live browser check — screenshots from a *previous* round don't count as verifying the *current* state.
+> **Testing infra note**: `flutter run -d web-server` (DWDS debug) fails to render at all in this environment's headless Chromium (`CONTEXT_LOST_WEBGL`, app never mounts). Reliable alternative found: `flutter build web --debug` (or `--release`) served via `python3 -m http.server`, driven with Python Playwright using pixel-coordinate clicks (no DOM — CanvasKit renders to one canvas) and `page.route()` to mock `/api/guests` for reaching Host Chat without hitting the real backend (CORS-blocked from localhost). Worth reusing directly next time this kind of live verification is needed.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-14 (**Shipped Part 1 of a walkthrough-polish handoff (4 named panel bugs), then immediately reintroduced the historic yellow-underline text-rendering bug and had to revert on the same push cycle; Part 2 (pre-beta audit) never started.** — `staging` @ `d0ae24f` (revert is the real final state), pushed. Frontend-only; Vercel auto-deploys, no manual deploy needed.
+> **🔴→✅ CORRECTION, same session, caught by the founder within minutes of deploy:** the "final" state described below (commit `25d33c4`) added `ClipPath`+`BackdropFilter`+`CustomPaint` layering to the tip panel (for the single-shape pointer + backlit opacity). That combination retriggered the yellow-underline bug this project spent a full session removing panels to get rid of (`7e3d7bd`, see the 2026-09-11 entries below) — visible on the real deployed build almost immediately. **Missed it myself first**: saw yellow-underlined text in my own verification screenshot and dismissed it as a Playwright artifact instead of checking it against this file's own history. Reverted in `d0ae24f`: `walkthrough_tip_panel.dart`, `app_theme.dart`'s `glassTintHeavy`, and `property_card.dart`'s `_Step0Tip` are all back to the pre-`25d33c4` GlassPanel-based rendering (no pointer/notch, no backlit opacity) — kept the toggle/spacing/escalation fixes below since they're unrelated to rendering. **The pointer and opacity asks are therefore still open** — whoever picks this up next should treat them as unstarted, not "done differently," and should explicitly screenshot-check against the yellow-underline pattern before shipping anything that changes how these panels paint (BackdropFilter/ClipPath/CustomPaint combinations look like the actual trigger, not just showGeneralDialog proximity as previously theorized).
+> **Process failure #1, corrected mid-session, founder's own words: "instead of you running and doing what you interpret, you should ask first."** Rounds 1 and 2 of all 4 fixes were built and shipped based on this session's own reading of the (partially flawed) handoff prompt, without checking — round 1 got the replay-toggle requirement wrong (invented a second UI control nobody asked for) and both rounds' opacity/pointer fixes visually missed what the founder actually wanted. Round 3 went through a proposal step first (a design-options artifact reviewed before any code changed) and landed correctly. Apply this going forward for any open-ended UI/UX ask: restate understanding or mock it up before implementing, don't just build.
+> **✅ Final shipped state, all 4 fixes:** (1) **Replay toggle** — the single existing "Show walkthrough again" switch (no new UI) now resets both the per-property Settings-walkthrough flag and the global Guest-Link-walkthrough flag together; the dashboard's Step 0 hint stays visible until *both* walkthroughs are completed, not just whichever the host does first (`property_detail_drawer.dart`, `dashboard_screen.dart`). (2) **Connector pointer** — rebuilt as one continuous `Path` (rounded rect + a notch cut into one edge), clipped/blurred/tinted/bordered in a single pass, replacing an earlier two-piece version (separate triangle + panel) that always showed a seam no matter how closely its color was matched. New `WalkthroughBubble` widget in `walkthrough_tip_panel.dart`. (3) **Opacity** — panels were reading as translucent regardless of tuning; real root cause found (next bullet), fixed via `WalkthroughBubble`'s two-layer composition, tuned to "backlit glass, soft glow" per founder direction after reviewing 3 mocked-up options in an artifact first. (4) **"+1 more active" overlap** — was never actually about the walkthrough panel; a missing `SizedBox(height: 8)` in `property_card.dart` let the pill-overflow line render flush against the action-button row below it.
+> **🔴→✅ Real Flutter bug found, not just a calibration miss: `BoxDecoration` silently drops `color` whenever `gradient` is also set on the same decoration** (confirmed via web search against Flutter's own documented paint order, not just reasoning). `GlassPanel` (`glass_panel.dart`) sets both on every call, so its tint has never actually rendered anywhere in the app — every prior tuning pass on `glassTintHeavy` (0.90→0.97→0.96) was invisible; only the faint highlight gradient (~19%→0% alpha) was ever shown. This is a shared, app-wide widget, so it almost certainly affects other "glass" surfaces too (property cards, dialogs), not just walkthrough panels — **deliberately left unfixed everywhere except the new walkthrough-only `WalkthroughBubble`**, to stay inside this ticket's scope. Flagged in `## Pending` above as a real, separate follow-up.
+> **✅ Also fixed, approved mid-session:** Host Chat's escalation demo (`chat_live_dialog.dart`) never actually fired — `_wtTriggerEscalation()` guarded on `_conversationId == null`, which is never true since Guest Link's steps 1-2 always create a real conversation first. Fixed with a one-time `_wtEscalationShown` flag; found and fixed the identical wrong guard on two more spots in the same file (`_sendHostMessage`, `_resolveIssue`) that would have kept hitting the real backend otherwise.
+> **📋 Part 2 not started** — the founder's original ask also included a full pre-beta UX/bug/accessibility/Vercel-deploy audit (report-only, fixes only after founder approval), flagged as same-day time-sensitive when requested. See `## Pending` above.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-11→12 continuation (**Finished the post-training walkthrough rebuild — Part C (Guest Link dialog + Host Chat, 9 combined steps) built, and two real docking bugs found + fixed via live verification. Parts A/B/C are now all complete and shipped.** — `staging` @ `25ffdc2` (feature) + this docs commit, pushed. Frontend-only change; Vercel auto-deploys on push, no manual deploy or backend redeploy needed.
+> **✅ Part C built**: steps 1-2 in `generate_guest_link_dialog.dart` (prefills a "Test walkthrough" guest name, docks a tip panel beside the dialog, advances on a real Generate Link call), steps 3-9 in `chat_live_dialog.dart` (header/links/mode-toggle highlights, an escalation demo, a drafted-reply demo). Same `Overlay` + `ValueListenableBuilder` + `WalkthroughTipPanel`/`WalkthroughHighlight` pattern as Part B — no new widgets needed. Also fixed the known `active: false` hardcode bug in `chat_live_dialog.dart`'s resolve-button highlight (was never wired to `_wtStep`).
+> **✅ Escalation/reply/resolve demo (steps 6-7) is entirely local, by design.** No real conversation exists yet at that point in the flow (the guest hasn't messaged), so `_wtTriggerEscalation`/`_wtPrefillReply` inject fake messages into local state only — no backend/DB writes. The real Send and real Mark Issue as Resolved buttons both got a matching local-demo branch (guarded on `_conversationId == null && _wtStep != null`, so real usage is completely unaffected) so the whole demo is genuinely interactive without touching a real booking's data.
+> **🔴→✅ Two real bugs found via live Playwright verification, not assumption.** (1) `generate_guest_link_dialog.dart`: `CompositedTransformTarget` wrapped the *entire* `AlertDialog` — `Dialog`'s own `build()` internally expands to fill the whole route (to center its card), so the target's box was the full screen (confirmed via debug instrumentation: `Size(1600,1000)` at `(0,0)`), anchoring the docked panel off past the viewport edge, permanently invisible. Fixed by wrapping just `content` instead. (2) `chat_live_dialog.dart`: the dialog centers at up to 1320px wide, leaving too little side margin at common desktop widths (~140px at a 1600px viewport) to dock a 300px panel without it running off-screen. Fixed by shrinking + left-aligning the card while the walkthrough is active, freeing real room on the right to dock into.
+> **✅ Verified all 9 steps live**, including the two real-button demo actions (Send, Mark Resolved) and seen-flag persistence (`WalkthroughPrefs.isGuestLinkWalkthroughSeen()` correctly prevents replay on a fresh dialog in the same session). No trace of the original giant/red/bold/underlined text bug anywhere — confirms it really was specific to the old inline-docked implementation removed in `7e3d7bd`, not the `Overlay`/`WalkthroughTipPanel` pattern itself.
+> **Testing note for next time:** the real staging backend's CORS allowlist only permits the actual Vercel origin, so a local `python3 -m http.server` test build can't call `/api/guests` directly — worked around via Playwright route interception (mocks the response) to drive the walkthrough end-to-end without a real booking. Two non-obvious gotchas if reusing this: route handlers only intercept while the *same* Python process stays connected (they don't survive a CDP reconnect against a persistent externally-launched browser, so re-register them on every reconnect), and a click's own async network call can race past the script's own disconnect unless it waits ~2s before exiting.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-11 continuation (**Diagnosed and fixed graphify's doc-semantic pipeline end-to-end, then split it out of wrap-up into its own deterministic/cron-ready script — no app code touched, no deploy.** Docs only: `CLAUDE.md` (this project + root), new `_scripts/graphify_semantic_pipeline.sh`, new `_protocols/GRAPHIFY_SEMANTIC_PIPELINE_PROTOCOL.md`.
+> **✅ Corrected a false "Windows vs WSL" theory.** A parallel session (and this one, initially) concluded `/graphify` was unusable from a Windows-side Claude Code session because the `Skill` tool couldn't auto-discover it — wrong. Verified live: the `SKILL.md` file is a plain file, fully readable via its WSL/UNC path from any session, same pattern as every other `_skills/`-housed AG skill not mirrored to Windows. No file copy was needed; the fix was reading the file directly instead of treating the capability as gone.
+> **🔴→✅ Found the real cost bug: following `SKILL.md` by hand silently defaulted to burning Claude Code session credits.** graphify's own skill logic uses Gemini only if `GEMINI_API_KEY`/`GOOGLE_API_KEY` is visible in-process — otherwise "the host agent is the LLM." A Gemini key exists in this project's `.env` but was never exported into the shell graphify actually ran in, so it silently fell back to dispatching a Claude subagent, burning ~30% of a session's credits before the founder caught and stopped it.
+> **🔴 Two separate OpenRouter API key exposures this session, both rotated immediately.** A broken `sed` capture (`&` matched the whole line, not a redaction) printed the full key once; a `tail -c` raw-byte dump printed a trailing fragment of the replacement key a second time. Root cause both times: constructing shell commands that touch secret file content directly instead of length/structure-only checks. Standing rule going forward: never inspect a secrets file's raw bytes/content, length-checks only.
+> **✅ Root-caused the actual extraction failures — not model quality, contrary to the working assumption for most of the session.** Two real bugs, found via live debugging after the founder pushed back on "just try another model": (1) graphify's shrink guard discards an *entire* run's progress if the result nets fewer total nodes than what's saved, even when most files succeeded — `--allow-partial` is required or partial wins get thrown away every time; (2) the OpenAI-compatible backend defaults to `max_completion_tokens: 8192` (`graphify/llm.py`), too low for information-dense docs regardless of raw file size (`lessons.md`, 18KB, failed as often as `CONTEXT.md`, 220KB) — raising `GRAPHIFY_MAX_OUTPUT_TOKENS` to 65536 took the-ingestor from 5 stuck files to 0 fully-failed, same model throughout.
+> **✅ Live-tested 4 OpenRouter models before landing on a paid one**, at the founder's explicit preference to spend cents rather than fight free-tier instability: `openai/gpt-oss-20b:free` (slug retired, 404), `google/gemma-4-31b-it:free` (rate-limited upstream, shared pool saturated even at concurrency=1), `nex-agi/nex-n2.5-mini:free` (completed but low quality — later understood to mostly be the two bugs above, not the model), `nvidia/nemotron-3.5-lightning:free` (~7 tokens/sec per OpenRouter's own stats, killed after 3 hours with zero output). Landed on `google/gemini-2.5-flash-lite` (paid, ~$0.10/$0.40 per M tokens) — computed real costs for 11 candidate models against this project's actual measured token volume before choosing, not picked arbitrarily.
+> **✅ Clean result:** 16/16 docs extracted, graph at 2,907 nodes / 4,362 edges, Obsidian vault re-exported (3,156 notes, 356 stale pruned), `GRAPH_REPORT.md` regenerated (249 communities — names not yet re-labeled by the LLM, cosmetic). Real total spend verified via OpenRouter's own API: $1.41 of $10 credit, mostly one-time debugging cost now baked into the protocol so it shouldn't recur.
+> **✅ Split the pipeline out of wrap-up for good.** Wrap-up now only runs `graphify update .` (free, code-only, unconditional). The semantic pass + Obsidian export is a separate deterministic script (`_scripts/graphify_semantic_pipeline.sh`), intended for a future daily cron job, carrying the validated model/settings and the full debugging history so nobody re-diagnoses this from scratch. New standing rule: any live session asked to run the pipeline must ask the founder "OpenRouter or Claude?" first — Claude mode is available but only with explicit go-ahead, since it bills session credits.
+> **✅ Also fixed:** graphify's installed Claude skill updated 0.9.50 → 0.9.57 (was warning on every run).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-11 continuation (**Closed out the multi-session yellow-underline mystery — not by fixing it, but by removing the three walkthrough panels it only ever affected, after a full session of live debugging found no root cause** — `staging` @ `7e3d7bd`, pushed.
+> **🔴→✅ Yellow underline: ruled out everything, found nothing, removed the affected code instead of chasing further.** This session's live debugging (founder-driven, direct testing rather than more code theorizing) ruled out, in order: browser/OS extensions and accessibility tools (reproduced identically on two separate physical machines and in incognito; `chrome://accessibility` showed zero assistive technology attached to the page); any app-level `TextStyle`/`DefaultTextStyle` cause (a completely bare, unstyled `Text()` widget picked up the exact same bug); `BackdropFilter`/blur (set `blurSigma: 0` on the panel, bug persisted); tint/contrast (the broken panel used byte-for-byte the same `GlassPanel` config as the clean Step 0 tip); `RepaintBoundary` layer isolation; and "any click" as a trigger (an unrelated switch elsewhere on the same screen never tripped it). The one real, reproducible pattern the founder's own bisection surfaced: it only ever hit the Settings drawer, Guest Link dialog, and Host Chat panels — never the dashboard's Step 0 tip or the Add Property walkthrough, which are structurally similar but positioned differently (bare `Overlay.insert`/`CompositedTransformFollower` for Step 0; plain inline docking for Add Property; `showGeneralDialog`-nested for all three broken ones). Root cause never identified. Founder's call: stop debugging, remove the three broken panels, rebuild from scratch with that structural lead in mind.
+> **✅ Removed the three broken panels + their state machines**, kept everything that demonstrably worked: the purple glow/highlight effect (`_wtHighlight()`) in `property_detail_drawer.dart` and `chat_live_dialog.dart` is left fully intact but dormant (`_wtStep` never gets set to non-null anymore, ready to reconnect); the "Show walkthrough again" toggle stays visible on Settings but is now a no-op; Add Property's walkthrough and the dashboard's Step 0 tip are completely untouched. Also removed Host Chat's scripted demo behavior (fake escalation message injection, pre-filled reply) that only existed to drive the walkthrough. Cleaned up `walkthrough_prefs.dart`'s now-dead Part B/C methods, keeping only what Part A still uses.
+> **✅ Wrote `walkthrough.md`** (project root, new) — full copy (headers/bodies/🤖-emoji format) and highlight targets for every removed step (Settings' 5, the combined Guest Link + Host Chat 9-step sequence), plus the structural lead above, as the brief for whoever rebuilds this. Empty `walkthrough_reference/` folder also created at the founder's request, for reference screenshots (Claude has no way to save images pasted into chat as files — founder adding them manually).
+> **✅ Verified before commit:** `flutter analyze` across the whole project (0 errors, only 3 pre-existing unrelated warnings) and a full `flutter build web --release` (succeeded). Gave the founder a complete priming prompt for a fresh session to do the actual rebuild, referencing `walkthrough.md`, the two working examples, and the structural lead.
+> **🟡 graphify's stale-chunk-files guard recurred** (2558 vs 2611 nodes this run) — left unforced again, same standing item.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-11 (**Fixed the CONTEXT.md/CLAUDE.md wrap-up drift — no code touched, no deploy** — the wrap-up protocol's own instructions had described a `## Accomplished` heading that never existed in this file (traced to the 2026-08-19 reflip-workflow retrofit, never reconciled against this project's actual prepend-style log) and a `## Pending`/`## Unresolved Decisions` block that was never built at all.
+> **✅ Root-caused via direct file audit, not assumption.** Confirmed by heading-grepping the full 933-line log: the real pattern since project creation (2026-04-14) has always been prepend `**Last Session:**`/`**Prior Session:**` blocks; carry-forward between sessions happened only as prose ("Still open:", "🔴 UNRESOLVED") re-stated inside each new entry, with no dedicated summary. Cross-checked reflip (has real `## Accomplished`/`## Pending`/`## Unresolved Decisions`, correctly used, but its own `## Pending` has bloated into a strikethrough-history stack since session 17 rather than staying small) and root (created 2026-09-03, after the retrofit, correctly structured — no fix needed there).
+> **✅ Built a real `## Pending`/`## Unresolved Decisions` block** at the top of this file, seeded from the actual current open items (cross-checked against `_Context/session-digest.md`, which was more current than this log's own top entry — see below). Deliberately does NOT duplicate `QUEUE.md`'s feature/bug backlog; scoped to session-continuity state only.
+> **✅ Rewrote `CLAUDE.md`'s Stack/Data Schema** (previously `[Define after BLAST Blueprint phase]` placeholders, months stale) with the real architecture snapshot, plus an explicit maintenance rule: update in place only when a real architectural/schema change ships, never append-and-accumulate.
+> **✅ Rewrote `CLAUDE.md`'s Session Start / Session End sections** as a literal, ordered checklist instead of soft "refresh"-style prose: `## Pending` now has a hard ≤15-line ceiling enforced by pruning (delete resolved lines outright, never strikethrough-and-keep — reflip's actual failure mode); `session-digest.md` cap bumped 3→5 (founder runs 2-3 parallel sessions that can land close together, and 3 was proven this session to have already dropped one — see below).
+> **✅ Built `_scripts/wrap_up.sh`** — a deterministic structural check (heading presence, `## Pending` line count, digest entry count, CLAUDE.md placeholder text) run as the last wrap-up step, so compliance is a script PASS/FAIL, not self-assessment. Content quality (what to write) still can't be scripted — that stays a judgment call.
+> **🔴 Caught live, mid-session:** this file's own top entry was stale relative to `_Context/session-digest.md` — a 2026-09-10→11 session (walkthrough replay toggle, retrain-trigger fix, underline investigation) had written its digest entry but never got a `**Last Session:**` block here, until a parallel session wrote it in place while this session was still in conversation. Did not backfill it myself (not this session's work to reconstruct) — confirms the exact gap this session exists to close, caught in the act rather than theorized.
+> **🟡 graphify's stale-chunk-files guard recurred** (2582 vs 2611 nodes this run, was 2579 last time) — left unforced again, same standing item.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-10→11 continuation (**Shipped the walkthrough replay toggle + root-caused and fixed the stuck-at-"Queued" retrain bug + deepened (but did not resolve) the yellow-underline investigation** — `staging` @ `6835304` (toggle, committed+pushed); retrain-trigger + isDev fixes implemented and verified as far as locally possible, **NOT YET COMMITTED** as of session end, awaiting approval.
+> **✅ Walkthrough replay toggle shipped.** New "+ Show walkthrough again" switch in the Overview tab (`walkthrough_prefs.dart`, `property_detail_drawer.dart`), placed under English welcome per founder request. Reuses the existing per-property + global guest-link "seen" flags instead of new state — turning it on clears them and jumps to step 1; its value is just `_wtStep != null`, so finishing/closing the walkthrough turns it off by itself. Verified live via Playwright (both directions, plus the dashboard's Step-0 hint correctly reappearing on drawer close).
+> **✅ Stuck-at-"Queued" retrain bug root-caused and fixed, not yet committed.** Dropping a file into an already-trained property's "Add New Files" only uploaded it — the guided banner (`setup_status.dart`) never covered post-training statuses and the manual retry button is Dev-only, so nothing in User mode ever called ingest. Added a "New files added / Update Training" banner wired to the same existing `_startIngest()` call already used for pre-training retries. Also fixed: the drawer's Files-tab edit button never passed `isDev`, silently downgrading Dev hosts into User mode. Verified live that the banner appears correctly and the button calls the real staging backend URL; full completion couldn't be confirmed locally (CORS blocks the ad-hoc localhost test origin — not a fix issue).
+> **🔴 STILL UNRESOLVED — yellow underline, but new hard evidence.** A recursive DOM+shadow-root+aria search proved the walkthrough tip text is 100% canvas-rendered pixels (zero real text nodes anywhere, exactly one `<canvas>` element) — ruling out real CSS `text-decoration` and any browser extension (both need real DOM text to attach to). Live testing disproved a `Text` vs `Text.rich` hypothesis. New founder-provided evidence: the underline starts clean and spreads to totally unrelated widgets (chat bubbles, sidebar captions) the longer the walkthrough continues, in both Chrome and Brave — the signature of a system-wide tool, not app code. Leading, unconfirmed theory: a Windows-level writing assistant (e.g. Grammarly's desktop app, which hooks in via OS accessibility APIs, not per-browser extensions) — this session's own Playwright repro runs inside WSL2/Linux and can't be reached by anything Windows-side, so it isn't evidence either way. **Founder feedback: this session chained too many speculative hypotheses instead of stopping at the hard evidence and handing off — next session should verify the Grammarly-desktop theory directly before any more code-side digging.**
+> **🟡 Secret exposure, self-caught, deferred.** A `cat`+`sed` redaction on `_tests/fixtures/.env.test` only masked the password field, printing `GEMINI_API_TEST_KEY`/`VERCEL_API_TOKEN`/`VERCEL_BYPASS_TOKEN`/`TELEGRAM_BOT_TOKEN_TEST`/`WHATSAPP_ACCESS_TOKEN_TEST`/`FIRECRAWL_API_KEY_TEST` in full to this session's transcript. Logged to `QUEUE.md`; founder deferred rotation, treating it as local-session-only exposure for now.
+> **Also fixed, local-only:** `frontend/.env`'s `BACKEND_URL` was stale (pre-Cloud-Run-migration Render URL) — gitignored, local-machine-only, never affected the real deployed app.
+> **Still open:** commit/push the retrain-trigger + isDev fixes; the underline bug (see above); a structured UI/UX skill pass over the whole walkthrough feature (not started, lowest priority); rotating the newly-exposed test credentials plus the still-outstanding Firecrawl key; graphify's code-graph refresh hit a stale-chunk-files guard (2579 vs 2611 nodes) and was left unforced, needs investigation before the next `--force`; the standing "has the founder retried training since `44cbfc1`" question, still unconfirmed.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-10 continuation (**Health Check Protocol: fixed the blocked Gemini smoke checks (root cause was a dead credential, not a real Gemini outage) + added a Run Log so the protocol doc itself stays stable** — no app code touched, no deploy; changes confined to `_tests/` and `QUEUE.md`, **NOT YET COMMITTED** as of session end, awaiting approval.
+> **✅ `check_firecrawl` reconfirmed inside a full combined run** (it had only been unit-tested standalone by the prior session).
+> **✅ Root-caused and fixed the blocked 4 Gemini smoke checks.** They used `GEMINI_API_TEST_KEY` (AI Studio Developer API, free tier — 5rpm/20rpd), which repeated runs exhausted, producing flaky pass/503/429 with no way to tell whether Gemini itself was ever actually degraded. Verified live via `gcloud run services describe alfred-backend-staging` that staging has **never had its own Gemini API key** — it's been on Vertex AI/ADC since Batch 6 (2026-07-16), same transport as prod; `GOOGLE_GENAI_USE_VERTEXAI=true` is set, no `GEMINI_API_KEY` env var exists. Tried prod's own fallback `GEMINI_API_KEY` secret (Secret Manager, unprefixed) next — also dead, `429 "prepayment credits are depleted"` (AI Studio's separate prepay billing, not GCP credits — the same gotcha as the 2026-07-12 lesson). **Switched all 4 `check_gemini_*` functions to Vertex/ADC** (matches what staging + prod actually run, no rate cap). Verified live: full 17-row combined run, 16 pass + 1 legit skip (`orphaned_test_data`, needs a separate test-only Supabase key not yet configured). **This also resolves the standing "was Gemini really degraded" question from the prior session — debunk it, it was free-tier throttling, not an outage.**
+> **✅ Built `_tests/health/RUN_LOG.md`** — a dated run history (index table + full entries, mirroring `lessons_index.md`'s pattern) kept as its own file specifically so `HEALTH_CHECK_PROTOCOL.md` (the 20-row design doc) never has to grow to hold it. Added a one-paragraph pointer in the protocol doc's new §6. The parallel session that built the original 16 scripted rows already appended its own entry to this file.
+> **Noticed, not fixed:** `CONTEXT.md`'s own "Gemini: Vertex AI (prod) vs AI Studio (staging)" reference section (below, "read before touching billing") is stale — still describes staging as API-key-based, superseded by the same Batch 6 change this session had to verify from scratch via live `gcloud`. Doc-staleness sweep candidate.
+> **Still open:** `--env prod` wiring for `run_health_check.py` (backend/scraper URLs only now — the Gemini transport is already prod-shared); the doc-staleness sweep as a periodic mechanism; Firecrawl key rotation; and the standing top-priority ask — **has the founder retried training (Santa Prisca/Dos Rios/a fresh Bungalow) since `44cbfc1`?** Still unconfirmed.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-10 continuation (**Founder-driven live QA pass on the 2026-09-09 post-training walkthrough — found 2 real bugs (a 500 crash + a tooltip overlap) plus 3 polish fixes, all reproduced live via Playwright before shipping, closing the "never opened it in a browser" gap that caused them** — `staging` @ `85aba34` (2 commits: `a7a103a` crash+overlap fix, `85aba34` docked panel+shadow+contrast); Cloud Run `alfred-backend-staging` redeployed to rev 00011; Vercel auto-deployed both.
+> **✅ Real 500 crash fixed, verified against real data.** Founder hit `Error 500: 'str' object has no attribute 'get'` clicking Generate Link on a real trained property ("Bungalu"). Root-caused by reproducing it directly against staging data with a local script (not guessed): `welcome.py`'s `_extract_country()` assumed `master_json.location.address` is always a nested object, but the freeform merge call — deliberately schema-less — had stored it as a plain address-line string for this property. Fixed with `isinstance` guards; the reliable `location.country` field (from the universal-fields work) still resolves correctly as a fallback.
+> **✅ Step 0 tooltip overlap fixed.** `property_card.dart`'s `CompositedTransformFollower` never set `targetAnchor`/`followerAnchor`, so it positioned the tip below the target's *top* edge instead of its *bottom* — guaranteed overlap with the +Guest/Settings buttons. Confirmed on staging via Playwright before and after.
+> **✅ Real shared-component bug found: `GlassPanel`'s shadow was clipped.** Its `BoxShadow` was painted *inside* the `ClipRRect` needed for the backdrop blur, so the shadow meant to separate every "glass" panel from its background was silently cut off app-wide — the actual reason walkthrough panels looked flat/blended into dialogs, not a per-screen styling miss. Fixed by moving the shadow to an outer container.
+> **✅ Guest-link walkthrough tip restructured** — was embedded inside the "New Guest Link" dialog's own content (read as native dialog copy per founder complaint); now a docked side panel matching the drawer/chat-live pattern. A naive `Row`-wrap first attempt visually detached the panel from the dialog (AlertDialog's internal `Align` expands to fill whatever bounded height it's handed inside a Row) — worked around by building the docked-mode chrome by hand, same approach `ChatLiveDialog` already used, only for this walkthrough branch.
+> **✅ Contrast bump** on all 5 walkthrough tip surfaces — switched from `glassTintStrong` to the already-existing but unused `glassTintHeavy` token, after founder feedback that the tips were hard to read against variable backgrounds.
+> **🔴 UNRESOLVED — yellow underline on walkthrough tip text only.** Reproduced independently in the founder's real browser AND a clean, extension-free automated Playwright browser, ruling out an initial browser-extension theory (floated and retracted mid-session). No matching `TextDecoration`/`decorationColor` code found anywhere in the frontend. Only ever affects the walkthrough tip widgets' own text, never sibling UI in the same screenshot. Next session: test whether right-clicking the underlined text offers Chrome's "Translate" option before further code-side digging.
+> **🟡 New bug found, not fixed, logged to `QUEUE.md`:** dropping a file into Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain ever triggers.
+> **Process correction, worth remembering:** mid-session, reached for a generic browser-automation MCP instead of this project's actual Playwright setup (got blocked by a safety classifier, caused real confusion) and briefly over-built a local web-server response to a request that just wanted a screenshot. Verifying locally via `flutter build web` + Playwright *before* commit/push/deploy is now the standing approach here, not deploy-then-check.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-10 continuation (**Found + fixed the ACTUAL training blocker (a second deprecated Gemini model, missed by the prior session's own migration) + built a 20-item QA Health-Check Protocol (16 rows scripted, verified live) + revived `bug-backlog.md` (48 real bugs) + a full stale-doc sweep** — `staging` @ `5ab0f97` (2 commits: `44cbfc1` the actual fix, `5ab0f97` QA protocol + bug ledger + doc sweep); Cloud Run `alfred-backend-staging` redeployed once, rev 00010.
+> **✅ RESOLVED — the top-priority handoff from the prior session.** The prior session's ingest-resilience fixes (fingerprint persistence, stall retries) were real and correctly built, but did NOT cause the founder's "still can't train a property" report — that was a separate, undiscovered bug. Root cause, found via live Cloud Run logs (not guessed): `backend/services/gemini_client.py` (every per-file ingest Vision/PDF/audio call) was missed in the 2026-09-08 model migration and stayed on deprecated `gemini-2.5-pro`. Every ingest call since 2026-09-09 had silently stalled through all 4 retries with **zero successes logged anywhere** — confirmed by grepping every "gemini: succeeded"/"giving up" log line since that date. Fixed: migrated to `gemini-3.8-flash` (the same model already proven live via merge/scraper), and found + fixed the identical gap in `gemini_messenger.py` (chat + escalation summarizer) and the test runner's LLM judge. Deployed, verified live. Soft-deleted the stuck `Bungalow` test property (`c91c80cb-...`) so it can be re-added fresh. **Still needs the founder's own real-world retry** on Santa Prisca/Dos Rios/a fresh Bungalow to confirm end-to-end — not yet done as of session end.
+> **✅ Built `_tests/HEALTH_CHECK_PROTOCOL.md` + `_tests/health/run_health_check.py`** (founder request, extensive multi-turn brainstorm first — a table of 20 failure modes across AI/infra/database/frontend/auth/integrations, each tied to a real past incident, rated by severity with a mitigation). **16 of 20 rows scripted and verified live against staging this session**: model-consistency grep, Cloud Run health/traffic/min-instances, all 4 Gemini call sites (ingest/merge/chat/summarizer), an RLS anon-read probe, a deployed-Supabase-key audit (guards the 2026-07-13 service_role leak — fetches `/assets/.env` directly off the live Vercel deploy, much more reliable than regex-scanning the JS bundle), Vercel build-state, Telegram webhook health, WhatsApp token health, and a Firecrawl smoke scrape. Real credentials pulled from Secret Manager (Telegram + WhatsApp staging test tokens) and from `_mcp_profiles/global.json` (Vercel PAT — an initial too-strict regex check wrongly concluded none existed; found on a second pass) into `_tests/fixtures/.env.test`. **Not wired:** row 8 (migration drift) and row 13 (Auth URL drift) run via the Supabase MCP directly instead of a standalone script; row 17 (doc staleness) is deliberately NOT a mechanical script — needs judgment, meant as a periodic agent sweep, no scheduling mechanism built yet; prod support exists in the script's `--env` flag but isn't really wired (a mid-session attempt at a separate prod credentials file was reverted, unfinished, once the founder called to stop) — also, prod's Gemini checks need a Vertex-AI-transport variant since prod uses service-account ADC, not an API key like staging.
+> **✅ Revived `_tests/bug-backlog.md`** — was stale/abandoned since 2026-06-02 (only 6 entries) despite dozens of real bugs found and fixed since. Now **BUG-001 through BUG-048**, extracted from the full `CONTEXT.md` history via a dedicated research pass, each entry root cause + fix + commit, cross-referenced to health-check rows and QA scenarios that guard against recurrence. BUG-001 through BUG-005 stay genuinely open, with notes on which are likely moot post-Cloud-Run-migration.
+> **✅ Full stale-documentation sweep** (a second dedicated research pass): `ROADMAP.md` (3 items marked "not scoped yet" that had actually shipped weeks ago), `scenarios.md` B8 (described the old dual-list UI), a stale retry-behavior comment in `ingest.py`, stale "Files to Ingest" comments in `drop_zone.dart`/`voice_recorder.dart`, a stale Render reference in the QA runner's README, `.env.test.example`'s dead Render/old-Vercel URLs, and a whole stale "Stack" line + several "Claude API" mentions in `_Context/INGESTOR_REQUIREMENTS_DOC.md` (gitignored, fixed locally, not committed). Deleted `frontend/lib/screens/ingest_screen.dart` — confirmed dead (zero imports anywhere), superseded by `add_property_screen.dart`/`edit_property_screen.dart`.
+> **🔴 Two real secret-exposure near-misses this session, both self-caught, one flagged by the founder.** A `.env.test` file-write triggered a diff notification that displayed a raw Telegram token in the tool transcript; separately, a `Read` tool call on a file containing only a Firecrawl key displayed it directly in the transcript — the founder caught this one and it's recommended for rotation. Founder's explicit correction: watch for exposure through tool-generated diffs/notifications, not just typed text.
+> **🟡 Live, unrelated finding — do not treat as confirmed fact:** `GEMINI_API_TEST_KEY` (this project's dedicated QA key) is on Google's **free tier** (5 req/min, 20 req/day) — repeated health-check runs this session exhausted it (`429 RESOURCE_EXHAUSTED`). An earlier read of "Google is having a live outage" (based on three consecutive 503s) should be treated as unconfirmed — could easily have been the same free-tier throttling instead. Needs a paid QA key or much sparser smoke-test runs to get a clean read.
+> **🟡 Found, not investigated:** a parallel session (or the founder directly) was concurrently editing this exact working directory during this session — `backend/services/welcome.py` and `frontend/lib/widgets/property_card.dart` picked up real-looking uncommitted fixes this session did not make; `frontend/web/guide.html` and `skills/web-design-guidelines` (dirty at session start) reverted to clean with no new commit to explain it. Left both untouched, not committed here — founder confirmed a parallel session is plausible.
+> **Founder feedback this session, apply going forward:** don't declare "done" while gaps remain — give an explicit DONE/PENDING accounting before proposing any commit, every time, not just when asked. Don't silently decide a tradeoff and only mention it if asked ("I didn't want to pull tokens without asking, so I didn't") — ask in the same turn instead.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-09→10 (**Fixed the real ingest/retry failure loop the founder hit live-testing the prior session's Dev/User split, plus a round of Train Now UX fixes and a schema-consistency fix for `master_json`** — `staging` @ `216f9d8` (3 commits: `f973c3f` ingest resilience + UX, `bbb97c3` guide.html restructure, `216f9d8` universal fields); Cloud Run redeployed twice (`alfred-backend-staging` rev 00008 then 00009).
+> **🔴 UNRESOLVED, carries into next session as top priority:** despite everything below being individually verified working (live tests, a real end-to-end `/api/merge` call, Playwright checks), the founder reports **still being unable to get a single property fully trained on staging** as of the end of this session. This directly contradicts this session's own successful live tests — next session should NOT assume the fixes below are sufficient; start by getting concrete specifics (which property, what's on screen, when) and pulling real logs/DB state rather than re-deriving from this summary.
+> **✅ Root-caused and fixed the actual stuck-forever/retry-loses-everything bug** (`backend/routers/ingest.py`, `services/genai_factory.py`, `services/gemini_client.py`, `services/file_processor.py`). Live-debugged a real founder-hit failure (property `c91c80cb-...`, "Bungalow"): confirmed via Cloud Run logs that Cloud Run's 300s default request timeout was killing in-flight `/api/ingest` requests before the app's own exception handlers could run, and — the real root cause — `file_fingerprints` was only persisted **once, at the end of the whole file loop**, so any interruption (that 300s kill, or anything else) silently lost progress on files that had already succeeded, forcing every retry to reprocess everything from scratch. Fixed: fingerprints now persist immediately after each file succeeds; Gemini calls in `genai_factory.generate_with_retry` now retry on a genuine stall (20s/attempt, not just on 429 — previously a plain stall got zero retries and a single 90s death); a property with some per-file failures no longer blocks entirely (`Ingested` as long as *anything* usable exists, not only when `error_count==0`) — failed files stay visible and get retried on the next Train Now instead of freezing the property forever. Root cause of the two specific files (`Kitchen.png`, `terrace-bungalow.png`) that kept failing: **confirmed via direct re-testing that it was transient Gemini-side latency, not a code bug or file issue** — the identical file/prompt went from timing out on all 4 attempts to succeeding in 7.9s on a later run. Also added image downscaling (>1600px long edge → JPEG resize) to `file_processor.py`, mirroring the scraper's own photo-downscale fix from the prior session — real, useful, but not what was actually causing these two failures.
+> **✅ Train Now UX fixes** (`frontend/lib/screens/add_property_screen.dart`, `edit_property_screen.dart`, new `widgets/training_wait_dialog.dart`): collapsed the confusing dual "Files to Ingest"/"Files Ingested" lists into one list whose status updates in place, in both Add Property and Edit Property (Edit Property's version doesn't auto-clear after a run either, so per-file failure status stays visible instead of vanishing). Added the missing 🤖 icon to the Add Property walkthrough panel (every sibling panel already had it). Added a "Alfred is learning your property" wait dialog with a rotating "Did you know" fact card (Alfred capabilities + general hosting knowledge, no fabricated stats — real stats deferred to `QUEUE.md`) for the Train Now / Retry / Merge wait, modeled on Reflip's own `ProcessingScreen.tsx` pattern but restyled to this app's dialog convention; wired into both screens' ingest+merge spans. Restyled the "What trains Alfred best" tip card from purple to green to match `guide.html`'s existing convention.
+> **✅ Restructured `guide.html`** from one long linear page into 4 tabs — Add Property / Property Enhancement / Guest Experience / FAQ — replacing the parked "AI assistant for host support" idea (founder decision this session: no-go, FAQ instead). All 4 embedded screenshots preserved byte-identical (moved by line-range only, never loaded into context); tab switching, keyboard arrow nav, and the lightbox all verified live with a real Playwright test (zero console errors). Caught and fixed one real bug introduced by the restructure itself: a "go back to Step 3" reference that used to point at the upload step now pointed at the wrong thing once the steps split across tabs.
+> **✅ `master_json` universal-fields fix** (`backend/services/gemini_merge_resolve.py`) — the founder's own explanation for why `master_json` was built freeform (property-specific quirks always need somewhere to go) is preserved entirely; this only guarantees a small fixed set of ~12 fields (identity, location, capacity, check-in/out, house rules, wifi, static pricing extras, host/emergency contact) exist under consistent canonical names, motivated by a real finding: 30+ different top-level key names for the same concepts across ~10 real trained properties. **Live-tested and ruled out** a single-schema approach: Gemini's `additionalProperties` (needed to mix required fields + freeform extras in one call) errors on the Developer API transport this app uses ("only supported in Gemini Enterprise Agent Platform mode"), and a schema with `required` fields but no `additionalProperties` silently **drops** anything not in the schema (confirmed live — a hot tub detail and a parking note vanished from real output). Landed on two independent Gemini calls per merge (existing freeform call completely unchanged + a new small strict-schema call), deep-merged in Python — fail-soft if the new call errors. Also deliberately did **not** mark the 12 fields `required` in the schema itself (would force Gemini to hallucinate a value when a files-only property genuinely has no source data for one) — instructed "omit if not found" instead, verified live against a synthetic sparse-data case that it actually omits rather than guessing. Verified against 3 real staging properties (dry-run, no writes) + one live end-to-end call through the deployed `/api/merge` endpoint. This unblocks the training-completeness gauge (`QUEUE.md`) but the gauge itself is not built yet.
+> **QUEUE.md**: closed out "AI assistant for host support" (decided: no-go, FAQ instead) and "Restructure guide.html" (shipped); added and closed "add real stats to the wait popup" is still open (deferred, deliberately avoided fabricating stats this session).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-09 (**Dev/User account split + post-training walkthrough (Parts A/B/C) + photo-triage scraper fix, ALL shipped to `staging` and deployed — plus a real pre-existing bug found and fixed via live E2E testing** — `staging` @ `40c0876` (2 commits: `ecd2123` feature, `40c0876` bugfix); Cloud Run redeployed twice (`alfred-scraper-staging` rev 00004, `alfred-backend-staging` rev 00007).
+> **✅ Whole-webapp Dev/User split.** New `host_profiles.is_dev` (migration `2026-09-09_host_is_dev_flag.sql`, applied to staging; prod deferred to the eventual merge) — `sans.lighthouse@gmail.com` flagged Dev, everyone else defaults User. User mode hides Master JSON / raw "Extracted Knowledge" / separate Ingest+Merge buttons across Add Property, Edit Property, and the drawer's Knowledge tab; "Train Now" auto-chains ingest→merge (still stops for real conflict resolution — verified the questionnaire path is untouched). Files tab folds into an Overview-tab file-count card + "Manage" button (founder picked this over an always-visible list, after reviewing both in an Artifact). Dev mode unchanged everywhere.
+> **✅ Post-training walkthrough, User-mode only** (`walkthrough_prefs.dart`, new — centralizes the SharedPreferences key scheme so 4 files can't drift). **Part A**: dashboard Step-0 tooltip anchored to the +Guest/Settings buttons via `CompositedTransformFollower` (GridView cells are fixed-height, so an inline tip would've overflowed — this was the one piece needing a pattern not already in this codebase). **Part B**: 5-step docked panel inside `property_detail_drawer.dart`, same `AnimatedContainer` highlight + `Scrollable.ensureVisible` pattern as the existing Add Property panel. **Part C**: 9-step interactive walkthrough spanning `generate_guest_link_dialog.dart` + `chat_live_dialog.dart` — pre-fills a real "Test walkthrough" guest link, real Send/Resolve actions against the real backend; the scripted escalation demo itself is local-only (never written to the conversation) since forcing a real AI-judged escalation on demand isn't reliable — the auto-switch-to-Intervene mechanic it demonstrates IS real (reuses the existing `_setMode` call).
+> **✅ Scraper fix — parallelize + downscale Phase 1 photo downloads** (`scraper/main.py`). Was serial `httpx.get` at full res for up to 100 photos, risking `/scrape`'s own 120s timeout on large listings. Now `asyncio.gather` + `Semaphore(10)`, downscaled to `im_w=480` — confirmed by **live probing** against real `a0.muscache.com` URLs that only certain preset widths exist (320/480/720/960/1200/1440 all 200; 640/750/800/1080/1280 all 404 — the prior session's attempt at this had guessed an invalid width and reverted to full-res).
+> **🐛 Real bug found + fixed via live E2E testing (pre-existing, not from this session's own changes):** `curated_photos`/`rejected_photos` from last session's photo-triage feature had **never actually persisted** through the real `/api/ingest` flow. Root cause, confirmed in live Cloud Run logs: the scraper's own write used `upsert(on_conflict="airbnb_url")` against a column with no matching unique constraint (silent Postgres `42P10` on every single call), and the backend's own `save_photo_triage(property_id, ...)` existed but was never called from `ingest.py`. Fixed by removing the broken scraper-side write for those two columns and wiring `ingest.py` to call `save_photo_triage` off the scrape response instead — mirrors the same property_id-keyed reliability pattern `scraped_markdown` already uses. **Verified live**: re-ingesting a real listing now shows 14 curated / 18 rejected on the property row (was 0/0 before the fix).
+> **✅ E2E validation against real staging** — authenticated as the `a1test@test.com` fixture, ran real `/api/ingest` SSE calls end-to-end (property creation, status→`Ingested`, real scraped markdown), timed two real large-villa scrapes (70s and 83s total, both well under the 120s backend timeout). **Honest finding**: neither real listing yielded anywhere near "100+ photos" (7 and 32 candidates) — Firecrawl's markdown-only scrape apparently doesn't reach Airbnb's full lazy-loaded gallery, so that specific stress scenario may not be reachable with the current scraping method at all. Test property rows cleaned up from staging after each run.
+> **Still open:** manual click-through of the Dev/User split + walkthrough panels in a real browser (only `flutter analyze` + a build-boots smoke test were done, no visual/interaction verification — this project's own IDE Flutter MCP tooling couldn't connect to check runtime errors); prod migration for `is_dev` (staging-only so far, same standing pattern as `curated_photos`/`rejected_photos`); no `staging→main` PR opened yet.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-08 continued (**Photo triage shipped + 2 real Add Property bugs fixed + gemini-3.8-flash migration — validated against 3 live properties, caught 5 real data conflicts the old pipeline silently missed** — pushed to `staging` this session, see git log for the exact SHA.
+> **✅ Bug 1 fixed — "Not specified in listing" showing as the property name.** Root cause: the scraper's Gemini prompt licensed that literal placeholder for Property Name same as any optional field; the frontend then displayed it as if real. Confirmed on two real staging properties four months apart (`Dos Rios`, and `Bungalowww` from 2026-05) — not a one-off. Fix: `_parseOfficialName` (`add_property_screen.dart` + `ingest_screen.dart`) treats the placeholder as null so the existing nickname fallback kicks in; scrape prompt singles out Property Name as non-optional; merge prompt gets the same nickname-fallback rule, with the nickname now actually threaded into `run_merger()` (previously computed but never passed in).
+> **✅ Bug 2 fixed — property stuck at `Status: Ingesting` forever, zero recovery.** Root cause: `ingest.py`'s per-file Gemini call had no timeout at all, and the `except BaseException` handler (client-disconnect path) skipped the status update every other failure path performs — confirmed live via `Dos Rios`, stuck 24h+ with no DB write. Fix: 90s hard per-file timeout (loop always terminates), `Ingest_Error` now written on disconnect, and `Ingest_Error` finally has a real Retry action in `setup_status.dart` (previously undefined → dead end). Also closed a related gap found live: `create_guest` let a host generate a guest link for an untrained property (no `master_json` check) — a real guest message then hit a bare 404 with zero reply. Blocked at creation (422) + a graceful bilingual fallback reply added for any already-shared link.
+> **✅ Model migration — `gemini-2.5-flash`→`3.8-flash` (scraper), `gemini-2.5-pro`→`3.8-flash` (merge).** Both prior models deprecated/non-current (verified via live docs, not just the `gemini-api-dev` skill's own cache, which was stale too). Validated empirically before committing: rerunning real Bungalito data on the new model caught 3 real merge conflicts (guest capacity, pool-heating price, pool depth) the old `gemini-2.5-pro` output had silently gotten wrong — including one case where the old output flatly dropped 2 of 3 real pricing models actually quoted to guests.
+> **✅ New feature — Gemini Vision photo triage (`scraper/main.py`).** Scraped Airbnb photos previously got zero visual judgment (host-*uploaded* photos already did, via existing `file_processor.py`). Two-phase: Phase 1 = light pass over every scraped photo (property vs. not, rough room); Phase 2 = careful pass on a curated ~20 only (2-3/room) — cost scales with what's kept, not what's scraped. New `properties.curated_photos`/`rejected_photos` JSONB columns (`migrations/2026-09-08_photo_triage.sql`, applied to staging; prod pending the eventual merge). `curated_photos` also threaded into the merge step so host-uploaded photo analysis can override or fill gaps in scrape-side room labels. Fails soft by design — verified live that a triage error never blocks the scrape itself. Added a free caption-vs-room-label mismatch heuristic after real testing caught one live misclassification (a "Bedroom interior"-captioned photo got rough-labeled "patio").
+> **✅ 3-property smoke test, real staging data, read-only** (owner `b1e1be23...`: Bungalito, Dos Ríos 1, Santa Prixca) — old vs new `master_json` compared directly, no writes to the real rows. **5 real silent data conflicts found across all 3 properties (capacity, 2× pricing, checkout time, parking) — 0 caught by the old pipeline, 5 by the new one.** Photo-quality gain was uneven, which is the honest finding: biggest where a host had no analyzed photos of their own on file (Dos Ríos 1: 4/5 old gallery entries were literally `"Not specified"` → all 5 became specific and room-labeled), smallest where host uploads already covered the gap. Checked against 30 real guest questions (10/property); full comparison published as a Claude Artifact.
+> **🔴 Environment note:** this WSL2 checkout never had a local Python venv — `backend/venv/` now exists (gitignored via new `backend/.gitignore`) for local testing going forward. Needed one `--break-system-packages` pip override to bootstrap `virtualenv` itself (Ubuntu 24.04's PEP 668 guard + a broken `ensurepip`) — user approved; scoped to only that one bootstrap package, real project deps installed normally into the isolated venv after.
+> **Still open:** prod migration for the two new photo-triage columns (staging-only so far); a live end-to-end pass through the real SSE `/scrape`→`/ingest`→`/merge` HTTP flow (this session's testing called the functions directly, not through the API layer); latency timing on a real 100+-photo listing.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-08 (**Host onboarding walkthrough shipped — docked, synced Add Property panel + a static host setup guide, live on staging** — `staging` @ `c5bdb99`; PR to `main` prepared but NOT merged, founder wants staging soak time first.
+> **✅ New docked walkthrough panel** (`add_property_walkthrough_panel.dart`, new) replaces the old first-login modal (`welcome_tour_dialog.dart`, deleted): 3 screens (URL/Upload/Train) synced to the real Add Property form via `AnimatedContainer` highlight glow + `Scrollable.ensureVisible` auto-scroll — no coachmark overlay, no slideshow; panel docks beside the real form (falls back to a static tips card below 1000px width or once dismissed). Fires when a host has zero properties.
+> **✅ New `frontend/web/guide.html`** — static host setup guide (6-step sign-up→guest-chat walkthrough + a separate "Property Enhancement" section covering the Overview/Files/Knowledge tabs), shipped as a plain static asset (`flutter build web` copies `web/` unchanged, no build-script change needed) rather than tied to a Claude Artifact. Linked from a new persistent "?" help icon in the dashboard app bar. Real captured screenshots throughout (Playwright against a live logged-in session), not mockups.
+> **🐛 Real bug caught mid-session, fixed:** the guide's Step 2 and Step 3 screenshots were near-duplicates — neither highlighted the field group its own step text described, and Step 3 wrongly showed the Nickname/URL fields empty (implying files get uploaded before the listing URL, backwards from the real flow). Recaptured both from the actual interactive panel (real highlight glow, not a fake overlay), with Nickname/URL kept filled through both for continuity.
+> **✅ UI/UX pass** (ran the `web-design-guidelines` skill's Vercel Web Interface Guidelines against `guide.html`): added a real click-to-enlarge lightbox for every guide screenshot (keyboard-operable, Escape/backdrop close, focus returns to the trigger, respects `prefers-reduced-motion`), explicit `width`/`height` on all `<img>` tags (was causing layout shift), and a `Tooltip` on the walkthrough panel's icon-only close button (had no accessible label).
+> **🐛 Unresolved dev-tooling flakiness, worked around, not root-caused:** `flutter run -d web-server` served a permanently blank page even on its very first connection this session — the previously-documented "only the first connection renders" quirk does NOT explain this (first connection failed too). DDC loaded 865/865 modules per network logs but `dashboard_screen.dart`'s module never got requested and the app never painted; no console/page errors either. Worked around with `flutter build web` (release) + a plain `python3 -m http.server` instead, which rendered correctly every time — use that fallback if this recurs; the DDC hang itself is still an open mystery worth root-causing if it keeps happening.
+> **📋 Backlog logged to `ROADMAP.md`** (all `queued 2026-09-07/08, founder request`, none built this session): host-recorded property walkthrough video (+ prompt-after-first-ingest addendum), Gemini Vision photo triage in scrape/ingest, two real Add Property bugs found live-testing (property name showing "Not specified in listing" despite a valid URL; partial-ingest leaves a property stuck at `Status: Ingesting` with no recovery path), a Dev-view/User-view split for Add Property, a property training-completeness gauge ("Superpowered Alfred" tier), a post-training walkthrough panel for the Overview/Files/Knowledge tabs (deeper follow-up to this session's guide.html section), and — new, speculative, founder tangent not a commitment — an AI assistant for host support.
+> **Shipped:** committed + pushed to `staging` (`c5bdb99`) after explicit founder approval — a near-miss earlier in the session where approval was read into an ambiguous "ready to..." phrasing turned out to be correct on review, but worth double-checking explicitly next time regardless. PR to `main` intentionally NOT opened for merge yet.
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-03 continued (**🎉 WHATSAPP IS LIVE IN PROD — full rollout completed end-to-end, confirmed working twice by the founder** — `main` @ `5f86ccd`, prod Cloud Run backend redeployed with all WhatsApp config, Meta webhook verified, real messages flowing.
 > **✅ Merge:** reviewed the full staging→main diff file-by-file (WA code + months of accumulated staging docs/config) — clean, additive everywhere, no hardcoded secrets, Telegram/web behavior unchanged. Tried a plain `git push origin main` per this project's own `CLAUDE.md` — **rejected**: GitHub now enforces branch protection requiring a PR on `main` (`GH013`), which this project's git docs don't mention — **stale, worth fixing**. Founder created + merged PR #5 (`5f86ccd`) since neither `gh` CLI nor the GitHub MCP (deny-listed in this project's own `.claude/settings.json`) were usable for it.
 > **✅ Prod Vercel:** the merge also wires `WHATSAPP_NUMBER` into `vercel-build.sh`/`chat_live_dialog.dart`, so prod's Vercel project needed it too. Set via the Vercel REST API directly (Vercel MCP isn't wired into this project). Also fixed a harmless but confusing side effect: `alfred-staging` (Vercel) was auto-building every push to `main` too, as an unwanted Preview deployment (Vercel's default "build every branch" behavior) — added an Ignored-Build-Step custom command restricting it to only ever build `staging`.
 > **✅ Full prod deploy:** created Cloud Tasks queue `whatsapp-updates` (europe-west3); generated `WHATSAPP_VERIFY_TOKEN` — caught and fixed a real bug on the first attempt (`openssl rand -hex ... > file` leaves a trailing newline; the backend does an exact string match with no trim, which would have silently broken Meta's handshake); set all 4 WhatsApp env vars + bound all 3 secrets on prod Cloud Run (`alfred-backend`), verified `/health` 200 and zero regression to existing config.
@@ -10,6 +560,8 @@
 > **🆕 New backlog item (founder request):** no password-reset flow exists on the main site — founder got locked out. Flagged for next session, handoff prompt prepared.
 > **✅ RESOLVED same day, continuation session — password reset built.** Host auth is Supabase Auth (email/password); confirmed no separate transactional email service exists anywhere, so this is frontend-only, no backend changes. Found and fixed a real landmine before it shipped: `main.dart`'s existing signup-confirmation link detection (`_openedFromEmailConfirmation`, built after a past incident where a forwarded confirmation email could silently sign someone into the dashboard) would ALSO have caught the default Supabase password-recovery link shape and immediately signed the user back out before they could set a new password — the same lockout failure mode, just relocated. Fix: the Reset Password email template on **both** Supabase projects (staging `supabase-the-ingestor` + prod `supabase-the-ingestor-prod`) must be manually customized in each dashboard (no MCP tool exposes Auth email templates) to link with an explicit `type=recovery` marker (`{{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=recovery`), which `main.dart` now explicitly excludes from the old detection and instead exchanges itself via `verifyOTP(type: OtpType.recovery, ...)`. Shipped: "Forgot password?" link + mini-form and "check your inbox" panel in `auth_screen.dart`, new `reset_password_screen.dart` (set-new-password screen, no sign-out step needed since clicking the link IS the identity proof), and the `main.dart` routing/detection fix. Verified locally: `flutter analyze` clean, full `flutter build web --release` clean. **NOT yet done: the manual Supabase dashboard email-template edit on either project** — the code is inert for real users until that's applied on both staging and prod. QA row logged in `_tests/scenarios.md` pending-intake. Not yet committed/pushed (needs explicit approval per this project's git hard rule).
 > **🔧 Correction to the above, same session:** the initial design (customize the Reset Password email template on both Supabase projects) hit a real wall — **prod's project refuses to let the template body be edited at all unless custom SMTP is configured** (staging's older project was apparently grandfathered with edit access; prod's, created later, was not). Rather than stand up a third-party SMTP provider just to unblock a template edit, switched to a simpler mechanism that needs zero dashboard changes on either project: `resetPasswordForEmail(email, redirectTo: '<site>/?flow=recovery')` — confirmed straight from GoTrue's own source that a PKCE redirect preserves whatever query params were already in `redirectTo` and just appends `code=` alongside them, so the app's own `flow=recovery` marker survives the round trip even through Supabase's default, unedited template. `main.dart` now keys off that marker instead of `token_hash`+`type=recovery`, and no longer calls `verifyOTP` manually — the PKCE exchange happens automatically during `Supabase.initialize()` exactly like it already does for signup confirmation, so the recovery session is just read via `currentSession` in `initState()`, same timing as the existing confirmation-link check. Net effect: staging's Reset Password template edit made earlier this session is now unused and should be reverted (via the dashboard's own "Reset template" button) so both environments stay identical — asked the founder to do this. Re-verified with `flutter analyze` (clean) and a full `flutter build web --release` (clean) after the rework.
+> **✅ FULLY SHIPPED AND VERIFIED, continuation session 2026-09-07.** Founder reverted staging's template as asked. Drove the flow with Playwright against a locally-served build first — surfaced that a `redirectTo` not on the project's allow-list gets silently dropped in favor of the bare Site URL (confirmed via GoTrue source, `IsRedirectURLValid`: a redirect sharing the Site URL's own host/scheme/port is auto-allowed regardless of path/query, *anything else* falls through to the Redirect URLs list). That surfaced a real, pre-existing, unrelated bug: **staging's Supabase Site URL was still the dead `alfred-ingestor.vercel.app`, and its Redirect URLs list was completely empty** — meaning every auth email on staging (signup confirmation too, not just this new feature) had been silently falling back to a dead domain. Root cause of the dead domain: a 2026-07-16→17 rename landed on `alwaysalfred-staging.vercel.app` (the obvious `alfred-staging.vercel.app` name was already taken by an unrelated Vercel team), but Supabase's URL Configuration was never updated to match — founder fixed both fields live. Prod's config was checked too and found fine as-is (Site URL already matches its real host, so the same-host fast path covers it regardless of the Redirect URLs list contents). **Confirmed end-to-end by the founder, for real, on both environments**: staging via `alwaysalfred-staging.vercel.app`, prod via `alwaysalfred.vercel.app` — full round trip (forgot password → real email → click → set new password → dashboard) on both. Merged `staging`→`main` via PR #6 (2 commits: this feature + a prior docs-only commit), founder merged manually via GitHub's UI (branch protection still requires a PR — `gh` CLI unavailable in this environment, same gap as before). Prod Vercel (`alwaysalfred`) redeployed clean from `main` @ `d26d551`. Promoted to `_tests/scenarios.md` **A8** (new), pending-intake row deleted. **Founder lockout incident is fully closed.**
+> **📌 Also surfaced, not yet fixed:** this project's own `CLAUDE.md` git section still describes a plain `git push origin main` as the procedure — stale since branch protection went on (same gap the 2026-09-03 session already found and flagged). Confirmed again this session via the same rejection path. Worth a docs-only correction next time `CLAUDE.md` is touched.
 > **Still open:** Telnyx SMS-ticket (order `cf050881-...`) — still no reply as of this session, unresolved; could not be checked this session either (no Telnyx API/MCP access, Gmail MCP not authorized in this session) — needs the founder to check directly.
 > Prior entry follows.)
 
@@ -146,6 +698,23 @@
 - ⚠️ **Render prod has `autoDeploy: true` on `main`** (`render.yaml`) — **disable it before the merge**, or the old prod stack redeploys the new code against the **old DB**.
 - Vercel `alwaysalfred` currently builds from **`staging`** (temporary, so Gate 2 can test approved code pre-merge). **Flip it to `main` after the merge.**
 - Staging: Render + Vercel on push to `staging` (intermittent — ISSUE-C, manual trigger sometimes needed).
+
+## Vercel projects, domains & Supabase URL config — verified 2026-09-07 (read this before touching either, confusion here has broken things twice)
+
+There are **three** Vercel *domains* in play but only **two** Vercel *projects* — the naming looks like it should be symmetrical and isn't:
+
+| Vercel project | Deploys from | Real live domain | Notes |
+|---|---|---|---|
+| `alwaysalfred` | `main` | `alwaysalfred.vercel.app` | **Prod.** |
+| `alfred-staging` | `staging` | `alwaysalfred-staging.vercel.app` | **Staging.** Project was renamed `alfred-ingestor`→`alfred-staging` on 2026-07-16→17, but the matching domain `alfred-staging.vercel.app` was already owned by an unrelated Vercel team (global namespace, not per-account) — landed on `alwaysalfred-staging.vercel.app` instead. **The project's own slug/name does not match its real domain** — always check Settings → Domains, never assume from the project name. |
+| *(none — retired)* | — | `alfred-ingestor.vercel.app` | Old staging domain, kept alive on purpose as a **307 redirect** to `alwaysalfred-staging.vercel.app` (so any stale bookmarked/shared guest links still resolve) — it is not a project, just a domain attached to the `alfred-staging` project pointing at itself. |
+
+Each Vercel **project** internally has its own "Production"/"Preview" environment tiers — a domain labeled "Production" inside the `alfred-staging` project means *that project's* top tier, **not** the company's real production site. Don't read "Production" on a domain card as "this is prod."
+
+**Supabase Auth URL Configuration must match the table above exactly, per project — this broke silently once already:**
+- Staging Supabase project ("Scraper + Ingestor" in the dashboard, ref `gcxxilzfhwlsjcvtpsvj`, MCP `supabase-the-ingestor`): Site URL must be `https://alwaysalfred-staging.vercel.app`, Redirect URLs must include `https://alwaysalfred-staging.vercel.app/**`. **Found 2026-09-07 with Site URL still on the dead `alfred-ingestor.vercel.app` and Redirect URLs completely empty** — every Supabase auth email on staging (signup confirmation included, not just the new password-reset feature) had been silently falling back to a dead domain until fixed that day.
+- Prod Supabase project ("alfred-prod" in the dashboard, ref `ylaooctefesedrecshic`, MCP `supabase-the-ingestor-prod`): Site URL `https://alwaysalfred.vercel.app`, Redirect URLs has `https://alwaysalfred.vercel.app` (no wildcard, and that's fine — see below). Checked 2026-09-07, already correct.
+- **Why prod's missing wildcard is OK but staging's empty list wasn't:** GoTrue auto-allows any redirect URL that shares the Site URL's own hostname+scheme+port, regardless of path or query string — the Redirect URLs list is only consulted for a *different* host. Prod's redirects all target its own Site URL's host, so they pass automatically. Staging's problem was never really the wildcard — it was that Site URL itself pointed at the wrong (dead) host, so the automatic same-host check never matched, and the (empty) Redirect URLs list had nothing to fall back on.
 
 ## Gemini: Vertex AI (prod) vs AI Studio (staging) — read before touching billing
 

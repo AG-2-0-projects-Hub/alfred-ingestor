@@ -8,17 +8,37 @@ import 'package:mime/mime.dart';
 import '../theme/app_theme.dart';
 
 const _supportedExtensions = [
-  'pdf', 'doc', 'docx',
-  'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif',
-  'xlsx', 'xls', 'csv',
-  'mp3', 'wav', 'ogg', 'm4a', 'aac', 'webm',
+  'pdf',
+  'doc',
+  'docx',
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'heic',
+  'gif',
+  'xlsx',
+  'xls',
+  'csv',
+  'mp3',
+  'wav',
+  'ogg',
+  'm4a',
+  'aac',
+  'webm',
+  // Conversation history exports / automated-message templates — the
+  // backend's file_processor.py already handles any unrecognized extension
+  // as plain text (Prompt A), same path as DOCX, so no backend change was
+  // needed to support these.
+  'json',
+  'txt',
 ];
 
 class DropZoneWidget extends StatefulWidget {
   final String propertyId;
 
   /// Called immediately when a supported file is selected (before upload completes).
-  /// Used by IngestScreen to add the file to the "Files to Ingest" list (REQ-13, REQ-15).
+  /// Used by the parent screen (Add/Edit Property) to add the file to the unified file list.
   final void Function(String filename) onFileAdded;
 
   /// Called after the upload attempt completes with success/failure.
@@ -71,7 +91,7 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
       return;
     }
 
-    widget.onFileAdded(safeFilename); // notify IngestScreen immediately (REQ-15)
+    widget.onFileAdded(safeFilename); // notify the parent screen immediately
 
     try {
       final mime = lookupMimeType(safeFilename) ?? 'application/octet-stream';
@@ -129,74 +149,84 @@ class _DropZoneWidgetState extends State<DropZoneWidget> {
               await _uploadBytes(file.name, Uint8List.fromList(bytes));
             }
           },
-          child: GestureDetector(
-            onTap: _pickFiles,
-            child: AnimatedScale(
-              duration: const Duration(milliseconds: 200),
-              curve: AppTheme.standardEasing,
-              scale: _isDragging ? 1.015 : 1.0,
-              child: CustomPaint(
-                painter: _DashedBorderPainter(
-                  color: _isDragging ? dragColor : palette.borderStrong,
-                  strokeWidth: _isDragging ? 2.0 : 1.5,
-                  radius: 14,
-                  dashLength: 8,
-                  gap: 5,
-                ),
-                child: AnimatedContainer(
+          // Was a bare GestureDetector — no screen-reader description and no
+          // keyboard reach for what's otherwise a primary Add Property action.
+          child: Semantics(
+            label: 'Upload files: drag and drop, or activate to browse',
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _pickFiles,
+                child: AnimatedScale(
                   duration: const Duration(milliseconds: 200),
-                  height: 132,
-                  decoration: BoxDecoration(
-                    color: _isDragging
-                        ? palette.primaryContainer.withValues(alpha: 0.55)
-                        : palette.glassTint,
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: _isDragging
-                        ? [
-                            BoxShadow(
-                              color: dragColor.withValues(alpha: 0.18),
-                              blurRadius: 24,
-                              spreadRadius: 1,
+                  curve: AppTheme.standardEasing,
+                  scale: _isDragging ? 1.015 : 1.0,
+                  child: CustomPaint(
+                    painter: _DashedBorderPainter(
+                      color: _isDragging ? dragColor : palette.borderStrong,
+                      strokeWidth: _isDragging ? 2.0 : 1.5,
+                      radius: 14,
+                      dashLength: 8,
+                      gap: 5,
+                    ),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 132,
+                      decoration: BoxDecoration(
+                        color: _isDragging
+                            ? palette.primaryContainer.withValues(alpha: 0.55)
+                            : palette.glassTint,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: _isDragging
+                            ? [
+                                BoxShadow(
+                                  color: dragColor.withValues(alpha: 0.18),
+                                  blurRadius: 24,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          AnimatedScale(
+                            duration: const Duration(milliseconds: 200),
+                            scale: _isDragging ? 1.12 : 1.0,
+                            child: Icon(
+                              Icons.cloud_upload_outlined,
+                              size: 36,
+                              color: _isDragging
+                                  ? dragColor
+                                  : palette.textSecondary,
                             ),
-                          ]
-                        : null,
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedScale(
-                        duration: const Duration(milliseconds: 200),
-                        scale: _isDragging ? 1.12 : 1.0,
-                        child: Icon(
-                          Icons.cloud_upload_outlined,
-                          size: 36,
-                          color: _isDragging ? dragColor : palette.textSecondary,
-                        ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _isDragging
+                                ? 'Drop files here'
+                                : 'Drag & drop or tap to browse',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: _isDragging
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color:
+                                  _isDragging ? dragColor : palette.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'PDF · DOCX · Images · Sheets · Audio · Chat exports — up to 15 MB per file',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: palette.textMuted,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _isDragging
-                            ? 'Drop files here'
-                            : 'Drag & drop or tap to browse',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: _isDragging
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          color: _isDragging
-                              ? dragColor
-                              : palette.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        'PDF · DOCX · Images · Sheets · Audio — up to 15 MB per file',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: palette.textMuted,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),

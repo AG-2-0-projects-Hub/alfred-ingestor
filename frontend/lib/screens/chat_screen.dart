@@ -142,11 +142,24 @@ class _ChatScreenState extends State<ChatScreen>
   // Returns the dedicated guest SupabaseClient, creating it on first call.
   // Using a separate client keeps the host's global auth session untouched.
   SupabaseClient get _db {
-    _guestClient ??= SupabaseClient(
-      dotenv.env['SUPABASE_URL']!,
-      dotenv.env['SUPABASE_ANON_KEY']!,
-      accessToken: _getOrRefreshToken,
-    );
+    if (_guestClient == null) {
+      // In practice this app never reaches ChatScreen with these unset —
+      // main() validates and fails loudly on boot before runApp() — but this
+      // guard keeps that failure mode explicit here too rather than a bare
+      // null-check crash, in case chat routing is ever reached before boot
+      // validation runs.
+      final url = dotenv.env['SUPABASE_URL'];
+      final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
+      if (url == null || url.isEmpty || anonKey == null || anonKey.isEmpty) {
+        throw StateError(
+            'SUPABASE_URL/SUPABASE_ANON_KEY not configured — cannot open guest chat.');
+      }
+      _guestClient = SupabaseClient(
+        url,
+        anonKey,
+        accessToken: _getOrRefreshToken,
+      );
+    }
     return _guestClient!;
   }
 
@@ -706,12 +719,38 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Throw the take away. Only reachable from the review state — never while
   /// recording, where it would be one mis-tap away from destroying the message.
+  /// A low-cost undo snackbar (rather than a blocking confirm dialog) covers
+  /// the mis-tap case without adding a second tap to the normal discard path.
   void _discardPendingVoice() {
     if (!mounted) return;
+    final discardedWav = _pendingVoiceWav;
+    final discardedSeconds = _recordSeconds;
     setState(() {
       _pendingVoiceWav = null;
       _recordSeconds = 0;
     });
+    if (discardedWav == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Recording discarded.'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            // Guard against overwriting a newer take: if the guest recorded
+            // (and is reviewing) a fresh take within the undo window,
+            // _pendingVoiceWav is no longer null — restoring the discarded
+            // one would silently clobber it.
+            if (_pendingVoiceWav != null) return;
+            setState(() {
+              _pendingVoiceWav = discardedWav;
+              _recordSeconds = discardedSeconds;
+            });
+          },
+        ),
+      ),
+    );
   }
 
   /// Upload and send the take the guest reviewed and approved.
@@ -1553,6 +1592,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 22,
               ),
+              tooltip: _playing ? 'Pause' : 'Play',
               color: widget.isGuest ? Colors.white : context.palette.primary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 44, minHeight: 44),

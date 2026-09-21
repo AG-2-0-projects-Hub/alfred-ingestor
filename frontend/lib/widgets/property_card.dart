@@ -3,6 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import 'conversation_pill.dart';
+import 'glass_panel.dart';
+import 'walkthrough_tip_panel.dart';
+
+// Matches ingest_worker.py's STALE_HEARTBEAT_S (Phase 2, 2026-09-16) — same
+// threshold the backend watchdog uses to decide a run is genuinely stuck,
+// not just slow, so the dashboard and the automatic recovery agree.
+bool _isHeartbeatStale(String? heartbeatIso) {
+  if (heartbeatIso == null) return true;
+  final ts = DateTime.tryParse(heartbeatIso);
+  if (ts == null) return true;
+  return DateTime.now().toUtc().difference(ts.toUtc()) >
+      const Duration(seconds: 90);
+}
 
 class PropertyCard extends StatelessWidget {
   final Map<String, dynamic> property;
@@ -13,10 +26,17 @@ class PropertyCard extends StatelessWidget {
   final VoidCallback onAddProperty;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  // Cancel + delete while status is Ingesting/Training/Merging (2026-09-19)
+  // -- the founder's escape hatch for a run that's stuck OR that the host
+  // simply wants to abandon. Always a full soft-delete, never a rollback.
+  final VoidCallback onDeleteProcessing;
   final int activeChatCount;
   final bool hasEscalation;
   final bool hasEmergency;
   final List<Map<String, dynamic>> conversationPreviews;
+  // Part A of the User-mode post-training walkthrough — Step 0's nudge on
+  // the +Guest/Settings buttons. Always false for Dev accounts.
+  final bool showStep0Hint;
 
   const PropertyCard({
     super.key,
@@ -28,10 +48,12 @@ class PropertyCard extends StatelessWidget {
     required this.onAddProperty,
     this.onArchivedChats = _noop,
     this.onCalendar = _noop,
+    this.onDeleteProcessing = _noop,
     this.activeChatCount = 0,
     this.hasEscalation = false,
     this.hasEmergency = false,
     this.conversationPreviews = const [],
+    this.showStep0Hint = false,
   });
 
   const PropertyCard.add({
@@ -44,10 +66,12 @@ class PropertyCard extends StatelessWidget {
         onGuestLink = _noop,
         onArchivedChats = _noop,
         onCalendar = _noop,
+        onDeleteProcessing = _noop,
         activeChatCount = 0,
         hasEscalation = false,
         hasEmergency = false,
-        conversationPreviews = const [];
+        conversationPreviews = const [],
+        showStep0Hint = false;
 
   static void _noop() {}
   static void _noopChat(String _) {}
@@ -69,6 +93,8 @@ class PropertyCard extends StatelessWidget {
       onGuestLink: onGuestLink,
       onArchivedChats: onArchivedChats,
       onCalendar: onCalendar,
+      onDeleteProcessing: onDeleteProcessing,
+      showStep0Hint: showStep0Hint,
     );
   }
 }
@@ -92,57 +118,64 @@ class _AddPropertyCardState extends State<_AddPropertyCard> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: _hovered ? palette.primaryContainer : palette.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _hovered ? palette.primary : palette.primaryHover,
-              width: _hovered ? 1.5 : 1,
-              style: BorderStyle.solid,
+      // Was a bare GestureDetector, unreachable by keyboard. InkWell gives
+      // real button semantics plus focus/Enter/Space activation for free —
+      // no custom press animation here to preserve, unlike the main card.
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            decoration: BoxDecoration(
+              color: _hovered ? palette.primaryContainer : palette.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _hovered ? palette.primary : palette.primaryHover,
+                width: _hovered ? 1.5 : 1,
+                style: BorderStyle.solid,
+              ),
+              boxShadow: _hovered ? palette.cardShadowHover : [],
             ),
-            boxShadow: _hovered ? palette.cardShadowHover : [],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: _hovered
-                      ? palette.primary.withValues(alpha: 0.12)
-                      : palette.primaryContainer,
-                  shape: BoxShape.circle,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: _hovered
+                        ? palette.primary.withValues(alpha: 0.12)
+                        : palette.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.add_rounded,
+                    size: 32,
+                    color: palette.primary,
+                  ),
                 ),
-                child: Icon(
-                  Icons.add_rounded,
-                  size: 32,
-                  color: palette.primary,
+                const SizedBox(height: 16),
+                Text(
+                  'Add Property',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w400,
+                    color: palette.primary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Add Property',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: palette.primary,
+                const SizedBox(height: 6),
+                Text(
+                  'Connect your Airbnb listing',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: palette.textMuted,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Connect your Airbnb listing',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: palette.textMuted,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -163,6 +196,8 @@ class _PropertyCard extends StatefulWidget {
   final VoidCallback onGuestLink;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  final VoidCallback onDeleteProcessing;
+  final bool showStep0Hint;
 
   const _PropertyCard({
     required this.property,
@@ -176,6 +211,8 @@ class _PropertyCard extends StatefulWidget {
     required this.onGuestLink,
     required this.onArchivedChats,
     required this.onCalendar,
+    required this.onDeleteProcessing,
+    this.showStep0Hint = false,
   });
 
   @override
@@ -185,6 +222,43 @@ class _PropertyCard extends StatefulWidget {
 class _PropertyCardState extends State<_PropertyCard> {
   bool _hovered = false;
   bool _pressed = false;
+  final LayerLink _step0Link = LayerLink();
+
+  // Step 0's tip used to be injected via a raw Overlay entry, in the same
+  // shared layer dialogs use for their own modal content — meaning which one
+  // ended up "in front" depended on manually-managed insertion order, and
+  // occasionally landed wrong (rendering above an open dialog, undimmed).
+  // The card itself never has this problem because it's an ordinary part of
+  // the dashboard's own widget tree, so a dialog opened on top of it is
+  // always guaranteed to render above it. Building the tip as a normal
+  // Positioned/CompositedTransformFollower inside this card's own Stack
+  // (below) gives it that same guarantee for free, instead of managing the
+  // ordering by hand.
+  Widget _buildStep0Tip() {
+    return Positioned(
+      width: 280,
+      child: CompositedTransformFollower(
+        link: _step0Link,
+        showWhenUnlinked: false,
+        // Left-aligned with the card (not centered on the button pair) —
+        // centering pushed the panel off the left edge of the screen for
+        // cards near the edge of the grid. The pointer doesn't need to land
+        // exactly between the two buttons.
+        targetAnchor: Alignment.bottomLeft,
+        followerAnchor: Alignment.topLeft,
+        offset: const Offset(0, 12),
+        child: IgnorePointer(
+          ignoring: !widget.showStep0Hint,
+          child: AnimatedOpacity(
+            opacity: widget.showStep0Hint ? 1 : 0,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeInOut,
+            child: const _Step0Tip(),
+          ),
+        ),
+      ),
+    );
+  }
 
   List<BoxShadow> _statusGlow(AppPalette p) {
     if (widget.hasEmergency) {
@@ -221,6 +295,18 @@ class _PropertyCardState extends State<_PropertyCard> {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final status = widget.property['status'] as String? ?? '';
+    // Scrape-quality failsafe (2026-09-17): status may genuinely be
+    // Trained/Merged underneath, but a real unresolved issue (an unreadable
+    // Airbnb link) exists -- the badge must not read "Ready" while that's
+    // true, or the host has no reason to ever open the fix-link dialog.
+    final scrapeRetry = widget.property['scrape_retry'] as Map<String, dynamic>?;
+    final scrapeLinkNeedsAttention =
+        scrapeRetry != null && scrapeRetry['attempts'] != null && scrapeRetry['next_retry_at'] == null;
+    // True for the few seconds/minutes between the host submitting a fix and
+    // it resolving -- without this, nothing on the card signals the retry is
+    // actually in flight (founder confirmed live: badge stayed "Ready" the
+    // whole time with no feedback).
+    final scrapeLinkRetrying = scrapeRetry?['retrying'] == true;
     final name = widget.property['name'] as String? ?? 'Unnamed';
     final propertyId = widget.property['id'] as String;
     // Airbnb CDN thumbnail from Master JSON — used as a fallback when the
@@ -229,178 +315,316 @@ class _PropertyCardState extends State<_PropertyCard> {
     final masterJson = widget.property['master_json'] as Map<String, dynamic>?;
     final media = masterJson?['media'] as Map<String, dynamic>?;
     final thumbnailUrl = media?['thumbnail_url'] as String?;
+    // Computed once here (not re-derived inside _buildActions) so the
+    // whole-card tap gate below and the action row's own branching can never
+    // disagree on what counts as Ready.
+    final wasTrainedBefore = masterJson != null;
+    final isReady = status == 'Trained' ||
+        status == 'Active' ||
+        status == 'Resolved' ||
+        status == 'Merged' ||
+        (wasTrainedBefore && status == 'Ingested');
+    // A first-run Stop clears status/ingest_run_id but never soft-deletes the
+    // row (2026-09-19) -- the only way a never-trained property ends up with
+    // an empty status. Distinct from "processing" (which always has a real
+    // in-flight status) and from a genuinely unrecognized status (which
+    // would still be non-empty).
+    final isGhost = status.isEmpty && !wasTrainedBefore;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onOpenExpanded,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 200),
-          curve: AppTheme.standardEasing,
-          scale: _pressed ? AppTheme.pressScale : (_hovered ? 1.012 : 1.0),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            decoration: BoxDecoration(
-              color: _hovered ? palette.glassTintStrong : palette.glassTint,
-              gradient: AppTheme.glassInnerHighlight,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _hovered
-                    ? palette.primaryHover.withValues(alpha: 0.5)
-                    : palette.glassBorderStrong,
-                width: 1,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // This card is the dashboard's primary way into a property — was a
+        // bare GestureDetector, so a keyboard-only user (Tab through the
+        // page) could never reach or open it at all. FocusableActionDetector
+        // adds real focus + Enter/Space activation (the app's default
+        // Shortcuts already route those keys to ActivateIntent for whichever
+        // widget has focus) without touching the custom tap-down/up press
+        // animation below; Semantics gives it a real button role for screen
+        // readers.
+        Semantics(
+          button: true,
+          enabled: isReady,
+          // Not ready yet -- the "New Guest Link"/conversations popup this
+          // opens assumes a trained property (see PropertyExpandedView), so
+          // tapping a still-processing/error/conflict card silently did
+          // nothing useful. Disabled instead of wired to a different
+          // destination -- there isn't one specified for those states yet.
+          label: 'Open ${widget.property['name'] as String? ?? 'property'}',
+          child: FocusableActionDetector(
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (intent) {
+                  if (isReady) widget.onOpenExpanded();
+                  return null;
+                },
               ),
-              boxShadow: [
-                ..._statusGlow(palette),
-                ...(_hovered ? palette.cardShadowHover : palette.cardShadow),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  height: 160,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _HeroImage(
-                          propertyId: propertyId,
-                          status: status,
-                          fallbackUrl: thumbnailUrl),
-                      Positioned(
-                        left: 0, right: 0, bottom: 0,
-                        height: 56,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.28),
-                                Colors.transparent,
+            },
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit: (_) => setState(() => _hovered = false),
+              cursor:
+                  isReady ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              child: GestureDetector(
+                onTap: isReady ? widget.onOpenExpanded : null,
+                onTapDown: isReady ? (_) => setState(() => _pressed = true) : null,
+                onTapUp: isReady ? (_) => setState(() => _pressed = false) : null,
+                onTapCancel: isReady ? () => setState(() => _pressed = false) : null,
+                child: AnimatedScale(
+                  duration: const Duration(milliseconds: 200),
+                  curve: AppTheme.standardEasing,
+                  scale:
+                      _pressed ? AppTheme.pressScale : (_hovered ? 1.012 : 1.0),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      color: _hovered
+                          ? palette.glassTintStrong
+                          : palette.glassTint,
+                      gradient: AppTheme.glassInnerHighlight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _hovered
+                            ? palette.primaryHover.withValues(alpha: 0.5)
+                            : palette.glassBorderStrong,
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        ..._statusGlow(palette),
+                        ...(_hovered
+                            ? palette.cardShadowHover
+                            : palette.cardShadow),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 160,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _HeroImage(
+                                  propertyId: propertyId,
+                                  status: status,
+                                  fallbackUrl: thumbnailUrl),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                height: 56,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.bottomCenter,
+                                      end: Alignment.topCenter,
+                                      colors: [
+                                        Colors.black.withValues(alpha: 0.28),
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: _StatusBadge(
+                                  status: status,
+                                  needsAttention: scrapeLinkNeedsAttention,
+                                  retrying: scrapeLinkRetrying,
+                                  isGhost: isGhost,
+                                ),
+                              ),
+                              if (widget.activeChatCount > 0)
+                                Positioned(
+                                  bottom: 8,
+                                  left: 12,
+                                  child:
+                                      _ChatBadge(count: widget.activeChatCount),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w400,
+                                    color: palette.textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                if (widget.hasEmergency) ...[
+                                  const SizedBox(height: 6),
+                                  _AlertPill(
+                                    label: 'Emergency',
+                                    icon: Icons.warning_amber_rounded,
+                                    bg: palette.dangerContainer,
+                                    fg: palette.danger,
+                                  ),
+                                ] else if (widget.hasEscalation) ...[
+                                  const SizedBox(height: 6),
+                                  _AlertPill(
+                                    label: 'Needs Attention',
+                                    icon: Icons.notifications_active_rounded,
+                                    bg: palette.warningContainer,
+                                    fg: palette.warning,
+                                  ),
+                                ],
+                                if (widget.conversationPreviews.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: _PillPreviewList(
+                                      previews: widget.conversationPreviews,
+                                      onOpenChat: widget.onOpenChat,
+                                      onOpenAll: widget.onOpenExpanded,
+                                    ),
+                                  ),
+                                  // _PillPreviewList deliberately fills every pixel of
+                                  // its Expanded box (it greedily fits as many pills
+                                  // as the space allows), so its last line — often
+                                  // "+N more active" — otherwise lands flush against
+                                  // the action row below with no breathing room.
+                                  const SizedBox(height: 8),
+                                ] else
+                                  const Spacer(),
+                                _buildActions(context, status, palette,
+                                    scrapeLinkNeedsAttention,
+                                    wasTrainedBefore: wasTrainedBefore,
+                                    isReady: isReady),
                               ],
                             ),
                           ),
                         ),
-                      ),
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: _StatusBadge(status: status),
-                      ),
-                      if (widget.activeChatCount > 0)
-                        Positioned(
-                          bottom: 8,
-                          left: 12,
-                          child: _ChatBadge(count: widget.activeChatCount),
-                        ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w400,
-                            color: palette.textPrimary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        if (widget.hasEmergency) ...[
-                          const SizedBox(height: 6),
-                          _AlertPill(
-                            label: 'Emergency',
-                            icon: Icons.warning_amber_rounded,
-                            bg: palette.dangerContainer,
-                            fg: palette.danger,
-                          ),
-                        ] else if (widget.hasEscalation) ...[
-                          const SizedBox(height: 6),
-                          _AlertPill(
-                            label: 'Needs Attention',
-                            icon: Icons.notifications_active_rounded,
-                            bg: palette.warningContainer,
-                            fg: palette.warning,
-                          ),
-                        ],
-                        if (widget.conversationPreviews.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _PillPreviewList(
-                              previews: widget.conversationPreviews,
-                              onOpenChat: widget.onOpenChat,
-                              onOpenAll: widget.onOpenExpanded,
-                            ),
-                          ),
-                        ] else
-                          const Spacer(),
-                        _buildActions(context, status, palette),
                       ],
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
-      ),
+        _buildStep0Tip(),
+      ],
     );
   }
 
-  Widget _buildActions(BuildContext context, String status, AppPalette palette) {
-    final isProcessing = status == 'Ingesting' || status == 'Training';
+  Widget _buildActions(BuildContext context, String status, AppPalette palette,
+      bool needsAttention,
+      {required bool wasTrainedBefore, required bool isReady}) {
+    // A first-time 'Ingested' property (no prior master_json) is still
+    // mid-chain toward merge, same as the badge above treats it — without
+    // this it fell through to a clickable "Details" button on a property
+    // that isn't actually ready to view yet.
+    final isProcessing = status == 'Ingesting' ||
+        status == 'Training' ||
+        status == 'Merging' ||
+        (status == 'Ingested' && !wasTrainedBefore);
     final isConflict = status == 'Conflict_Pending';
     final isError = status.contains('Error');
-    final isReady = status == 'Trained' ||
-        status == 'Active' ||
-        status == 'Resolved' ||
-        status == 'Merged';
 
     if (isProcessing) {
-      return Row(children: [
-        SizedBox(
-          width: 14,
-          height: 14,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: palette.accent,
+      // Phase 2 (2026-09-16): this card used to show a bare "Processing…"
+      // spinner with nothing clickable for however long a run actually took
+      // — a genuinely stalled run (the background worker gone quiet) left
+      // the host with zero way back in from the dashboard (confirmed live:
+      // a property stuck here had status correctly "Ingested" but merge had
+      // silently never fired, and there was no path to notice or fix it
+      // short of finding the row by hand). Reuses onOpenSettings — the same
+      // action "Settings" already uses — since that's where the real Resume
+      // action lives (property_detail_drawer -> edit_property_screen).
+      final heartbeatIso = widget.property['ingest_heartbeat_at'] as String?;
+      final stalled = _isHeartbeatStale(heartbeatIso);
+      // A processing property that isn't obviously stuck still has no way to
+      // back out from the dashboard (2026-09-19) -- maybe the host wants to
+      // add a file they forgot, or it really is stuck and heartbeat just
+      // hasn't gone stale yet. Kills the run + wipes the property either
+      // way; shown for BOTH the stalled and the plain-spinner case below.
+      final deleteBtn = _TinyIconBtn(
+        icon: Icons.close_rounded,
+        tooltip: 'Cancel training and delete this property',
+        onTap: widget.onDeleteProcessing,
+      );
+      if (stalled) {
+        return Row(children: [
+          Expanded(
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: widget.onOpenSettings,
+                borderRadius: BorderRadius.circular(6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.refresh_rounded, size: 15, color: palette.warning),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Resume training',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: palette.warning,
+                    ),
+                  ),
+                ]),
+              ),
+            ),
           ),
+          deleteBtn,
+        ]);
+      }
+      return Row(children: [
+        Expanded(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: palette.accent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Processing…',
+              style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+            ),
+          ]),
         ),
-        const SizedBox(width: 8),
-        Text(
-          'Processing…',
-          style: GoogleFonts.inter(
-              fontSize: 12, color: palette.textSecondary),
-        ),
+        deleteBtn,
       ]);
     }
 
+    // Re-ingest/Resolve conflicts were GestureDetector-wrapped Text — no
+    // hover/focus affordance or button semantics, easy to miss exactly when
+    // a host needs a recovery action most. InkWell gives both, plus real
+    // keyboard access, for a couple of lines each.
     if (isError) {
       return Row(children: [
         Icon(Icons.error_outline_rounded, size: 15, color: palette.danger),
         const SizedBox(width: 6),
-        GestureDetector(
-          onTap: widget.onOpenSettings,
-          child: Text(
-            'Re-ingest',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: palette.danger,
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                'Re-ingest',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: palette.danger,
+                ),
+              ),
             ),
           ),
         ),
@@ -411,14 +635,20 @@ class _PropertyCardState extends State<_PropertyCard> {
       return Row(children: [
         Icon(Icons.warning_amber_rounded, size: 15, color: palette.warning),
         const SizedBox(width: 6),
-        GestureDetector(
-          onTap: widget.onOpenSettings,
-          child: Text(
-            'Resolve conflicts',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: palette.warning,
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                'Resolve conflicts',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: palette.warning,
+                ),
+              ),
             ),
           ),
         ),
@@ -431,7 +661,46 @@ class _PropertyCardState extends State<_PropertyCard> {
         onOpenSettings: widget.onOpenSettings,
         onArchivedChats: widget.onArchivedChats,
         onCalendar: widget.onCalendar,
+        highlightHint: widget.showStep0Hint,
+        step0Link: widget.showStep0Hint ? _step0Link : null,
+        settingsNeedsAttention: needsAttention,
       );
+    }
+
+    // Stop was clicked on the first-ever run and the host navigated away
+    // without retrying (2026-09-19) -- status/ingest_run_id were cleared but
+    // the row was never soft-deleted. Only two ways out: resume (opens the
+    // drawer, which shows the matching SetupStatusBanner and its own route
+    // into EditPropertyScreen) or delete outright.
+    if (status.isEmpty && !wasTrainedBefore) {
+      return Row(children: [
+        Icon(Icons.pause_circle_outline_rounded, size: 15, color: palette.warning),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: widget.onOpenSettings,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  'Resume Training',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: palette.warning,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        _TinyIconBtn(
+          icon: Icons.close_rounded,
+          tooltip: 'Delete this incomplete property',
+          onTap: widget.onDeleteProcessing,
+        ),
+      ]);
     }
 
     return Align(
@@ -451,30 +720,56 @@ class _ReadyActions extends StatelessWidget {
   final VoidCallback onOpenSettings;
   final VoidCallback onArchivedChats;
   final VoidCallback onCalendar;
+  final bool highlightHint;
+
+  /// When set, the Step 0 hint panel is docked off this link — anchored to
+  /// just the +Guest/Settings pair (not the whole action row) so the panel
+  /// points at the space between those two buttons specifically.
+  final LayerLink? step0Link;
+
+  /// True when the scrape-link failsafe has flagged this property (the
+  /// "Needs Attention" badge on the card thumbnail) -- glows the Settings
+  /// button since that's the actual path to the fix-link dialog, and the
+  /// badge alone gave no cue where to click.
+  final bool settingsNeedsAttention;
 
   const _ReadyActions({
     required this.onGuestLink,
     required this.onOpenSettings,
     required this.onArchivedChats,
     required this.onCalendar,
+    this.highlightHint = false,
+    this.step0Link,
+    this.settingsNeedsAttention = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final buttonPair = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         _CardAction(
           icon: Icons.link_rounded,
           label: '+ Guest',
           onTap: onGuestLink,
           accent: true,
+          highlighted: highlightHint,
         ),
         const SizedBox(width: 6),
         _CardAction(
-          icon: Icons.settings_rounded,
-          label: 'Settings',
+          icon: Icons.search_rounded,
+          label: 'Details',
           onTap: onOpenSettings,
+          highlighted: highlightHint,
+          glow: settingsNeedsAttention,
         ),
+      ],
+    );
+    return Row(
+      children: [
+        step0Link != null
+            ? CompositedTransformTarget(link: step0Link!, child: buttonPair)
+            : buttonPair,
         const Spacer(),
         _TinyIconBtn(
           icon: Icons.calendar_month_outlined,
@@ -497,12 +792,21 @@ class _CardAction extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool accent;
+  final bool highlighted;
+  // Warning-color glow for "this needs your attention" (the scrape-link
+  // failsafe) -- same visual language as _StatusBadge's glowAlpha, not a new
+  // effect. Independent of `highlighted` (the Step 0 hint), which uses the
+  // primary color -- the two aren't expected to co-occur, but keeping them
+  // separate avoids one silently overriding the other if they ever did.
+  final bool glow;
 
   const _CardAction({
     required this.icon,
     required this.label,
     required this.onTap,
     this.accent = false,
+    this.highlighted = false,
+    this.glow = false,
   });
 
   @override
@@ -513,10 +817,32 @@ class _CardAction extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
+          border: highlighted
+              ? Border.all(color: palette.primary, width: 1.5)
+              : glow
+                  ? Border.all(color: palette.warning, width: 1.5)
+                  : null,
+          boxShadow: highlighted
+              ? [
+                  BoxShadow(
+                    color: palette.primary.withValues(alpha: 0.30),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : glow
+                  ? [
+                      BoxShadow(
+                        color: palette.warning.withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -529,6 +855,83 @@ class _CardAction extends StatelessWidget {
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Step 0 tip — shared entry point for the Part B/C post-training
+// walkthroughs ───────────────────────────────────────────────────────────
+// Anchored below the +Guest/Settings row via CompositedTransformFollower (see
+// _PropertyCardState) since GridView cells are fixed-height and can't just
+// grow to fit an inline tip. Points up at the space between the two buttons
+// (docked off just that pair, not the whole action row — see _ReadyActions).
+class _Step0Tip extends StatelessWidget {
+  const _Step0Tip();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Material(
+      color: Colors.transparent,
+      child: GlassPanel(
+        radius: 14,
+        blurSigma: AppTheme.glassBlurSigmaHeavy,
+        tint: palette.glassTintHeavy,
+        border: Colors.transparent,
+        clipper: const WalkthroughPointerClipper(
+          radius: 14,
+          side: WalkthroughPointerSide.top,
+          pointerCenter: 140,
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('🤖', style: TextStyle(fontSize: 13)),
+                const SizedBox(width: 5),
+                Text(
+                  'STEP 0',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                    color: palette.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SelectableText.rich(
+              TextSpan(
+                style: GoogleFonts.inter(
+                    fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+                children: [
+                  const TextSpan(text: "You've got two shortcuts here — "),
+                  TextSpan(
+                    text: '+Guest',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: palette.textPrimary),
+                  ),
+                  const TextSpan(text: ' to connect your guest, or '),
+                  TextSpan(
+                    text: 'Details',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: palette.textPrimary),
+                  ),
+                  const TextSpan(
+                      text:
+                          ' to check in on training. Click either to keep going.'),
+                ],
               ),
             ),
           ],
@@ -565,7 +968,27 @@ class _TinyIconBtn extends StatelessWidget {
 // ── Status badge ──────────────────────────────────────────────────────────
 class _StatusBadge extends StatelessWidget {
   final String status;
-  const _StatusBadge({required this.status});
+  // Scrape-quality failsafe (2026-09-17) — true once the give-up state is
+  // active (see migrations/2026-09-17_scrape_retry.sql). Overrides every
+  // status below: the property may genuinely be Trained/Merged, but "Ready"
+  // would mislead the host into thinking nothing needs their attention.
+  final bool needsAttention;
+  // True while a host-triggered link retry is actually in flight — takes
+  // priority over needsAttention (there's nothing to flag while Alfred is
+  // already re-checking) and reuses the exact same "Processing" treatment
+  // Ingesting/Merging already use, rather than inventing a new visual state.
+  final bool retrying;
+  // True for a first-run Stop left un-retried (2026-09-19) — a never-trained
+  // property with status cleared but not soft-deleted. Distinguishes this
+  // from a genuinely unrecognized status, which still falls to the generic
+  // fallback below.
+  final bool isGhost;
+  const _StatusBadge({
+    required this.status,
+    this.needsAttention = false,
+    this.retrying = false,
+    this.isGhost = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -573,17 +996,37 @@ class _StatusBadge extends StatelessWidget {
     // Status → (label, bg, fg, glowAlpha). glowAlpha == 0 means no glow.
     // "Active" uses the vapor-blue accent (autopilot signal); Ready uses
     // bioluminescent mint; emergencies/errors get warm red glow.
-    final (label, bg, fg, glowAlpha) = switch (status) {
-      'Ingesting' || 'Training' =>
-        ('Processing', p.accentContainer, p.accent, 0.25),
-      'Ingested' => ('Ingested', p.warningContainer, p.warning, 0.35),
-      'Merged' || 'Trained' || 'Resolved' =>
-        ('Ready', p.successContainer, p.success, 0.35),
+    final (label, bg, fg, glowAlpha) = retrying
+        ? ('Processing', p.accentContainer, p.accent, 0.25)
+        : isGhost
+        ? ('Training incomplete', p.warningContainer, p.warning, 0.30)
+        : needsAttention
+        ? ('Needs Attention', p.warningContainer, p.warning, 0.35)
+        : switch (status) {
+      // 'Ingested' is a mid-chain state, not a milestone the host should see
+      // as its own word — non-dev auto-merges straight through it, and dev
+      // still has to click Merge manually, but either way "Processing" reads
+      // correctly. Previously showed the raw backend enum verbatim here.
+      'Ingesting' || 'Training' || 'Ingested' || 'Merging' => (
+          'Processing',
+          p.accentContainer,
+          p.accent,
+          0.25
+        ),
+      'Merged' || 'Trained' || 'Resolved' => (
+          'Ready',
+          p.successContainer,
+          p.success,
+          0.35
+        ),
       'Active' => ('Active', p.accentContainer, p.accent, 0.30),
-      'Conflict_Pending' =>
-        ('Conflicts', p.warningContainer, p.warning, 0.35),
-      String s when s.contains('Error') =>
-        ('Error', p.dangerContainer, p.danger, 0.40),
+      'Conflict_Pending' => ('Conflicts', p.warningContainer, p.warning, 0.35),
+      String s when s.contains('Error') => (
+          'Error',
+          p.dangerContainer,
+          p.danger,
+          0.40
+        ),
       _ => (
           status.isNotEmpty ? status : 'Unknown',
           p.surfaceAlt,
@@ -595,7 +1038,13 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: bg,
+        // bg is a translucent "container" token shared with 9+ other spots
+        // in the app (buttons, banners, dialogs) that are deliberately soft.
+        // Blending it against the card's own surface color -- rather than
+        // making the shared token itself opaque -- keeps this pill legible
+        // over any thumbnail photo without changing how bg looks anywhere
+        // else it's used.
+        color: Color.alphaBlend(bg, p.surface),
         borderRadius: BorderRadius.circular(100),
         boxShadow: glowAlpha > 0
             ? [
@@ -726,8 +1175,7 @@ class _HeroImageState extends State<_HeroImage> {
     try {
       final url = await Supabase.instance.client.storage
           .from('Property_assets')
-          .createSignedUrl(
-              '${widget.propertyId}/hero_image/main.jpg', 3600);
+          .createSignedUrl('${widget.propertyId}/hero_image/main.jpg', 3600);
       if (mounted) setState(() => _url = url);
     } catch (_) {}
     if (mounted) setState(() => _loaded = true);

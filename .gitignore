@@ -44,6 +44,8 @@ google-chrome-stable_current_amd64.deb
 .bob/
 .claude/*
 !.claude/settings.json
+!.claude/hooks
+!.claude/hooks/**
 .codeartsdoer/
 .codebuddy/
 .codemaker/

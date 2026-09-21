@@ -15,6 +15,10 @@ class GlassPanel extends StatefulWidget {
   final bool hoverable;
   final List<BoxShadow>? shadow;
   final VoidCallback? onTap;
+  /// Opt-in custom clip shape (e.g. a rounded rect with a pointer tail cut
+  /// into one edge). Null (the default, used everywhere else) keeps the
+  /// plain ClipRRect path unchanged.
+  final CustomClipper<Path>? clipper;
 
   const GlassPanel({
     super.key,
@@ -27,6 +31,7 @@ class GlassPanel extends StatefulWidget {
     this.hoverable = false,
     this.shadow,
     this.onTap,
+    this.clipper,
   });
 
   @override
@@ -56,24 +61,58 @@ class _GlassPanelState extends State<GlassPanel> {
         gradient: AppTheme.glassInnerHighlight,
         borderRadius: BorderRadius.circular(widget.radius),
         border: Border.all(color: borderColor, width: 1),
+      ),
+      child: widget.child,
+    );
+
+    final backdropChild = BackdropFilter(
+      filter: ImageFilter.blur(
+          sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
+      child: panel,
+    );
+    final blurred = widget.clipper != null
+        ? ClipPath(clipper: widget.clipper, child: backdropChild)
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(widget.radius),
+            child: backdropChild,
+          );
+
+    // The drop shadow has to live OUTSIDE the ClipRRect above: a BoxShadow
+    // painted by a clipped descendant gets cut off at the clip's own bounds
+    // instead of spreading outward, which was silently killing every panel's
+    // shadow — the one thing meant to visually separate these "glass" cards
+    // from whatever sits behind them (a dialog, a dashboard, another card).
+    final clipped = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: AppTheme.standardEasing,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(widget.radius),
         boxShadow: widget.shadow ??
             (_hovered && widget.hoverable
                 ? palette.cardShadowHover
                 : palette.cardShadow),
       ),
-      child: widget.child,
-    );
-
-    final clipped = ClipRRect(
-      borderRadius: BorderRadius.circular(widget.radius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-            sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
-        child: panel,
-      ),
+      child: blurred,
     );
 
     if (!widget.hoverable && widget.onTap == null) return clipped;
+
+    // Was a bare GestureDetector — mouse/touch-only, invisible to a keyboard
+    // user (no focus, no Enter/Space activation) and to a screen reader (no
+    // button semantics). This is a shared component, so wrapping it here
+    // fixes every GlassPanel(onTap: ...) consumer app-wide at once. InkWell
+    // gives real button semantics, keyboard focus + activation, and a splash
+    // that shows correctly through the translucent glass surface.
+    final tappable = widget.onTap == null
+        ? clipped
+        : Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(widget.radius),
+              child: clipped,
+            ),
+          );
 
     return MouseRegion(
       cursor: widget.onTap != null
@@ -81,9 +120,7 @@ class _GlassPanelState extends State<GlassPanel> {
           : MouseCursor.defer,
       onEnter: widget.hoverable ? (_) => setState(() => _hovered = true) : null,
       onExit: widget.hoverable ? (_) => setState(() => _hovered = false) : null,
-      child: widget.onTap == null
-          ? clipped
-          : GestureDetector(onTap: widget.onTap, child: clipped),
+      child: tappable,
     );
   }
 }
