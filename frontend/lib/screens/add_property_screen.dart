@@ -22,10 +22,18 @@ import '../widgets/training_result_dialogs.dart';
 class AddPropertyScreen extends StatefulWidget {
   final bool showWalkthrough;
   final bool isDev;
+  // Fired once, in initState, with the client-generated id this screen will
+  // use for the whole flow -- lets the caller (dashboard_screen.dart) know
+  // which property is currently being created here, so its own background
+  // "training just finished" watcher can skip it instead of firing its own
+  // competing popup for the same event (see dashboard_screen.dart's
+  // _activeAddPropertyId).
+  final ValueChanged<String>? onPropertyIdKnown;
   const AddPropertyScreen({
     super.key,
     this.showWalkthrough = false,
     this.isDev = false,
+    this.onPropertyIdKnown,
   });
 
   @override
@@ -39,6 +47,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   final _urlSectionKey = GlobalKey();
   final _uploadSectionKey = GlobalKey();
   final _trainSectionKey = GlobalKey();
+  final _conflictSectionKey = GlobalKey();
   WalkthroughScreen? _walkthroughScreen;
   late final String _propertyId;
   String? _resolvedPropertyId;
@@ -69,6 +78,17 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   // pop a dialog that's already gone (which would pop whatever route is now
   // on top instead, e.g. this screen itself).
   bool _waitDialogDismissed = false;
+  // Route handle for the wait dialog, so it can be closed via
+  // popTrainingWaitDialog's route-keyed removal (waits for the real
+  // fade-out to finish, and closes exactly this route) instead of a blind
+  // Navigator.pop() -- a blind pop closes whatever is CURRENTLY topmost,
+  // which stopped being safe once dashboard_screen.dart can independently
+  // push its own result dialog on the same root navigator while this one is
+  // still open (see the matching fix in dashboard_screen.dart). If that
+  // happens, a blind pop here closes dashboard's dialog instead, leaving
+  // this one stuck on screen until the host manually taps "Continue in
+  // background" -- confirmed live 2026-09-21.
+  Route<void>? _waitDialogRoute;
   // Set by _applyPropertyRow when a terminal status lands while the wait
   // dialog is still showing. Pushing the conflict/trained dialog right then
   // would stack it on top of the still-open wait dialog; the blind
@@ -107,6 +127,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   void initState() {
     super.initState();
     _propertyId = _generateUuidV4();
+    widget.onPropertyIdKnown?.call(_propertyId);
     _urlController.addListener(() => setState(() {}));
     if (widget.showWalkthrough) {
       _walkthroughScreen = WalkthroughScreen.url;
@@ -244,6 +265,15 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
         } else {
           _showConflictDialog(report.length);
         }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _conflictSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(ctx,
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
+                alignment: 0.1);
+          }
+        });
       } else if (waitDialogActive) {
         _pendingResultDialog =
             () => _maybeShowTrainedDialog(prevStatus, status);
@@ -447,9 +477,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
     // Ingest/Merge buttons and completion dialog instead.
     final showWaitDialog = !widget.isDev;
     if (showWaitDialog && mounted) {
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
+      _waitDialogRoute = pushTrainingWaitDialog(
+        context,
         barrierColor: AppTheme.trainingBarrierColor,
         builder: (_) => TrainingWaitDialog(
           onRunInBackground: () => setState(() => _waitDialogDismissed = true),
@@ -480,6 +509,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
       final resolvedId = data['property_id'] as String?;
       if (resolvedId != null && resolvedId != _propertyId) {
         setState(() => _resolvedPropertyId = resolvedId);
+        widget.onPropertyIdKnown?.call(resolvedId);
         _subscribeToProperty(resolvedId);
       }
       // Wait for the real end of the chain — a genuine terminal status, or a
@@ -494,8 +524,9 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           onRetry: _startIngest);
     } finally {
       if (showWaitDialog && mounted && !_waitDialogDismissed) {
-        Navigator.of(context, rootNavigator: true).pop();
+        await popTrainingWaitDialog(context, _waitDialogRoute);
       }
+      _waitDialogRoute = null;
       // Show any result dialog _applyPropertyRow deferred while the wait
       // dialog above was still up, now that it's actually closed.
       final pendingDialog = _pendingResultDialog;
@@ -1435,11 +1466,14 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                       conflictReport != null &&
                       conflictReport.isNotEmpty) ...[
                     const SizedBox(height: 28),
-                    Text('Resolve Conflicts',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    Container(
+                      key: _conflictSectionKey,
+                      child: Text('Resolve Conflicts',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
                     const SizedBox(height: 12),
                     ConflictQuestionnaireWidget(
                       key: ValueKey(conflictReport.length),

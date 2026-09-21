@@ -81,6 +81,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   // be detected regardless of which action caused it.
   final Map<String, String?> _prevPropertyStatus = {};
   static const _dialogBSuccessStatuses = {'Trained', 'Merged', 'Fully_Trained'};
+  // Id of the property currently being created on an open Add Property
+  // screen, if any -- that screen already shows its own popups locally for
+  // its first training run (see its own field comment), so this background
+  // watcher must skip it entirely or the two independently show competing
+  // popups for the same event, landing on top of each other on the same
+  // root navigator. Set when Add Property screen reports its id, cleared
+  // once that screen is closed. Confirmed live 2026-09-21 -- this was the
+  // actual cause of "two stacked popups" during first-time property
+  // creation, despite this class's own field comment above already
+  // describing the intended exclusion.
+  String? _activeAddPropertyId;
   // Serializes result popups so two properties finishing close together show
   // one at a time instead of stacking two barrierDismissible:false dialogs.
   final List<Future<void> Function()> _resultDialogQueue = [];
@@ -329,7 +340,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final announced = <String>{};
     for (final row in rows) {
       final id = row['id'] as String?;
-      if (id == null) continue;
+      if (id == null || id == _activeAddPropertyId) continue;
       final retry = row['scrape_retry'] as Map<String, dynamic>?;
       // retrying==true added 2026-09-17 -- without it, a host-submitted link
       // fix (which sets retrying on top of a prior give-up shape, so
@@ -376,7 +387,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _checkTrainingCompletion(List<Map<String, dynamic>> rows, {Set<String> skipIds = const {}}) {
     for (final row in rows) {
       final id = row['id'] as String?;
-      if (id == null || skipIds.contains(id)) continue;
+      if (id == null || skipIds.contains(id) || id == _activeAddPropertyId) {
+        continue;
+      }
       final status = row['status'] as String?;
       final hadPrev = _prevPropertyStatus.containsKey(id);
       final previous = _prevPropertyStatus[id];
@@ -620,9 +633,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         builder: (_) => AddPropertyScreen(
           showWalkthrough: _properties.isEmpty,
           isDev: _isDev,
+          onPropertyIdKnown: (id) => _activeAddPropertyId = id,
         ),
       ),
     );
+    // Add Property screen is gone now (its own local popups already handled
+    // this property's first training run start to finish) -- stop skipping
+    // it in the background watcher below and pick up its final state here.
+    _activeAddPropertyId = null;
     _loadProperties();
   }
 
