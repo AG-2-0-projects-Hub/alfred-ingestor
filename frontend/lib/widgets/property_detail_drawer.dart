@@ -265,7 +265,7 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
                 stepIndex: step,
                 stepCount: _wtStepCount,
                 title: title,
-                body: body,
+                body: TextSpan(text: body),
                 onBack: step > 0 ? _wtBack : null,
                 onNext: _wtNext,
                 onClose: _wtFinish,

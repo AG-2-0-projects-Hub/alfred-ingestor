@@ -9,6 +9,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/aurora_background.dart';
 import '../widgets/property_card.dart';
 import '../widgets/property_detail_drawer.dart';
+import 'edit_property_screen.dart';
 import '../widgets/training_result_dialogs.dart';
 import '../widgets/property_expanded_view.dart';
 import '../widgets/archived_chats_dialog.dart';
@@ -396,12 +397,20 @@ class _DashboardScreenState extends State<DashboardScreen>
               name,
               // Clear back to the bare dashboard first (whatever screen this
               // fired on top of -- Edit Property, an already-open drawer,
-              // anything) before opening a fresh drawer on the resolved
-              // property, so the host never lands on a stale leftover screen.
+              // anything) before going straight to Edit Property, where the
+              // conflicts are actually shown -- not the drawer, which just
+              // has its own Resolve button that routed here anyway (the
+              // redundant loop this was fixed to remove, 2026-09-21).
               onResolve: () {
                 Navigator.of(context, rootNavigator: true)
                     .popUntil((r) => r.isFirst);
-                _openDrawer(row);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => EditPropertyScreen(
+                    property: row,
+                    isDev: _isDev,
+                    onResolved: _refreshAndCheck,
+                  ),
+                )).then((_) => _refreshAndCheck());
               },
             ));
       } else if (_dialogBSuccessStatuses.contains(status) &&
@@ -617,6 +626,19 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadProperties();
   }
 
+  // Refreshes the property list, then immediately runs the same
+  // transition-detection checks the realtime subscription/10s poll already
+  // run -- lets an action the host just took here (e.g. resolving a
+  // conflict) fire the trained/conflict popup right away instead of waiting
+  // on realtime or the next poll tick. Safe to call redundantly: both
+  // checks are transition-based against _prevPropertyStatus and no-op if
+  // realtime already handled it first.
+  Future<void> _refreshAndCheck() async {
+    await _loadProperties(silent: true);
+    final announced = _checkScrapeRetryResolved(_properties);
+    _checkTrainingCompletion(_properties, skipIds: announced);
+  }
+
   void _openDrawer(Map<String, dynamic> property) {
     showGeneralDialog(
       context: context,
@@ -633,7 +655,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         alignment: Alignment.centerRight,
         child: PropertyDetailDrawer(
           property: property,
-          onRefresh: _loadProperties,
+          onRefresh: _refreshAndCheck,
           isDev: _isDev,
         ),
       ),

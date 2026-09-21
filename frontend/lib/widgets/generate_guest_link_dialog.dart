@@ -99,13 +99,24 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
               child: WalkthroughTipPanel(
                 stepIndex: step,
                 stepCount: 9,
+                title: step == 0 ? 'Generate a guest link' : null,
                 body: step == 0
-                    ? "I've filled in a test name — hit Generate Link and "
-                        "I'll create real links you can use to message me "
-                        "myself, as a guest."
-                    : "Send whichever matches how your guest reaches out — "
-                        "web, WhatsApp, or Telegram, they all reach me the "
-                        "same way. One more thing to show you first →",
+                    ? const TextSpan(
+                        text: "I've filled in a test name — hit Generate Link and "
+                            "I'll create real links you can use to message me "
+                            "myself, as a guest.")
+                    : TextSpan(children: [
+                        const TextSpan(
+                            text: "You have up to three ways to reach your guest — "
+                                "web chat, WhatsApp, or Telegram. Send whichever you "
+                                "or your guest prefers; it's the same "),
+                        const TextSpan(
+                            text: 'Me',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const TextSpan(
+                            text: " either way, already briefed on this stay. One "
+                                "more thing to show you first →"),
+                      ]),
                 onNext: _wtNext,
                 onClose: _wtClose,
                 isLast: false,

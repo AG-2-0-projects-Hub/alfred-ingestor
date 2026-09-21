@@ -221,7 +221,37 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
 
   void _wtBack() {
     if (_wtStep == null || _wtStep == 0) return;
+    // Leaving step 3 ("Escalated") the way we came: undo the demo escalation
+    // it staged, so Back actually returns to step 2's exact state instead of
+    // leaving the escalated message and Intervene mode live. Re-clears
+    // _wtEscalationShown too, so re-entering step 3 later stages it fresh.
+    if (_wtStep == 3) {
+      _wtEscalationShown = false;
+      setState(() {
+        _mode = 'autopilot';
+        _escalationReason = null;
+        _requiresAttention = false;
+        _messages = _messages
+            .where((m) => m['id'] != 'wt-demo-guest' && m['id'] != 'wt-demo-ai')
+            .toList();
+      });
+    }
     _setWtStep(_wtStep! - 1);
+  }
+
+  // Step 4 ("Your turn")'s tip-panel Next: clicking it instead of Send should
+  // still complete the step for real -- send the pre-filled reply (if not
+  // already sent) and resolve, same as the Send + Mark Issue as Resolved
+  // path, rather than just skipping ahead with the message unsent and the
+  // mode still stuck on Intervene. _resolveIssue's wasStep4 branch already
+  // advances via _wtNext() once it resets the mode, so this doesn't call it.
+  void _wtHandleNext() {
+    if (_wtStep == 4) {
+      if (!_wtReplySent) _sendHostMessage();
+      _resolveIssue();
+      return;
+    }
+    _wtNext();
   }
 
   void _wtFinish() {
@@ -351,9 +381,9 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 stepIndex: step + 2,
                 stepCount: 9,
                 title: info.title,
-                body: info.body,
+                body: TextSpan(text: info.body),
                 onBack: info.hasBack ? _wtBack : null,
-                onNext: _wtNext,
+                onNext: _wtHandleNext,
                 onClose: _wtFinish,
                 isLast: info.isLast,
                 pointerSide: WalkthroughPointerSide.left,

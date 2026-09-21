@@ -100,7 +100,7 @@ class WalkthroughTipPanel extends StatelessWidget {
   final int stepIndex;
   final int stepCount;
   final String? title;
-  final String body;
+  final InlineSpan body;
   final VoidCallback? onBack;
   final VoidCallback onNext;
   final VoidCallback onClose;
@@ -201,7 +201,7 @@ class WalkthroughTipPanel extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              Text(
+              Text.rich(
                 body,
                 style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
               ),

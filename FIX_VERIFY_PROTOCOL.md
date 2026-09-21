@@ -16,10 +16,10 @@ session if it's missing. Not a promise — a structural check.
 
 ## The sequence
 
-1. **FMEA, before any code.** A real failure-mode table — state × surface × data-delivery-path,
-   not three shallow bullets — covering what this fix touches and how it can fail. Explicitly
+1. **FMEA, before any code.** A real failure-mode table — state × surface × data-delivery-path x  desired final state,
+   not four shallow bullets — covering what this fix touches and how it can fail. Explicitly
    state whether automated test coverage already exists for this area. Silence on that question
-   is not acceptable.
+   is not acceptable. Explain in plain words, no code or pseudo-code.
 2. **Propose the fix, wait for explicit approval.** Same as every other change in this project —
    no code before a "yes"/"confirm"/"go ahead".
 3. **Implement.**

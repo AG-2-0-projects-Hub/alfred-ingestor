@@ -58,6 +58,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Alfred mascot/persona — own mini-project, Clippy-style riff, 🤖 emoji is the placeholder (queued 2026-09-09)
 - [ ] Revisit "Update a Property" — file deletion doesn't retract knowledge, real Airbnb listing changes (photos, house code); wants real beta-tester input first (queued 2026-09-09)
 - [ ] Add real sourced stats/fun facts to the Train Now wait popup's rotating card (currently Alfred-capability tips only, no stats — deliberately avoided fabricating numbers) (queued 2026-09-09)
+- [ ] guide.html: add a section on exporting Airbnb's listing JSON directly (the "goldmine" method), plus a simple copy-paste-into-a-doc (.txt/.docx/PDF) fallback for non-technical hosts — deferred pending the exact export steps from the founder (queued 2026-09-21)
 - [ ] Property/document match-check (queued 2026-09-19, deliberately parked as its own design
       problem — not part of the 2026-09-19 UI/UX batch): verify that uploaded supporting documents
       (house manual, WiFi photo, etc.) actually belong to the property they're attached to, rather

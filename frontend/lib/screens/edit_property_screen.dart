@@ -20,11 +20,17 @@ import '../widgets/training_wait_dialog.dart';
 class EditPropertyScreen extends StatefulWidget {
   final Map<String, dynamic> property;
   final bool isDev;
+  // Called right after a conflict resolution succeeds, in addition to the
+  // normal local state update -- lets a caller (dashboard_screen.dart) learn
+  // about it immediately instead of only finding out once realtime/the poll
+  // catches up (which was the source of the "trained" popup's 5-7s lag).
+  final VoidCallback? onResolved;
 
   const EditPropertyScreen({
     super.key,
     required this.property,
     this.isDev = false,
+    this.onResolved,
   });
 
   @override
@@ -495,6 +501,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       _propertyStatus = status;
       _masterJson = masterJson;
     });
+    widget.onResolved?.call();
   }
 
   // Phase 3 (2026-09-16) — item 2's "request never reaches the backend"
