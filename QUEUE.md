@@ -14,6 +14,13 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
+      feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
+      PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
+      `display: standalone`, Flutter web already registers a service worker) — the real work is a
+      responsive layout pass across the dashboard/chat screens. Also directly shortens a future
+      native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
+      Stitch draft during the week; not urgent, but goes first when picked up.
 - [ ] Write the missing `_UNIVERSAL_FIELDS_TEST` (`backend/services/gemini_merge_resolve.py` —
       a comment at the schema definition claims this smoke test exists and verifies Gemini omits
       ungrounded fields instead of hallucinating them; it doesn't actually exist anywhere in the

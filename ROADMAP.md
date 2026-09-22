@@ -350,6 +350,7 @@ We are effectively at **Phase 6 of 7** of the V1 build. Remaining work is **hard
 Parked; detail when M3 is in sight.
 - **OTA / channel-manager integration (Channex.io)** — sync to Airbnb / Booking / VRBO through one layer instead of per-platform APIs. *Also the legitimate de-risk for R1.*
 - **Dynamic pricing with a heat-map view** — recommended nightly pricing across dates/properties as a visual heat map.
+- **Financial overview (per property)** — a simple, non-official rollup for the host: income minus taxes, cleaning fee, Airbnb fee, etc. Not accounting-grade, just a general picture. Start simple (basic subtraction from numbers already available or host-entered); more robust reporting later if it proves valuable. Founder-flagged 2026-09-22.
 - Cleaning-schedule automation, multi-language expansion (candidates).
 
 ---

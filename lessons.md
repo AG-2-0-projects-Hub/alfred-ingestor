@@ -653,6 +653,63 @@ in any project using the Bash tool + wsl from this same host setup.
 
 ---
 
-## 2026-09-21 — An unverified fix for a slow Gemini call broke it completely in prod, immediately
+## 2026-09-22 — A "guaranteed" structured-data layer had a real coverage gap nobody had checked against the platform's own requirements
 
-**Context:** Investigating Submit Resolutions' Alfred
+**Context:** Founder reported a real bug testing prod: a Mexican property's first guest message
+came back in English. `welcome.py`'s language picker reads `master_json.location.country`.
+
+**Discovery:** `UNIVERSAL_FIELDS_SCHEMA` (the schema-enforced "guaranteed always exists" layer of
+`master_json`, built specifically to fix inconsistent freeform key naming) never actually defined
+a `country` field -- only `location.address` (a raw string) + `coordinates`. Confirmed live on the
+founder's actual property: the address string didn't even contain the word "Mexico," so no
+text-parsing fallback could have covered this -- only a real schema fix. Auditing the same schema
+against Airbnb's own official mandatory host-disclosure requirements (not assumption -- checked
+via web research against Airbnb's Help Center) found a second, bigger gap: zero safety-disclosure
+fields (smoke/CO alarms, cameras, weapons, hazards) despite Airbnb requiring hosts to disclose all
+of them. Separately, a code comment in the same file claimed a smoke test
+(`_UNIVERSAL_FIELDS_TEST`) verifies the schema never hallucinates ungrounded fields -- it doesn't
+exist anywhere in the repo (verified via ripgrep before trusting the claim).
+
+**Impact:** Shipped `location.{country,city,state_region,postal_code}`, a new `safety` object,
+`parking`, and `commercial_photography_allowed` (`staging 2ccef20`). Verified live against a real
+Gemini call before committing -- not just a code read. The missing test got queued
+(`QUEUE.md`) rather than built same-session, since it wasn't the thing actually being asked for.
+
+**Global Candidate:** Yes -- when a schema/data layer is described as "the guaranteed layer" or
+"the structured fields," that description is a claim, not a fact -- verify its actual field
+coverage against real consumers (what code reads from it) AND, where the domain has one, the
+platform's own official required-field list, rather than trusting the layer's name or its own
+design-comment's stated intent. Also: a code comment claiming a test/mechanism exists is itself
+unverified until grepped for.
+
+---
+
+## 2026-09-22 — "Let's start simple" can be misread as license to defer the actual requested capability, not just its scope/UI
+
+**Context:** Planning a Telegram host-escalation bridge (alert on escalation + let the host act on
+it without opening the webapp). Founder said "let's start simple, add features later."
+
+**Discovery:** First plan draft interpreted "simple" as: send a notification, plus a separate
+"Intervene" button that just opens the webapp -- deferring "reply directly from Telegram" (the
+blueprint's free-text relay) to an unspecified "later phase." Founder corrected this firmly: the
+existing code already auto-flips `conversation.mode` to `intervene` the instant a message
+escalates, so there is no button needed at all -- the host "intervening" IS them typing a reply in
+Telegram, which routes to the guest. That routing was never a nice-to-have deferred feature; it
+was the actual, literal thing being asked for. "Simple" meant simple alert *content* (don't send
+the whole conversation history) and simple *UI* (no extra button to press), not a stubbed-down
+core capability. The founder named this explicitly as the reason a pre-build FMEA/plan-alignment
+step exists: "you would have spent time and effort building something that is not right."
+
+**Impact:** Re-scoped the plan properly: host's typed Telegram reply routes to the guest via the
+existing `host_send` delivery logic, disambiguated by Telegram's native reply-to-message when
+multiple escalations are open at once (founder's explicit choice over "most recent wins"), with a
+confirmation echo on every routed reply so the host always knows who they responded to. No wasted
+build time -- caught during planning, before any code was written.
+
+**Global Candidate:** Yes -- when a request says "keep it simple"/"start simple," that phrase is
+ambiguous across at least three axes (scope of content, UI surface, and core capability) and can
+be misread as license to cut the one thing actually being asked for. Before finalizing a plan built
+on that instruction, restate back specifically what stays "full" vs what gets simplified, rather
+than assuming which axis the word was meant to apply to.
+
+---

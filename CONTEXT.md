@@ -9,20 +9,17 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 **Created:** 2026-04-14
 
 ## Pending
-**Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. This tracks
-session-continuity state only: in-flight investigations and handoffs that don't fit a backlog line.
-- 🔴 guide.html screenshots still broken after two rounds (crops, highlight style, wrong Knowledge-
-  tab approach, misplaced/blurry/incomplete shots) — untouched this session. Full detail + root
-  causes + why it kept going wrong: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
-  **Must use `FIX_VERIFY_PROTOCOL.md`.**
-- 🟡 Stray property "Bungalowww" didn't actually delete (`status` still not `'deleted'`) — minor,
-  worth a quick look at the delete path.
-- 🟡 Fix 2 (walkthrough opacity) not started. Fix 1 (pointer/notch) done. `GlassPanel`'s
-  color/gradient bug (below) is the likely root cause.
-- 🟡 `GlassPanel` silently drops `color` app-wide when `gradient` is also set — still unfixed.
+**Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
+- 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
+  untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
+  Must use `FIX_VERIFY_PROTOCOL.md`.
+- 🟢 **Telegram host-escalation pipeline — fully planned, execute in a fresh session** with
+  `FIX_VERIFY_PROTOCOL.md`. Self-contained plan: `C:\Users\San_8\.claude\plans\tingly-finding-cupcake.md`.
+- 🟡 Stray property "Bungalowww" didn't actually delete — worth a quick look at the delete path.
+- 🟡 Walkthrough opacity Fix 2 not started — likely root cause is `GlassPanel` silently dropping
+  `color` app-wide when `gradient` is also set (still unfixed).
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
-- 🟡 Auth "email already registered" notice (new, this session) is deployed but not yet clicked
-  through by the founder — diagnosed + fixed from prod logs, not live-tested.
+- 🟡 Auth "email already registered" notice (new) deployed, not yet clicked through by the founder.
 
 ## Unresolved Decisions
 - guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
@@ -30,7 +27,67 @@ session-continuity state only: in-flight investigations and handoffs that don't 
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-21 later (**First `staging->main` merge since 2026-09-07 (106 commits,
+**Last Session:** 2026-09-22 (**Fixed a real founder-reported bug (English welcome message on a
+Mexican property), audited the schema against Airbnb's own mandatory host fields, shipped a
+structured location/safety/parking extension (staging `2ccef20`), then planned a full
+Telegram host-escalation pipeline for tomorrow — corrected mid-session after the founder caught
+a real scope misunderstanding.**) — staging only, no push.
+> **✅ Root-caused + fixed: English welcome message on a Spanish-language property.**
+> `welcome.py`'s language picker reads `master_json.location.country`, but
+> `UNIVERSAL_FIELDS_SCHEMA` (`gemini_merge_resolve.py`) never defined a `country` field at
+> all — only `location.address` (raw string) + `coordinates`. Confirmed live on the founder's
+> own "Bungalow" property (prod): `location.address` had no country text in it either, so no
+> text-parsing fallback could have fixed already-ingested properties — only a real schema fix +
+> re-train does. Also found (comment already admitted it, never fixed): the freeform merge
+> produces 3+ different key names for "safety" across real properties (`safety_and_security`/
+> `safety_and_emergency`/`safety_emergency`) — same class of bug as the country gap.
+> **✅ Audited against Airbnb's own mandatory host disclosures** (web research, not assumption) —
+> found the schema also had zero coverage of safety disclosures Airbnb requires (smoke/CO alarms,
+> security cameras, weapons, dangerous animals, hazards). Shipped `location.{country,city,
+> state_region,postal_code}`, a new `safety` object, and `parking` + `commercial_photography_
+> allowed` to `UNIVERSAL_FIELDS_SCHEMA` — verified live against a real Gemini call with synthetic
+> Spanish-property text (all 9 checks passed, including correctly *omitting* `co_alarm` when not
+> mentioned — no hallucination). Deliberately did NOT add a full amenities taxonomy or static
+> pricing (no consumer needs them structured yet; freeform + Alfred's whole-JSON read already
+> covers them) — committed `staging 2ccef20`, not pushed. Missing `_UNIVERSAL_FIELDS_TEST`
+> (a comment claimed it exists; it doesn't) queued in `QUEUE.md` rather than built now.
+> **✅ Discussed + queued: Telegram as a host-alert bridge** while the real mobile app + push
+> notifications (confirmed in code: web notifications require the tab open, no FCM/APNs) waits as
+> its own not-to-be-rushed project. Founder had **already built this exact pipeline once in
+> Make.com** — exported at `_Context/Supabase Alfred Airbnb - E - The Bot.blueprint.json`, read
+> directly via a Python JSON walk (not the Make UI) and reused as proven prior art: alert
+> format, button callback-data convention, and the `/start`-deep-link host-linking mechanic all
+> carried over, adapted onto the current native schema (`host_profiles`/`conversations.mode`)
+> instead of the legacy one (`hosts`/`is_escalated`).
+> **🔴 Real mid-session scope correction, logged as a global lesson:** first plan draft wrongly
+> treated "start simple" as license to defer the actual core ask (replying to a guest directly
+> from Telegram) to a "later phase," keeping only a notification + a separate Intervene button.
+> Founder corrected it firmly: escalation already auto-flips `mode` to `intervene` in existing
+> code, so there's no button needed — the host just types in Telegram and that IS the
+> intervention; "simple" meant simple alert content (not the full conversation) and simple UI (no
+> extra button), not a stubbed-out core feature. Re-planned properly: host's typed Telegram reply
+> now routes to the guest via the existing `host_send` delivery logic (`messages.py:583-633`,
+> extracted into a shared helper), disambiguated by Telegram's native reply-to-message when a host
+> has 2+ escalations open at once (founder's explicit pick over "most recent wins"), with a
+> confirmation echo after every routed reply so the host always knows exactly who they replied to.
+> Also found, while checking the connect-link design: `create_guest` (`messages.py:873-913`)
+> already has both the exact link-builder pattern to reuse (env-var-based domain, NOT hardcoded
+> `t.me` — that domain had a real worldwide outage on 2026-07-13) and a free bonus
+> (`host_chat_url`, a ready-made deep link into a specific conversation's live view) folded into
+> the alert text at zero extra cost.
+> **✅ Plan finalized, self-contained, ready for a fresh session:**
+> `C:\Users\San_8\.claude\plans\tingly-finding-cupcake.md` — full FMEA, exact files/line ranges,
+> effort estimate (~6-7 hrs), explicit env-var confirmation (no new secrets needed), and a
+> pointer to run `FIX_VERIFY_PROTOCOL.md` for real tomorrow. Founder chose to execute in a fresh
+> session rather than this one (context already deep) — see the handoff prompt at the end of this
+> session's transcript.
+> **✅ Also queued:** PWA redesign/reformatting (founder-flagged **priority** — a Stitch UI draft
+> already exists; checked that the PWA plumbing itself is basically already in place, the real
+> work is a responsive layout pass) and a financial-overview feature added to `ROADMAP.md` §11
+> (Horizon) per founder request (simple income-minus-fees rollup, not accounting-grade).
+> Prior entry follows.)
+
+**Prior Session:** 2026-09-21 later (**First `staging->main` merge since 2026-09-07 (106 commits,
 2.5 months) — shipped to PROD, plus a same-session self-inflicted regression found live by the
 founder and fixed within the hour.**) — `main` @ `2ac9487` (merge of PR #8, on top of PR #7's
 `b9a4ed8`), prod backend redeployed twice (`alfred-backend-00022-vtk` then `-00023-9mg`), prod
