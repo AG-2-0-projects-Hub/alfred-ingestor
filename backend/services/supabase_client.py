@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
@@ -657,12 +658,178 @@ def get_property_for_chat(property_id: str) -> dict | None:
     client = get_client()
     result = (
         client.table("properties")
-        .select("id, master_json, name, learned_knowledge, deleted_at, welcome_also_english")
+        .select("id, owner_id, master_json, name, learned_knowledge, deleted_at, "
+                "welcome_also_english")
         .eq("id", property_id)
         .maybe_single()
         .execute()
     )
     return result.data if result else None
+
+
+# ── Host Telegram linking (escalation alerts + reply-from-Telegram) ────────────
+# Host-side analogue of the guest telegram_chat_id/whatsapp_wa_id linking above.
+
+_HOST_LINK_CODE_TTL_MIN = 10
+
+
+def create_host_telegram_link_code(host_id: str) -> str:
+    """Mint a one-time Telegram-connect code for this host, upserting
+    host_profiles the same lazy way ProfileDialog already does (a host may not
+    have a row yet). High-entropy + short-lived: a valid code grants "receive
+    this host's escalation alerts and can reply to guests as this host," so it
+    is a credential, not a cosmetic id — see the migration's WHY note."""
+    client = get_client()
+    code = secrets.token_urlsafe(12)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(minutes=_HOST_LINK_CODE_TTL_MIN)
+    ).isoformat()
+    client.table("host_profiles").upsert({
+        "id": host_id,
+        "telegram_link_code": code,
+        "telegram_link_code_expires_at": expires_at,
+    }).execute()
+    return code
+
+
+def resolve_host_telegram_code(code: str) -> str | None:
+    """Host id for an unexpired link code, or None (unknown or expired) — the
+    caller must not link on None. Does not consume the code; link_host_telegram
+    clears it on success."""
+    client = get_client()
+    result = (
+        client.table("host_profiles")
+        .select("id, telegram_link_code_expires_at")
+        .eq("telegram_link_code", code)
+        .maybe_single()
+        .execute()
+    )
+    if not (result and result.data):
+        return None
+    expires_at = result.data.get("telegram_link_code_expires_at")
+    if not expires_at:
+        return None
+    try:
+        stamp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if datetime.now(timezone.utc) > stamp:
+        return None
+    return result.data["id"]
+
+
+def link_host_telegram(host_id: str, chat_id: str) -> None:
+    """Attach a Telegram chat to a host account and clear the one-time code.
+
+    Mirrors link_guest_telegram's "move, don't duplicate" contract: release
+    this chat_id from any OTHER host first (so re-tapping Start from a new
+    phone moves the link rather than hitting the unique index), then attach it
+    here and consume the code.
+    """
+    client = get_client()
+    cid = str(chat_id)
+    client.table("host_profiles").update({"telegram_chat_id": None}) \
+        .eq("telegram_chat_id", cid).neq("id", host_id).execute()
+    client.table("host_profiles").update({
+        "telegram_chat_id": cid,
+        "telegram_link_code": None,
+        "telegram_link_code_expires_at": None,
+    }).eq("id", host_id).execute()
+
+
+def get_host_telegram_chat_id(host_id: str) -> str | None:
+    """The linked Telegram chat_id for a host, or None if never connected."""
+    result = (
+        get_client().table("host_profiles")
+        .select("telegram_chat_id")
+        .eq("id", host_id)
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("telegram_chat_id") if result else None
+
+
+def get_host_by_telegram_chat_id(chat_id) -> str | None:
+    """Host id linked to this Telegram chat, or None — the common case, since
+    most inbound chats are guests, not hosts."""
+    result = (
+        get_client().table("host_profiles")
+        .select("id")
+        .eq("telegram_chat_id", str(chat_id))
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("id") if result else None
+
+
+def get_conversation_by_host_alert_message_id(
+    host_id: str, message_id: int,
+) -> dict | None:
+    """Resolve a Telegram reply-to onto its conversation, scoped to this host's
+    OWN properties — a reply-to belonging to a different host's alert (should
+    never happen, but never trust client-supplied ids) returns None rather than
+    ever touching another host's conversation."""
+    client = get_client()
+    conv_res = (
+        client.table("conversations")
+        .select("id, booking_id, property_id, mode")
+        .eq("host_alert_message_id", message_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (conv_res and conv_res.data):
+        return None
+    conv = conv_res.data
+    if not host_owns_property(host_id, conv["property_id"]):
+        return None
+    prop = client.table("properties").select("name") \
+        .eq("id", conv["property_id"]).maybe_single().execute()
+    guest = client.table("guests").select("name") \
+        .eq("booking_id", conv["booking_id"]).maybe_single().execute()
+    return {
+        "id": conv["id"],
+        "mode": conv.get("mode"),
+        "guest_name": (guest.data or {}).get("name") if guest else None,
+        "property_name": (prop.data or {}).get("name") if prop else None,
+    }
+
+
+def get_active_intervene_conversations(host_id: str) -> list[dict]:
+    """Every conversation currently awaiting a host reply, across all of this
+    host's properties — the single-active-escalation fallback for a Telegram
+    reply that isn't a reply-to any specific alert."""
+    client = get_client()
+    props_res = (
+        client.table("properties").select("id, name")
+        .eq("owner_id", host_id).execute()
+    )
+    properties = {p["id"]: p["name"] for p in (props_res.data or [])}
+    if not properties:
+        return []
+    convs_res = (
+        client.table("conversations")
+        .select("id, booking_id, property_id")
+        .in_("property_id", list(properties.keys()))
+        .eq("mode", "intervene")
+        .execute()
+    )
+    conversations = convs_res.data or []
+    if not conversations:
+        return []
+    booking_ids = [c["booking_id"] for c in conversations]
+    guests_res = (
+        client.table("guests").select("booking_id, name")
+        .in_("booking_id", booking_ids).execute()
+    )
+    guest_names = {g["booking_id"]: g.get("name") for g in (guests_res.data or [])}
+    return [
+        {
+            "id": c["id"],
+            "guest_name": guest_names.get(c["booking_id"]),
+            "property_name": properties.get(c["property_id"]),
+        }
+        for c in conversations
+    ]
 
 
 def find_or_create_conversation(booking_id: str, property_id: str) -> dict:

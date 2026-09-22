@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../screens/auth_screen.dart';
 import '../services/api_client.dart';
@@ -48,6 +51,12 @@ class _ProfileDialogState extends State<ProfileDialog> {
   bool _uploading = false;
   bool _deleting = false;
 
+  // Telegram "Connect" (host-escalation alerts + reply-from-Telegram).
+  String? _telegramChatId; // non-null once linked
+  String? _telegramLink; // set after generating a connect link this session
+  bool _connectingTelegram = false;
+  Timer? _telegramPollTimer;
+
   SupabaseClient get _db => Supabase.instance.client;
   String? get _uid => _db.auth.currentUser?.id;
   String get _email => _db.auth.currentUser?.email ?? '';
@@ -63,6 +72,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _nameController.dispose();
     _nicknameController.dispose();
     _bioController.dispose();
+    _telegramPollTimer?.cancel();
     super.dispose();
   }
 
@@ -71,7 +81,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     try {
       final row = await _db
           .from('host_profiles')
-          .select('display_name, nickname, bio, avatar_url')
+          .select('display_name, nickname, bio, avatar_url, telegram_chat_id')
           .eq('id', _uid ?? '')
           .maybeSingle();
       // row == null here is a clean "no profile row yet" — expected for a
@@ -81,6 +91,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _nicknameController.text = row['nickname'] as String? ?? '';
         _bioController.text = row['bio'] as String? ?? '';
         _avatarUrl = row['avatar_url'] as String?;
+        _telegramChatId = row['telegram_chat_id'] as String?;
       }
     } catch (_) {
       // A real failure (network, RLS) is NOT the same as "no row yet" — that
@@ -174,6 +185,135 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
   }
 
+  void _copy(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied!'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  Future<void> _connectTelegram() async {
+    setState(() => _connectingTelegram = true);
+    try {
+      final token = _db.auth.currentSession?.accessToken;
+      final data = await ApiClient.postJson(
+        '/api/host/telegram/link-code', const {}, bearer: token,
+      );
+      if (mounted) {
+        setState(() => _telegramLink = data['telegram_link'] as String?);
+      }
+      // The host taps the link/QR on their phone and it links server-side —
+      // this dialog has no other way to know that happened, so poll the
+      // owner-scoped RLS row every few seconds and flip to "Connected" the
+      // moment it lands. Capped at 10 minutes, matching the code's own expiry.
+      _telegramPollTimer?.cancel();
+      var elapsed = Duration.zero;
+      const interval = Duration(seconds: 3);
+      const cap = Duration(minutes: 10);
+      _telegramPollTimer = Timer.periodic(interval, (timer) async {
+        elapsed += interval;
+        if (elapsed >= cap) {
+          timer.cancel();
+          return;
+        }
+        final row = await _db
+            .from('host_profiles')
+            .select('telegram_chat_id')
+            .eq('id', _uid ?? '')
+            .maybeSingle();
+        final chatId = row?['telegram_chat_id'] as String?;
+        if (chatId != null && mounted) {
+          timer.cancel();
+          setState(() {
+            _telegramChatId = chatId;
+            _telegramLink = null;
+          });
+        }
+      });
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessage), backgroundColor: context.palette.danger),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: const Text('Could not generate a connection link. Please try again.'),
+              backgroundColor: context.palette.danger),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _connectingTelegram = false);
+    }
+  }
+
+  Widget _buildTelegramSection(AppPalette palette) {
+    if (_telegramChatId != null) {
+      return Row(
+        children: [
+          Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Telegram connected — you'll get an alert there when a guest "
+              'needs you.',
+              style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_telegramLink != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Open this link on your phone, or scan the QR code, then tap '
+            'Start in Telegram.',
+            style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: QrImageView(data: _telegramLink!, size: 140),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _telegramLink!,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                tooltip: 'Copy',
+                onPressed: () => _copy(_telegramLink!),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return OutlinedButton.icon(
+      onPressed: _connectingTelegram ? null : _connectTelegram,
+      icon: const Icon(Icons.send_rounded, size: 16),
+      label: Text(_connectingTelegram ? 'Generating…' : 'Connect Telegram'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -252,6 +392,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     const SizedBox(height: 8),
                     _readOnlyRow(Icons.home_work_outlined, 'Registered properties',
                         '${widget.propertyCount}', palette),
+                    const SizedBox(height: 20),
+                    _label('Telegram alerts', palette),
+                    _buildTelegramSection(palette),
                     const SizedBox(height: 28),
                     const Divider(),
                     const SizedBox(height: 12),
