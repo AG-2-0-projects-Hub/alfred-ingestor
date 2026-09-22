@@ -14,6 +14,13 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] Write the missing `_UNIVERSAL_FIELDS_TEST` (`backend/services/gemini_merge_resolve.py` —
+      a comment at the schema definition claims this smoke test exists and verifies Gemini omits
+      ungrounded fields instead of hallucinating them; it doesn't actually exist anywhere in the
+      repo). Two fixture inputs through `_extract_universal_fields()` — one with clear
+      country/safety/parking facts stated, one with none — asserting facts get extracted when
+      present and fields are omitted (not guessed) when absent. Flagged 2026-09-22 while adding
+      structured `location`/`safety`/`parking` fields to the same schema.
 - [ ] Wire up Sentry error tracking (backend + frontend) — reuse the existing reflip pipeline/setup
       as the template (same Sentry org, `alonso-vazquez-ng`, already has `reflip-backend`/
       `reflip-frontend` projects; the-ingestor needs its own two). Motivated by the 2026-09-21
