@@ -1250,6 +1250,76 @@ Guest-side WhatsApp (port of the Telegram channel onto Meta Cloud API direct). H
 
 ---
 
+## P. Telegram host escalation (alerts, reply, picker, resolve)
+
+Host-side Telegram (mirror of J's guest-side channel) — bridges the "browser tab must be open"
+gap in web push notifications. Built 2026-09-22→23, live-tested extensively by the founder on
+staging via their own phone across multiple real conversations. Status below reflects that
+testing plus one direct DB-query verification pass (see P6's note) — not yet re-verified on prod.
+
+### P1. Host connects Telegram via link/QR
+- **id:** tgh-connect-01
+- **touches:** `backend/routers/properties.py` (`/host/telegram/link-code`), `frontend/lib/widgets/profile_dialog.dart`
+- **layer:** 2 (Playwright — see `_tests/runner/scenarios/p1.ts`)
+- **setup:** a host account with no `telegram_chat_id` set
+- **action:** open profile dialog → "Connect Telegram" → tap the generated link (or scan QR) → tap Start in Telegram
+- **host_expected:** profile dialog polls and flips to "Telegram connected" within ~3-10s; `host_profiles.telegram_chat_id` set, `telegram_link_code` cleared
+- **status:** passing — automated via `_tests/runner/scenarios/p1.ts`, run against staging 2026-09-23: connect-link/QR rendering, help panel open/close all PASS. Also caught and fixed a real bug in the process: the deep-link text (and everything below it — Delete account included) was silently below the dialog's scrollable fold once the QR section grew the content past its visible height; fixed with `Scrollable.ensureVisible` on the new section. The actual Telegram-side linking (scanning the QR, tapping Start) still isn't Playwright-drivable and remains founder-verified manually, per this row's original note.
+
+### P2. Escalation alert reaches the host's Telegram
+- **id:** tgh-alert-01
+- **touches:** `backend/routers/messages.py` (`_build_host_alert_text`, escalation block), `backend/services/telegram_client.py` (`send_alert`)
+- **layer:** 4
+- **action:** a guest message triggers escalation on a property whose host is Telegram-connected
+- **host_expected:** a 🔔 alert arrives with property name, escalation reason, guest's message, Alfred's draft reply, and a working "Mark Resolved" button
+- **status:** passing — founder-verified live, multiple times, multiple properties
+
+### P3. Guest follow-up messages during an active escalation also forward
+- **id:** tgh-followup-01
+- **touches:** `backend/routers/messages.py` (intervene-mode branch, ~line 279-330)
+- **layer:** 4
+- **action:** guest sends a second message while the conversation is still in `intervene` mode
+- **host_expected:** a 💬 message arrives (not just the original 🔔 alert), also with a working Mark Resolved button; `conversations.host_alert_message_id` repoints to it
+- **status:** passing — founder-verified live (this was the original bug report that led to `00ced13`)
+
+### P4. Host reply routes correctly (single-active, reply-to, picker, /switch)
+- **id:** tgh-reply-routing-01
+- **touches:** `backend/routers/telegram.py` (`_handle_host_reply`, `_handle_select_callback`, `_send_picker`, `_handle_host_switch`)
+- **layer:** 4
+- **action:** (1) exactly one active escalation, host types a plain message; (2) 2+ active, host types a plain message; (3) host taps a picker button; (4) host sends `/switch` while already locked; (5) host replies-to a specific alert directly
+- **host_expected:** (1) auto-routes silently, no picker shown, confirmation echo names the right guest; (2) picker appears (one button per guest, "name — property"), original message NOT delivered anywhere; (3) picker message edits to "🔗 Connected to X", lock set, subsequent plain messages go to that guest; (4) picker reopens regardless of current lock; (5) lock switches to that guest, message delivered, confirmation echo
+- **guest_expected:** only the correctly-routed guest receives the reply, never the wrong one
+- **status:** passing — founder-verified live, all 5 sub-cases, with 2 real simultaneous escalations
+
+### P5. Mark Resolved from Telegram matches the dashboard's Resolve button exactly
+- **id:** tgh-resolve-01
+- **touches:** `backend/routers/messages.py` (`_resolve_conversation_core`), `backend/routers/telegram.py` (`_handle_callback`), `frontend/lib/widgets/chat_live_dialog.dart` (`_computeEscalationWindow`)
+- **layer:** 4
+- **action:** tap "Mark Resolved" on a Telegram alert
+- **host_expected:** button's own message edits to "✅ Resolved" (keyboard removed — tapping again does nothing); if this was the host's locked conversation, the lock clears (`active_conversation_booking_id` → null) and the next plain message reopens the picker/auto-routes as if unlocked
+- **guest_expected:** "Alfred has resumed the conversation" appears in their chat (web) or is pushed to their channel (Telegram/WhatsApp guest)
+- **dashboard_expected:** the resolved message chain renders green, identically to a dashboard-triggered resolve
+- **status:** passing — founder-verified live; green-highlighting specifically double-checked via direct Supabase query across 3 conversations (see `_Context/` session history) after an initial one-off report of it not working, which did not reproduce
+
+### P6. WhatsApp delivery failure surfaces correctly on a Telegram-originated reply
+- **id:** tgh-wa-delivery-01
+- **touches:** `backend/routers/telegram.py` (`_handle_host_reply`), `backend/routers/messages.py` (`_host_send_core`, `_deliver_host_whatsapp`)
+- **layer:** 4
+- **setup:** a guest whose active channel is WhatsApp and whose 24h service window has closed (or Meta otherwise rejects delivery)
+- **action:** host replies to that guest from Telegram
+- **host_expected:** a ⚠️ warning with the real reason (e.g. "WhatsApp's 24-hour reply window has closed..."), NOT a false "✓ Sent"
+- **status:** passing — fixed via code audit (bug found by reading `_handle_host_reply` after two similar live-found bugs), accepted on code-symmetry with the already-proven dashboard code path per founder decision 2026-09-23 rather than a live repro — staging has no real guest check-in/out data to naturally produce a closed 24h window. Follow-up re-verification with real guests queued in `ROADMAP.md`.
+
+### P7. Non-Telegram-connected hosts see zero behavior change
+- **id:** tgh-noop-01
+- **touches:** `backend/routers/messages.py` (escalation block's `if host_chat_id:` guard)
+- **layer:** 4
+- **action:** an escalation occurs on a property whose host has never connected Telegram
+- **expected:** identical behavior to before this feature existed — dashboard-only, no Telegram calls attempted, no errors logged
+- **status:** passing — implicit in every pre-existing dashboard-only property tested this session (the guard is `if host_chat_id:`, never entered when unset) — not a dedicated separate test, just noting it's covered by construction
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
@@ -1268,7 +1338,8 @@ Guest-side WhatsApp (port of the Telegram channel onto Meta Cloud API direct). H
 | **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
 | **N. Infrastructure & deploy** | **4** | **4** | — | — |
 | **O. WhatsApp** | **6** | — | — | **6** |
-| **Total** | **85** | **17** | **43** | **28** |
+| **P. Telegram host escalation** | **7** | — | **1** | **6** |
+| **Total** | **92** | **17** | **44** | **34** |
 
 **Open (not passing) — as of 2026-07-15:**
 - **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.
