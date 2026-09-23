@@ -87,11 +87,12 @@ def _escape_html(text: str) -> str:
 def _build_host_alert_text(
     property_name: str | None, escalation_reason: str | None,
     guest_message: str, draft_reply: str, host_chat_url: str,
+    icon: str = "🔔",
 ) -> str:
     """Compose the HTML text of a Telegram escalation alert. Guest/AI content is
     freeform and untrusted by Telegram's HTML parser (an unescaped `<`/`>`/`&`
     would 400 the send) — everything interpolated here is escaped."""
-    lines = [f"🔔 <b>{_escape_html(property_name or 'Your property')}</b>"]
+    lines = [f"{icon} <b>{_escape_html(property_name or 'Your property')}</b>"]
     if escalation_reason:
         lines.append(f"Reason: {_escape_html(escalation_reason.replace('_', ' '))}")
     lines.append("")
@@ -282,6 +283,53 @@ async def process_guest_message(
             conversation["id"],
             ai_status="paused",
         )
+
+        # The host needs every guest follow-up while already escalated, not
+        # just the one message that triggered it — otherwise Telegram is
+        # one-way (found live 2026-09-23): a web host sees these via
+        # realtime, but a Telegram-only host saw nothing after the first
+        # alert. Forward each one the same way, with its own Mark Resolved
+        # button, and re-point host_alert_message_id at it so a reply-to
+        # always targets the guest's latest message.
+        try:
+            owner_id = (property_data or {}).get("owner_id")
+            host_chat_id = (
+                await asyncio.to_thread(
+                    supabase_client.get_host_telegram_chat_id, owner_id
+                )
+                if owner_id else None
+            )
+            if host_chat_id:
+                followup_text = message or (
+                    (f"[{image_count} images]" if image_count > 1 else "[image]")
+                    if media_kind == "image"
+                    else "[voice message]" if media_kind == "audio" else ""
+                )
+                property_name, _ = _resolve_identity(property_data)
+                frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+                    .strip().rstrip("/")
+                host_chat_url = (
+                    f"{frontend_url}/chat-live?booking={booking_id}"
+                    f"&property={property_data['id']}"
+                )
+                alert_text = _build_host_alert_text(
+                    property_name or (property_data or {}).get("name"),
+                    None, followup_text, "", host_chat_url, icon="💬",
+                )
+                sent_message_id = await telegram_client.send_alert(
+                    host_chat_id, alert_text,
+                    [("✅ Mark Resolved", f"resolved_{booking_id}")],
+                )
+                if sent_message_id:
+                    await asyncio.to_thread(
+                        supabase_client.update_conversation,
+                        conversation["id"],
+                        host_alert_message_id=sent_message_id,
+                    )
+        except Exception as exc:
+            log.warning("telegram host follow-up alert failed for booking=%s: %s",
+                        booking_id, exc)
+
         return {
             "reply": None,
             "requires_escalation": False,

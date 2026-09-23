@@ -713,3 +713,34 @@ on that instruction, restate back specifically what stays "full" vs what gets si
 than assuming which axis the word was meant to apply to.
 
 ---
+
+## 2026-09-23 — Re-hit the ALREADY-DOCUMENTED `wsl bash` command-substitution bug (2026-09-03) doing secrets/deploy work
+
+**Context:** Redeploying the Telegram host-escalation backend to staging, needed to fetch
+`TELEGRAM_WEBHOOK_SECRET` from Secret Manager and pass it as a header to re-register the webhook
+(it must never be printed per the Secret Redaction Rule) — exactly the kind of
+infra/secrets/deploy task this project's own `CLAUDE.md` says to grep `lessons_index.md` for
+before starting.
+
+**Discovery:** `SECRET=$(gcloud secrets versions access latest --secret=...)` inside a
+`wsl bash -lc '...'` call silently evaluated to an empty string (`${#SECRET}`=0, exit code 0, no
+stderr) — confirmed it's command substitution itself, not gcloud, since even
+`X=$(echo hi)` returns empty the same way. This is **the exact bug already logged 2026-09-03**
+("Bash-tool -> WSL `$(...)` command substitution silently returns empty — use file
+redirection/pipes instead, never capture into a var") — the index row was right there and names
+the fix precisely. The lessons-index check was skipped before starting the deploy/secrets work,
+so several minutes went into re-diagnosing a known issue from scratch. Same failure-to-check
+pattern already called out once before, 2026-09-16 ("Re-hit an ALREADY-DOCUMENTED shell-quoting
+bug ... because the mandated lessons-index check was skipped").
+
+**Impact:** Worked around it the same way this time: did the fetch-secret-then-HTTP-call entirely
+inside one `python3 -c` process (`subprocess.run(capture_output=True)` for the gcloud call,
+`urllib.request` for the HTTP call) instead of bash `$(...)`.
+
+**Global Candidate:** No — the underlying bug is already global (2026-09-03). What's worth
+tightening is project-local process: this is the SECOND time the mandated pre-work lessons-index
+grep was skipped and cost real time re-discovering something already written down. Consider
+actually running the grep as a literal first tool call on any infra/secrets/deploy task, not a
+mental note that's easy to skip under task momentum.
+
+---
