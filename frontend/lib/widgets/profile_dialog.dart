@@ -58,6 +58,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Timer? _telegramPollTimer;
   final _tgHelpDockLink = LayerLink();
   OverlayEntry? _tgHelpOverlay;
+  final _telegramSectionKey = GlobalKey();
 
   SupabaseClient get _db => Supabase.instance.client;
   String? get _uid => _db.auth.currentUser?.id;
@@ -204,6 +205,19 @@ class _ProfileDialogState extends State<ProfileDialog> {
       );
       if (mounted) {
         setState(() => _telegramLink = data['telegram_link'] as String?);
+        // The QR/link section pushes the dialog's content past its visible
+        // height -- without this, the host has no obvious affordance telling
+        // them to scroll, and the new content (link text, copy button, even
+        // Delete account below it) silently sits below the fold.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _telegramSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(ctx,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+                alignment: 1.0);
+          }
+        });
       }
       // The host taps the link/QR on their phone and it links server-side —
       // this dialog has no other way to know that happened, so poll the
@@ -559,7 +573,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
                         ),
                       ],
                     ),
-                    _buildTelegramSection(palette),
+                    Container(
+                      key: _telegramSectionKey,
+                      child: _buildTelegramSection(palette),
+                    ),
                     const SizedBox(height: 28),
                     const Divider(),
                     const SizedBox(height: 12),
