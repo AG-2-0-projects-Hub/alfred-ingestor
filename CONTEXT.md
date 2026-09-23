@@ -13,14 +13,10 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 - 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
   untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
   Must use `FIX_VERIFY_PROTOCOL.md`.
-- 🟢 **Telegram host-escalation pipeline — built, deployed to staging, extensively live-tested by
-  the founder (staging `9284bba`). NOT yet merged to main/prod.** What's left is closing out
-  FIX_VERIFY_PROTOCOL properly (pending-intake rows, a real Playwright scenario for the
-  Connect-Telegram UI piece, the FIX_VERIFY commit trailer) and then the actual staging→main
-  merge sequence (prod migrations, PR, founder-merge, prod webhook re-registration — easy to
-  forget, would silently break Mark Resolved/the picker on prod). Fully self-contained plan,
-  including flagged inconsistencies and one open question for the founder:
-  `C:\Users\San_8\.claude\plans\telegram-host-escalation-merge-readiness.md`.
+- 🟢 **Telegram host-escalation — FIX_VERIFY closed (staging `ad87535`).** Only the staging→main
+  merge sequence remains (prod migrations, PR, founder-merge, prod webhook re-registration — easy
+  to forget, would silently break Mark Resolved/the picker on prod): `C:\Users\San_8\.claude\plans\
+  telegram-host-escalation-merge-readiness.md` §4.
 - 🟡 Stray property "Bungalowww" didn't actually delete — worth a quick look at the delete path.
 - 🟡 Walkthrough opacity Fix 2 not started — likely root cause is `GlassPanel` silently dropping
   `color` app-wide when `gradient` is also set (still unfixed).
