@@ -588,10 +588,18 @@ async def _handle_host_reply(
         # feedback at all AND risk Cloud Tasks retrying the job (a retry after
         # insert_message already succeeded would re-deliver the same reply to
         # the guest a second time). Catch it here instead.
-        await messages_router._host_send_core(conversation["id"], text)
-        await telegram_client.send_italic(
-            chat_id, f"{note}✓ Sent to {_conversation_label(conversation)}"
-        )
+        # `delivery` is set only when the guest is on WhatsApp and Meta would
+        # not (or did not) accept the message — same contract as host_send's
+        # HTTP route, which shows this as a warning snackbar rather than a
+        # success toast. Discarding it here would tell the host "sent" for a
+        # message the guest never actually received (found live 2026-09-23
+        # auditing for this exact class of gap after two earlier ones).
+        delivery = await messages_router._host_send_core(conversation["id"], text)
+        label = _conversation_label(conversation)
+        if delivery:
+            await telegram_client.send_message(chat_id, f"{note}⚠️ {delivery}")
+        else:
+            await telegram_client.send_italic(chat_id, f"{note}✓ Sent to {label}")
     except Exception as exc:
         log.exception("telegram host reply failed for host=%s: %s", host_id, exc)
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
