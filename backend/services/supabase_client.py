@@ -762,6 +762,23 @@ def get_host_by_telegram_chat_id(chat_id) -> str | None:
     return (result.data or {}).get("id") if result else None
 
 
+def _conversation_display_names(
+    client, property_id: str, booking_id: str,
+) -> tuple[str | None, str | None]:
+    """(guest_name, property_name) for a single conversation — shared by the
+    few host-facing lookups below that resolve one conversation at a time.
+    get_active_intervene_conversations batches its own version instead, since
+    it may resolve many at once."""
+    prop = client.table("properties").select("name") \
+        .eq("id", property_id).maybe_single().execute()
+    guest = client.table("guests").select("name") \
+        .eq("booking_id", booking_id).maybe_single().execute()
+    return (
+        (guest.data or {}).get("name") if guest else None,
+        (prop.data or {}).get("name") if prop else None,
+    )
+
+
 def get_conversation_by_host_alert_message_id(
     host_id: str, message_id: int,
 ) -> dict | None:
@@ -782,16 +799,69 @@ def get_conversation_by_host_alert_message_id(
     conv = conv_res.data
     if not host_owns_property(host_id, conv["property_id"]):
         return None
-    prop = client.table("properties").select("name") \
-        .eq("id", conv["property_id"]).maybe_single().execute()
-    guest = client.table("guests").select("name") \
-        .eq("booking_id", conv["booking_id"]).maybe_single().execute()
+    guest_name, property_name = _conversation_display_names(
+        client, conv["property_id"], conv["booking_id"]
+    )
     return {
         "id": conv["id"],
+        "booking_id": conv["booking_id"],
         "mode": conv.get("mode"),
-        "guest_name": (guest.data or {}).get("name") if guest else None,
-        "property_name": (prop.data or {}).get("name") if prop else None,
+        "guest_name": guest_name,
+        "property_name": property_name,
     }
+
+
+def get_conversation_for_host_lock(host_id: str, booking_id: str) -> dict | None:
+    """Resolve a booking_id (a Telegram lock, or a picker's select_<booking_id>
+    callback) onto its conversation, scoped to this host's OWN properties —
+    same ownership contract as get_conversation_by_host_alert_message_id.
+    Includes `mode` so the caller can detect a stale lock/selection (the
+    conversation was resolved some other way, e.g. the dashboard)."""
+    client = get_client()
+    guest_res = (
+        client.table("guests").select("property_id")
+        .eq("booking_id", booking_id).maybe_single().execute()
+    )
+    if not (guest_res and guest_res.data):
+        return None
+    property_id = guest_res.data["property_id"]
+    if not host_owns_property(host_id, property_id):
+        return None
+    conv_res = (
+        client.table("conversations").select("id, mode")
+        .eq("booking_id", booking_id).maybe_single().execute()
+    )
+    if not (conv_res and conv_res.data):
+        return None
+    guest_name, property_name = _conversation_display_names(
+        client, property_id, booking_id
+    )
+    return {
+        "id": conv_res.data["id"],
+        "mode": conv_res.data.get("mode"),
+        "guest_name": guest_name,
+        "property_name": property_name,
+    }
+
+
+def get_host_active_conversation_booking_id(host_id: str) -> str | None:
+    """The booking_id a host's plain Telegram messages currently route to, or
+    None if unlocked."""
+    result = (
+        get_client().table("host_profiles")
+        .select("active_conversation_booking_id")
+        .eq("id", host_id)
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("active_conversation_booking_id") if result else None
+
+
+def set_host_active_conversation(host_id: str, booking_id: str | None) -> None:
+    """Set (or clear, with None) this host's Telegram 'locked-in' conversation."""
+    get_client().table("host_profiles").update(
+        {"active_conversation_booking_id": booking_id}
+    ).eq("id", host_id).execute()
 
 
 def get_active_intervene_conversations(host_id: str) -> list[dict]:
@@ -825,6 +895,7 @@ def get_active_intervene_conversations(host_id: str) -> list[dict]:
     return [
         {
             "id": c["id"],
+            "booking_id": c["booking_id"],
             "guest_name": guest_names.get(c["booking_id"]),
             "property_name": properties.get(c["property_id"]),
         }

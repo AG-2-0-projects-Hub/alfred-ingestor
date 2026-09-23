@@ -113,10 +113,15 @@ async def answer_callback_query(callback_query_id: str, text: str | None = None)
 
 
 async def edit_message(chat_id, message_id: int, text: str) -> None:
-    """Rewrite an already-sent message's text (used to turn a resolved alert's
-    button row into a plain '✅ Resolved' confirmation)."""
-    await _post("editMessageText",
-                {"chat_id": chat_id, "message_id": message_id, "text": text})
+    """Rewrite an already-sent message's text AND remove its inline keyboard.
+    Every current caller edits a message specifically to retire its buttons
+    after they've been acted on (resolved, or a picker choice made) — Telegram
+    keeps the original keyboard attached unless a reply_markup is explicitly
+    supplied on the edit, so this always clears it."""
+    await _post("editMessageText", {
+        "chat_id": chat_id, "message_id": message_id, "text": text,
+        "reply_markup": {"inline_keyboard": []},
+    })
 
 
 async def download_file(file_id: str) -> bytes | None:

@@ -918,6 +918,27 @@ async def _resolve_conversation_core(booking_id: str) -> dict:
     )
     await _notify_channel_transition(guest, None, "resume", active_channel)
 
+    # Clear the host's Telegram "locked-in conversation" if it was pointing at
+    # THIS one — resolving a different escalation must not touch it. Runs
+    # whether resolve came from the dashboard or the Telegram "Mark Resolved"
+    # callback, so a dashboard resolve doesn't leave a stale Telegram lock
+    # behind (routers/telegram._handle_host_reply's own stale-lock detection
+    # is only a backstop for this, not the primary mechanism). Best-effort —
+    # never fail the resolve itself over this.
+    try:
+        owner = await asyncio.to_thread(supabase_client.get_property_for_chat, property_id)
+        owner_id = (owner or {}).get("owner_id")
+        if owner_id:
+            locked_booking_id = await asyncio.to_thread(
+                supabase_client.get_host_active_conversation_booking_id, owner_id
+            )
+            if locked_booking_id == booking_id:
+                await asyncio.to_thread(
+                    supabase_client.set_host_active_conversation, owner_id, None
+                )
+    except Exception as exc:
+        log.warning("telegram lock clear failed for booking=%s: %s", booking_id, exc)
+
     return {"status": "resolved", "learned": learned_entry}
 
 
