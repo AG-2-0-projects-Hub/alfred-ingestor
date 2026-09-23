@@ -438,9 +438,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
               Expanded(
                 child: Text(
                   _telegramLink!,
-                  style: TextStyle(
+                  style: GoogleFonts.robotoMono(
                     fontSize: 12,
-                    fontFamily: 'monospace',
                     color: palette.textSecondary,
                   ),
                   overflow: TextOverflow.ellipsis,
