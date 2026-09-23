@@ -911,8 +911,21 @@ async def _resolve_conversation_core(booking_id: str) -> dict:
             log.warning("learning_events insert failed for booking=%s: %s",
                         booking_id, exc)
 
-    # Telegram guest gets the same "Alfred has resumed" notice — only if TG is
-    # their active channel (a web guest sees the marker via realtime).
+    # __SYS_RESOLVED__ marker so a WEB guest sees "Alfred has resumed" via
+    # realtime (frontend/lib/utils/chat_system_messages.dart renders it).
+    # Used to be inserted by the frontend right after this endpoint returned —
+    # correct for the dashboard's own Resolve button, but a no-op for a
+    # Telegram-originated resolve (routers/telegram._handle_callback calls
+    # this function directly, no frontend involved) — found live 2026-09-23,
+    # same class of gap as the guest-follow-up-forwarding one. Owning the
+    # insert here instead makes it work regardless of caller; the frontend's
+    # own insert is removed in the same change to avoid a duplicate marker.
+    await asyncio.to_thread(
+        supabase_client.insert_message, conv_id, "system", "__SYS_RESOLVED__",
+    )
+
+    # Telegram guest gets the same notice pushed directly — only if TG is
+    # their active channel (a web guest just saw the marker above instead).
     active_channel = await asyncio.to_thread(
         supabase_client.get_active_channel, conv_id
     )

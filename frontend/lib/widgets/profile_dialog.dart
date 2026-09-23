@@ -56,6 +56,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
   String? _telegramLink; // set after generating a connect link this session
   bool _connectingTelegram = false;
   Timer? _telegramPollTimer;
+  final _tgHelpDockLink = LayerLink();
+  OverlayEntry? _tgHelpOverlay;
 
   SupabaseClient get _db => Supabase.instance.client;
   String? get _uid => _db.auth.currentUser?.id;
@@ -73,6 +75,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _nicknameController.dispose();
     _bioController.dispose();
     _telegramPollTimer?.cancel();
+    _tgHelpOverlay?.remove();
     super.dispose();
   }
 
@@ -249,6 +252,139 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
   }
 
+  static const List<List<String>> _telegramHelpLines = [
+    ['When a guest needs you, you\'ll get an alert here with their message, '
+        'Alfred\'s draft, and a ', 'Mark Resolved', ' button.'],
+    ['Just ', 'type to reply', ' — it goes straight to that guest, no need '
+        'to tap anything first.'],
+    ['Multiple guests waiting at once? You\'ll see a ', 'list', ' to pick '
+        'from. Or you can also ', 'reply directly', ' to a specific guest\'s ',
+        'alert message', ' to jump straight to them.'],
+    ['Send ', '/switch', ' anytime to bring that list back up.'],
+    ['Tap ', 'Mark Resolved', ' when you\'re done — Alfred takes back over '
+        'and the guest is notified.'],
+  ];
+
+  /// Odd-indexed entries in each row are the bold spans (the pattern reads
+  /// as plain/bold/plain/bold/... starting with plain).
+  List<InlineSpan> _telegramHelpSpans(List<String> parts, AppPalette palette) {
+    return [
+      for (var i = 0; i < parts.length; i++)
+        TextSpan(
+          text: parts[i],
+          style: i.isOdd
+              ? TextStyle(fontWeight: FontWeight.w700, color: palette.textPrimary)
+              : null,
+        ),
+    ];
+  }
+
+  void _toggleTelegramHelp() {
+    if (_tgHelpOverlay != null) {
+      _tgHelpOverlay?.remove();
+      _tgHelpOverlay = null;
+      return;
+    }
+    final screenW = MediaQuery.sizeOf(context).width;
+    if (screenW < 900) {
+      // Not enough room to dock a side panel without it overflowing the
+      // viewport — a plain centered dialog reads fine on a narrow screen.
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('How Telegram replies work'),
+          content: SizedBox(
+            width: 320,
+            child: _buildTelegramHelpBody(context.palette),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Got it'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final entry = OverlayEntry(
+      builder: (overlayContext) => Positioned(
+        width: 300,
+        child: CompositedTransformFollower(
+          link: _tgHelpDockLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.topRight,
+          followerAnchor: Alignment.topLeft,
+          offset: const Offset(12, -12),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: context.palette.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: context.palette.border),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 24, offset: Offset(0, 8)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'How Telegram replies work',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: context.palette.textPrimary,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: _toggleTelegramHelp,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: Icon(Icons.close_rounded,
+                              size: 16, color: context.palette.textMuted),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _buildTelegramHelpBody(context.palette),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    _tgHelpOverlay = entry;
+    Overlay.of(context, rootOverlay: true).insert(entry);
+  }
+
+  Widget _buildTelegramHelpBody(AppPalette palette) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final line in _telegramHelpLines) ...[
+          Text.rich(
+            TextSpan(children: _telegramHelpSpans(line, palette)),
+            style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
   Widget _buildTelegramSection(AppPalette palette) {
     if (_telegramChatId != null) {
       return Row(
@@ -393,7 +529,23 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     _readOnlyRow(Icons.home_work_outlined, 'Registered properties',
                         '${widget.propertyCount}', palette),
                     const SizedBox(height: 20),
-                    _label('Telegram alerts', palette),
+                    Row(
+                      children: [
+                        Expanded(child: _label('Telegram alerts', palette)),
+                        CompositedTransformTarget(
+                          link: _tgHelpDockLink,
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: _toggleTelegramHelp,
+                            child: const Text('How to use', style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ],
+                    ),
                     _buildTelegramSection(palette),
                     const SizedBox(height: 28),
                     const Divider(),
