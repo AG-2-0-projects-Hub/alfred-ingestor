@@ -21,6 +21,17 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       responsive layout pass across the dashboard/chat screens. Also directly shortens a future
       native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
       Stitch draft during the week; not urgent, but goes first when picked up.
+- [ ] Guest hostility/profanity doesn't reliably escalate. Founder-flagged + confirmed live
+      2026-09-23 with real test messages, same conversations, minutes apart: "a chingar a su
+      madre!#" and "fuckng fucking fuckkkkk!" did NOT escalate (`is_escalated_interaction: false`),
+      while "todo esta de la vergaaa!!!!" and "Odio esta estancia! esta de l verga!!" DID
+      (`true`, `resolution_status: resolved`) — so it's not "never escalates on profanity," it's
+      inconsistent. `requires_escalation` is a Gemini judgment call from `gemini_messenger.
+      first_pass`'s prompt, not a keyword rule, so this is likely a prompt-wording gap rather than
+      a code bug. Investigate the actual escalation criteria in that prompt; test any change
+      empirically against a batch of real hostile messages before committing to it (per this
+      project's own evidence-over-assumption practice, see CLAUDE.md's "Competing approaches"
+      rule) rather than guessing at new wording.
 - [ ] Write the missing `_UNIVERSAL_FIELDS_TEST` (`backend/services/gemini_merge_resolve.py` —
       a comment at the schema definition claims this smoke test exists and verifies Gemini omits
       ungrounded fields instead of hallucinating them; it doesn't actually exist anywhere in the

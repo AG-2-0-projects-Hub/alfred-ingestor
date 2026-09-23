@@ -294,7 +294,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
         builder: (_) => AlertDialog(
           title: const Text('How Telegram replies work'),
           content: SizedBox(
-            width: 320,
+            width: 360,
             child: _buildTelegramHelpBody(context.palette),
           ),
           actions: [
@@ -310,7 +310,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
     final entry = OverlayEntry(
       builder: (overlayContext) => Positioned(
-        width: 300,
+        width: 340,
         child: CompositedTransformFollower(
           link: _tgHelpDockLink,
           showWhenUnlinked: false,
@@ -375,11 +375,21 @@ class _ProfileDialogState extends State<ProfileDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final line in _telegramHelpLines) ...[
-          Text.rich(
-            TextSpan(children: _telegramHelpSpans(line, palette)),
-            style: GoogleFonts.inter(fontSize: 12.5, height: 1.5, color: palette.textSecondary),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('•  ',
+                  style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary)),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: _telegramHelpSpans(line, palette)),
+                  style: GoogleFonts.inter(
+                      fontSize: 12, height: 1.5, color: palette.textSecondary),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
         ],
       ],
     );
