@@ -438,7 +438,11 @@ class _ProfileDialogState extends State<ProfileDialog> {
               Expanded(
                 child: Text(
                   _telegramLink!,
-                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: palette.textSecondary,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
