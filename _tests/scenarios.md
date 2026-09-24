@@ -1320,6 +1320,19 @@ testing plus one direct DB-query verification pass (see P6's note) — not yet r
 
 ---
 
+## Q. First-login onboarding
+
+### Q1. "Welcome to Alfred" modal shows once, on a genuinely empty dashboard
+- **id:** welcome-modal-first-login-01
+- **touches:** `frontend/lib/widgets/welcome_walkthrough_dialog.dart`, `frontend/lib/screens/dashboard_screen.dart` (`_maybeShowWelcomeModal`, `_markWelcomeModalSeen`), `host_profiles.welcome_modal_seen`
+- **layer:** 2 (Playwright — `_tests/runner/scenarios/q1.ts`)
+- **setup:** a host account with zero active properties and `welcome_modal_seen = false`
+- **action:** load the dashboard; tap "Maybe later"; reload
+- **host_expected:** modal appears with all 5 steps, an all-caps "ADD YOUR FIRST PROPERTY" button, and a "Maybe later" link; dismissing it clears the overlay immediately; `host_profiles.welcome_modal_seen` flips to `true`; reloading does NOT show it again
+- **status:** passing — real Playwright run against staging, 2026-09-24 (PASS on all 4 assertions: modal render, dismiss, no-reappear-after-reload, DB flag). guide.html's Add Property tab had claimed this modal existed since some earlier session, but a full git-history search found it had never actually been built — see `C:\Users\San_8\.claude\plans\snoopy-spinning-spindle.md` for the full investigation. Not yet exercised: tapping "ADD YOUR FIRST PROPERTY" itself (routes through the same already-covered `_openAddProperty()`/AddPropertyScreen path as every other entry point, so not independently re-verified here)
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
@@ -1339,7 +1352,8 @@ testing plus one direct DB-query verification pass (see P6's note) — not yet r
 | **N. Infrastructure & deploy** | **4** | **4** | — | — |
 | **O. WhatsApp** | **6** | — | — | **6** |
 | **P. Telegram host escalation** | **7** | — | **1** | **6** |
-| **Total** | **92** | **17** | **44** | **34** |
+| **Q. First-login onboarding** | **1** | — | **1** | — |
+| **Total** | **93** | **17** | **45** | **34** |
 
 **Open (not passing) — as of 2026-07-15:**
 - **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.

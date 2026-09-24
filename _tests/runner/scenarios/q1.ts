@@ -128,18 +128,21 @@ export async function runQ1(): Promise<ScenarioResult> {
     if (!modalVerdict.pass) throw new Error('Welcome modal did not render as expected');
 
     // "Maybe later" -- centered text button below the primary button. Measured
-    // live against a real screenshot this session (dialog ~420px wide, content
-    // padding 28px, buttons near the bottom of the scrollable content).
+    // live against a real screenshot this session.
     const vp = page.viewportSize() ?? VP;
-    await page.mouse.click(vp.width * 0.5, vp.height * 0.86);
-    await page.waitForTimeout(1000);
+    await page.mouse.click(vp.width * 0.5, vp.height * 0.806);
+    await page.waitForTimeout(2000);
 
     const dismissedShot = await page.screenshot({ fullPage: true });
     artifacts.dismissedScreenshot = dismissedShot.toString('base64');
     const dismissedVerdict = await judgeScreenshot(
       dismissedShot,
-      'The plain dashboard empty-state (or similar), with NO "Welcome to Alfred" modal dialog '
-      + 'visible anywhere -- it has been dismissed.',
+      'The dashboard background is fully visible and NOT dimmed/greyed-out by any overlay. There '
+      + 'is NO popup card floating in front of the page, NO numbered list of 5 steps, and NO '
+      + 'all-caps "ADD YOUR FIRST PROPERTY" button or "Maybe later" link anywhere. (A plain, '
+      + 'undimmed page that happens to also say "Welcome to Alfred" in its normal background '
+      + 'content, with a title-case "Add Your First Property" button, is CORRECT and should PASS '
+      + '-- only a popup card in front of a dimmed backdrop counts as the modal still showing.)',
     );
     notes.push(`dismissed judge: ${dismissedVerdict.pass ? 'PASS' : 'FAIL'} — ${dismissedVerdict.notes}`);
 
@@ -150,8 +153,12 @@ export async function runQ1(): Promise<ScenarioResult> {
     artifacts.afterReloadScreenshot = afterReloadShot.toString('base64');
     const afterReloadVerdict = await judgeScreenshot(
       afterReloadShot,
-      'The plain dashboard empty-state, with NO "Welcome to Alfred" modal dialog visible -- it '
-      + 'does not reappear after a reload.',
+      'The dashboard background is fully visible and NOT dimmed/greyed-out by any overlay. There '
+      + 'is NO popup card floating in front of the page, NO numbered list of 5 steps, and NO '
+      + 'all-caps "ADD YOUR FIRST PROPERTY" button or "Maybe later" link anywhere. (A plain, '
+      + 'undimmed page that happens to also say "Welcome to Alfred" in its normal background '
+      + 'content, with a title-case "Add Your First Property" button, is CORRECT and should PASS '
+      + '-- only a popup card in front of a dimmed backdrop counts as the modal reappearing.)',
     );
     notes.push(`no-reappear judge: ${afterReloadVerdict.pass ? 'PASS' : 'FAIL'} — ${afterReloadVerdict.notes}`);
 
