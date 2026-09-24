@@ -2,7 +2,7 @@
 --
 -- STATUS
 --   staging (gcxxilzfhwlsjcvtpsvj) : run via MCP this session
---   prod    (ylaooctefesedrecshic) : NOT YET APPLIED — run alongside the eventual staging→main merge
+--   prod    (ylaooctefesedrecshic) : APPLIED via MCP 2026-09-23
 --
 -- Every migration must be applied to BOTH projects (post-split rule, CONTEXT.md).
 --
