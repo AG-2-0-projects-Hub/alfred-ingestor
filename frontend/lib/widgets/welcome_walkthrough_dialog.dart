@@ -26,7 +26,7 @@ class WelcomeWalkthroughDialog extends StatelessWidget {
     (
       icon: Icons.home_work_rounded,
       title: 'Add a property',
-      body: 'Paste your Airbnb listing URL — Alfred scrapes the details automatically.',
+      body: 'Paste your Airbnb listing URL — Alfred pulls in the details automatically.',
     ),
     (
       icon: Icons.upload_file_rounded,
@@ -37,8 +37,8 @@ class WelcomeWalkthroughDialog extends StatelessWidget {
     (
       icon: Icons.auto_awesome_rounded,
       title: 'Train Alfred',
-      body: 'Ingest, then Merge — Alfred combines your files with the listing into '
-          'one knowledge base.',
+      body: "Once you've uploaded your files, click Train Alfred to build your "
+          'knowledge base.',
     ),
     (
       icon: Icons.link_rounded,
