@@ -176,8 +176,9 @@ class _PropertyDetailDrawerState extends State<PropertyDetailDrawer>
           1,
           _wtAddKnowledgeKey,
           'Tell me something directly',
-          "Type it, or record a voice note — parking rules, a fix for the "
-              "shower, whatever's easiest. I'll add it to what I already know.",
+          'Type it, or record a voice note — parking rules, a fix for the '
+              'shower, where the linens are. Come back and add more anytime '
+              "you remember something new — I'll fold it in without starting over.",
         );
       case 3:
         return (

@@ -19,6 +19,7 @@ import '../widgets/generate_guest_link_dialog.dart';
 import '../widgets/feedback_dialog.dart';
 import '../widgets/profile_dialog.dart';
 import '../widgets/host_settings_dialog.dart';
+import '../widgets/welcome_walkthrough_dialog.dart';
 import '../services/push_notification_service.dart';
 import '../services/api_client.dart';
 import '../utils/walkthrough_prefs.dart';
@@ -44,6 +45,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   Map<String, dynamic>? _hostStats;
   String? _hostAvatarUrl;
   bool _isDev = false;
+  // First-login "Welcome to Alfred" modal (host_profiles.welcome_modal_seen,
+  // not SharedPreferences — see migrations/2026-09-24_welcome_modal_seen.sql
+  // for why). _hostProfileLoaded/_welcomeModalDecided guard against a race
+  // between this and _loadProperties (whichever finishes last decides) and
+  // against the check re-firing on the 10s silent poll/realtime.
+  bool _welcomeModalSeen = false;
+  bool _hostProfileLoaded = false;
+  bool _welcomeModalDecided = false;
   // Part A of the User-mode post-training walkthrough (Step 0) — the
   // dashboard nudge shown on any Ready card. Step 0 points at both +Guest
   // and Settings, so it only actually dismisses once BOTH the account-wide
@@ -109,6 +118,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadWalkthroughSeenIds();
     _loadProperties().then((_) {
       if (!mounted) return;
+      _maybeShowWelcomeModal();
       _subscribeRealtime();
       // Safety net: Supabase free-tier realtime can lag or silently drop
       // updates to low-traffic tables (conversations, properties). A short
@@ -559,17 +569,50 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (uid == null) return;
       final row = await Supabase.instance.client
           .from('host_profiles')
-          .select('avatar_url, is_dev')
+          .select('avatar_url, is_dev, welcome_modal_seen')
           .eq('id', uid)
           .maybeSingle();
       if (mounted) {
         setState(() {
           _hostAvatarUrl = row?['avatar_url'] as String?;
           _isDev = row?['is_dev'] as bool? ?? false;
+          _welcomeModalSeen = row?['welcome_modal_seen'] as bool? ?? false;
+          _hostProfileLoaded = true;
         });
+        _maybeShowWelcomeModal();
       }
     } catch (_) {
       // Ignore — fall back to the default person glyph.
+    }
+  }
+
+  // Shows the first-login onboarding modal at most once per app load, once
+  // BOTH _loadProperties and _loadHostAvatar have resolved at least once —
+  // whichever finishes last is the one that actually triggers it, so there's
+  // no race between "do we know _properties.isEmpty" and "do we know
+  // welcome_modal_seen."
+  void _maybeShowWelcomeModal() {
+    if (_welcomeModalDecided || !_hostProfileLoaded || _loading) return;
+    _welcomeModalDecided = true;
+    if (_properties.isEmpty && !_welcomeModalSeen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final result = await WelcomeWalkthroughDialog.show(context);
+        await _markWelcomeModalSeen();
+        if (result == 'add_property' && mounted) _openAddProperty();
+      });
+    }
+  }
+
+  Future<void> _markWelcomeModalSeen() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      await Supabase.instance.client
+          .from('host_profiles')
+          .upsert({'id': uid, 'welcome_modal_seen': true});
+    } catch (_) {
+      // Best-effort — worst case the modal shows once more on a later login.
     }
   }
 

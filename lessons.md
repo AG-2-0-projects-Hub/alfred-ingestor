@@ -595,3 +595,152 @@ to any visual/UI fix task, not just this project. Two concrete countermeasures w
 forward: prefer element-locator screenshots over hand-guessed pixel `clip` coordinates (removes an
 entire class of position-guessing bugs), and treat "I noticed this is still imperfect" during your
 own work as a stop-and-fix signal, not something to ship and let the user catch.
+
+---
+
+## 2026-09-21 — An unverified fix for a slow Gemini call broke it completely in prod, immediately
+
+**Context:** Investigating Submit Resolutions' "Alfred is not responding" error (founder report:
+the error fired once, but clicking Submit again immediately succeeded). Reasoned by analogy to a
+past bug (a 2026-09-09 incident where a Gemini call silently stalled forever with zero response)
+and added a 25s call_timeout + 2-attempt retry to the resolver's Gemini call, on the theory it
+might be the same class of stall.
+
+**Discovery:** It wasn't the same bug. The founder's own report was the disproof, missed at
+analysis time: "clicked Submit again, got 'Alfred is now trained' immediately" means the ORIGINAL
+call (no timeout at all) had already completed successfully server-side -- a call that truly never
+responds can't produce that outcome. The real cause was just latency past the frontend's 60s
+timeout, not a stall. Cloud Run's own request timeout is 300s, so nothing was actually forcing a
+25s ceiling -- capping it there guaranteed failure (2x25s, then a raised TimeoutError) on every real
+property instead of the occasional slow-but-successful call. Shipped straight to prod (merged same
+session, FIX_VERIFY_PROTOCOL.md explicitly skipped per founder request to save tokens) and broke
+every live /api/resolve call immediately -- caught only because the founder was testing live and
+reported it right away, not by any automated check.
+
+**Impact:** Reverted the cap entirely (bfc1907), fixed the actual latency contributor (the resolver
+was sending the full master_json twice in one prompt -- once in system_instruction, once in the
+user message), and gave the frontend call more patience (120s) instead of the backend less.
+Founder live-verified the revert on prod immediately after.
+
+**Global Candidate:** Yes -- before adding a timeout/cap to "fix" a slow call, confirm it's a true
+stall (zero response, ever) and not just legitimately slow relative to some OTHER, tighter timeout
+in the chain (here: the frontend's 60s, not the backend's real 300s ceiling). The fix for "too slow
+for timeout X" is very often "raise timeout X," not "cap the work at some shorter Y." Also: a
+backend timing change with no FIX_VERIFY / no test coverage went straight to prod in the same
+session it was written -- exactly the risk that protocol exists to catch, skipped here by explicit
+request under token pressure. Worth deciding as a standing rule whether timing/timeout changes
+specifically (as opposed to logic changes) get a lighter-weight mandatory check even under time
+pressure, since their failure mode is "breaks every call of this type identically," not a rare edge
+case.
+
+## 2026-09-21 — Git Bash silently rewrites POSIX-looking script paths into Windows paths before they reach `wsl`
+
+**Context:** Polling GCP Cloud Build status from the Bash tool via `wsl bash /tmp/some_script.sh`,
+after writing the script to `\\wsl.localhost\Ubuntu\tmp\some_script.sh` (WSL's real /tmp).
+
+**Discovery:** The command failed with `bash: C:/Users/.../AppData/Local/Temp/some_script.sh: No
+such file or directory` -- Git Bash's MSYS layer auto-converts an argument that looks like an
+absolute POSIX path into a Windows path when the command being invoked (wsl.exe) is a native
+Windows binary, not an MSYS one. This happens even though the path is correct on the WSL side;
+Git Bash never gets a chance to know that. Fixed by prefixing with `MSYS_NO_PATHCONV=1`, which
+disables the auto-conversion for that one command.
+
+**Impact:** Any `wsl <cmd> <path-looking-argument>` invocation from this environment's Bash tool
+needs `MSYS_NO_PATHCONV=1 wsl ...` if the argument is a POSIX path meant for the WSL side.
+
+**Global Candidate:** Yes -- this is an MSYS/Git-Bash behavior, not project-specific, and will recur
+in any project using the Bash tool + wsl from this same host setup.
+
+---
+
+## 2026-09-22 — A "guaranteed" structured-data layer had a real coverage gap nobody had checked against the platform's own requirements
+
+**Context:** Founder reported a real bug testing prod: a Mexican property's first guest message
+came back in English. `welcome.py`'s language picker reads `master_json.location.country`.
+
+**Discovery:** `UNIVERSAL_FIELDS_SCHEMA` (the schema-enforced "guaranteed always exists" layer of
+`master_json`, built specifically to fix inconsistent freeform key naming) never actually defined
+a `country` field -- only `location.address` (a raw string) + `coordinates`. Confirmed live on the
+founder's actual property: the address string didn't even contain the word "Mexico," so no
+text-parsing fallback could have covered this -- only a real schema fix. Auditing the same schema
+against Airbnb's own official mandatory host-disclosure requirements (not assumption -- checked
+via web research against Airbnb's Help Center) found a second, bigger gap: zero safety-disclosure
+fields (smoke/CO alarms, cameras, weapons, hazards) despite Airbnb requiring hosts to disclose all
+of them. Separately, a code comment in the same file claimed a smoke test
+(`_UNIVERSAL_FIELDS_TEST`) verifies the schema never hallucinates ungrounded fields -- it doesn't
+exist anywhere in the repo (verified via ripgrep before trusting the claim).
+
+**Impact:** Shipped `location.{country,city,state_region,postal_code}`, a new `safety` object,
+`parking`, and `commercial_photography_allowed` (`staging 2ccef20`). Verified live against a real
+Gemini call before committing -- not just a code read. The missing test got queued
+(`QUEUE.md`) rather than built same-session, since it wasn't the thing actually being asked for.
+
+**Global Candidate:** Yes -- when a schema/data layer is described as "the guaranteed layer" or
+"the structured fields," that description is a claim, not a fact -- verify its actual field
+coverage against real consumers (what code reads from it) AND, where the domain has one, the
+platform's own official required-field list, rather than trusting the layer's name or its own
+design-comment's stated intent. Also: a code comment claiming a test/mechanism exists is itself
+unverified until grepped for.
+
+---
+
+## 2026-09-22 — "Let's start simple" can be misread as license to defer the actual requested capability, not just its scope/UI
+
+**Context:** Planning a Telegram host-escalation bridge (alert on escalation + let the host act on
+it without opening the webapp). Founder said "let's start simple, add features later."
+
+**Discovery:** First plan draft interpreted "simple" as: send a notification, plus a separate
+"Intervene" button that just opens the webapp -- deferring "reply directly from Telegram" (the
+blueprint's free-text relay) to an unspecified "later phase." Founder corrected this firmly: the
+existing code already auto-flips `conversation.mode` to `intervene` the instant a message
+escalates, so there is no button needed at all -- the host "intervening" IS them typing a reply in
+Telegram, which routes to the guest. That routing was never a nice-to-have deferred feature; it
+was the actual, literal thing being asked for. "Simple" meant simple alert *content* (don't send
+the whole conversation history) and simple *UI* (no extra button to press), not a stubbed-down
+core capability. The founder named this explicitly as the reason a pre-build FMEA/plan-alignment
+step exists: "you would have spent time and effort building something that is not right."
+
+**Impact:** Re-scoped the plan properly: host's typed Telegram reply routes to the guest via the
+existing `host_send` delivery logic, disambiguated by Telegram's native reply-to-message when
+multiple escalations are open at once (founder's explicit choice over "most recent wins"), with a
+confirmation echo on every routed reply so the host always knows who they responded to. No wasted
+build time -- caught during planning, before any code was written.
+
+**Global Candidate:** Yes -- when a request says "keep it simple"/"start simple," that phrase is
+ambiguous across at least three axes (scope of content, UI surface, and core capability) and can
+be misread as license to cut the one thing actually being asked for. Before finalizing a plan built
+on that instruction, restate back specifically what stays "full" vs what gets simplified, rather
+than assuming which axis the word was meant to apply to.
+
+---
+
+## 2026-09-23 — Re-hit the ALREADY-DOCUMENTED `wsl bash` command-substitution bug (2026-09-03) doing secrets/deploy work
+
+**Context:** Redeploying the Telegram host-escalation backend to staging, needed to fetch
+`TELEGRAM_WEBHOOK_SECRET` from Secret Manager and pass it as a header to re-register the webhook
+(it must never be printed per the Secret Redaction Rule) — exactly the kind of
+infra/secrets/deploy task this project's own `CLAUDE.md` says to grep `lessons_index.md` for
+before starting.
+
+**Discovery:** `SECRET=$(gcloud secrets versions access latest --secret=...)` inside a
+`wsl bash -lc '...'` call silently evaluated to an empty string (`${#SECRET}`=0, exit code 0, no
+stderr) — confirmed it's command substitution itself, not gcloud, since even
+`X=$(echo hi)` returns empty the same way. This is **the exact bug already logged 2026-09-03**
+("Bash-tool -> WSL `$(...)` command substitution silently returns empty — use file
+redirection/pipes instead, never capture into a var") — the index row was right there and names
+the fix precisely. The lessons-index check was skipped before starting the deploy/secrets work,
+so several minutes went into re-diagnosing a known issue from scratch. Same failure-to-check
+pattern already called out once before, 2026-09-16 ("Re-hit an ALREADY-DOCUMENTED shell-quoting
+bug ... because the mandated lessons-index check was skipped").
+
+**Impact:** Worked around it the same way this time: did the fetch-secret-then-HTTP-call entirely
+inside one `python3 -c` process (`subprocess.run(capture_output=True)` for the gcloud call,
+`urllib.request` for the HTTP call) instead of bash `$(...)`.
+
+**Global Candidate:** No — the underlying bug is already global (2026-09-03). What's worth
+tightening is project-local process: this is the SECOND time the mandated pre-work lessons-index
+grep was skipped and cost real time re-discovering something already written down. Consider
+actually running the grep as a literal first tool call on any infra/secrets/deploy task, not a
+mental note that's easy to skip under task momentum.
+
+---

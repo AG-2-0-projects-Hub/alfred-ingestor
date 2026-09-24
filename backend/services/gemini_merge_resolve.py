@@ -645,6 +645,10 @@ UNIVERSAL_FIELDS_SCHEMA = {
             "type": "OBJECT",
             "properties": {
                 "address": {"type": "STRING"},
+                "country": {"type": "STRING"},
+                "city": {"type": "STRING"},
+                "state_region": {"type": "STRING"},
+                "postal_code": {"type": "STRING"},
                 "coordinates": {
                     "type": "OBJECT",
                     "properties": {
@@ -652,6 +656,14 @@ UNIVERSAL_FIELDS_SCHEMA = {
                         "lng": {"type": "NUMBER"},
                     },
                 },
+            },
+        },
+        "parking": {
+            "type": "OBJECT",
+            "properties": {
+                "type": {"type": "STRING"},
+                "capacity": {"type": "STRING"},
+                "accessible_spot": {"type": "BOOLEAN"},
             },
         },
         "capacity": {
@@ -679,6 +691,24 @@ UNIVERSAL_FIELDS_SCHEMA = {
                 "pets_allowed": {"type": "BOOLEAN"},
                 "smoking_allowed": {"type": "BOOLEAN"},
                 "parties_allowed": {"type": "BOOLEAN"},
+                "commercial_photography_allowed": {"type": "BOOLEAN"},
+            },
+        },
+        "safety": {
+            "type": "OBJECT",
+            "properties": {
+                "smoke_alarm": {"type": "BOOLEAN"},
+                "co_alarm": {"type": "BOOLEAN"},
+                "security_camera": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "present": {"type": "BOOLEAN"},
+                        "location_description": {"type": "STRING"},
+                    },
+                },
+                "weapons_on_property": {"type": "BOOLEAN"},
+                "dangerous_animals": {"type": "BOOLEAN"},
+                "hazards": {"type": "STRING"},
             },
         },
         "amenities": {
@@ -731,8 +761,10 @@ it with an empty, "N/A", "Not specified", or made-up value).
 - Property identity: if no real listing title exists in either source, use the \
 host-provided nickname instead of leaving it out — but do not invent a name if \
 neither exists.
-- Booleans (pets_allowed, smoking_allowed, parties_allowed) reflect what the \
-house rules actually state; omit any that aren't addressed at all.
+- Booleans (pets_allowed, smoking_allowed, parties_allowed, \
+commercial_photography_allowed, smoke_alarm, co_alarm, security_camera.present, \
+weapons_on_property, dangerous_animals, accessible_spot) reflect what the sources \
+actually state; omit any that aren't addressed at all.
 - Output valid JSON only, no markdown fences, no commentary.
 """
 

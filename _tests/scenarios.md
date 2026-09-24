@@ -1250,6 +1250,89 @@ Guest-side WhatsApp (port of the Telegram channel onto Meta Cloud API direct). H
 
 ---
 
+## P. Telegram host escalation (alerts, reply, picker, resolve)
+
+Host-side Telegram (mirror of J's guest-side channel) — bridges the "browser tab must be open"
+gap in web push notifications. Built 2026-09-22→23, live-tested extensively by the founder on
+staging via their own phone across multiple real conversations. Status below reflects that
+testing plus one direct DB-query verification pass (see P6's note) — not yet re-verified on prod.
+
+### P1. Host connects Telegram via link/QR
+- **id:** tgh-connect-01
+- **touches:** `backend/routers/properties.py` (`/host/telegram/link-code`), `frontend/lib/widgets/profile_dialog.dart`
+- **layer:** 2 (Playwright — see `_tests/runner/scenarios/p1.ts`)
+- **setup:** a host account with no `telegram_chat_id` set
+- **action:** open profile dialog → "Connect Telegram" → tap the generated link (or scan QR) → tap Start in Telegram
+- **host_expected:** profile dialog polls and flips to "Telegram connected" within ~3-10s; `host_profiles.telegram_chat_id` set, `telegram_link_code` cleared
+- **status:** passing — automated via `_tests/runner/scenarios/p1.ts`, run against staging 2026-09-23: connect-link/QR rendering, help panel open/close all PASS. Also caught and fixed a real bug in the process: the deep-link text (and everything below it — Delete account included) was silently below the dialog's scrollable fold once the QR section grew the content past its visible height; fixed with `Scrollable.ensureVisible` on the new section. The actual Telegram-side linking (scanning the QR, tapping Start) still isn't Playwright-drivable and remains founder-verified manually, per this row's original note.
+
+### P2. Escalation alert reaches the host's Telegram
+- **id:** tgh-alert-01
+- **touches:** `backend/routers/messages.py` (`_build_host_alert_text`, escalation block), `backend/services/telegram_client.py` (`send_alert`)
+- **layer:** 4
+- **action:** a guest message triggers escalation on a property whose host is Telegram-connected
+- **host_expected:** a 🔔 alert arrives with property name, escalation reason, guest's message, Alfred's draft reply, and a working "Mark Resolved" button
+- **status:** passing — founder-verified live, multiple times, multiple properties
+
+### P3. Guest follow-up messages during an active escalation also forward
+- **id:** tgh-followup-01
+- **touches:** `backend/routers/messages.py` (intervene-mode branch, ~line 279-330)
+- **layer:** 4
+- **action:** guest sends a second message while the conversation is still in `intervene` mode
+- **host_expected:** a 💬 message arrives (not just the original 🔔 alert), also with a working Mark Resolved button; `conversations.host_alert_message_id` repoints to it
+- **status:** passing — founder-verified live (this was the original bug report that led to `00ced13`)
+
+### P4. Host reply routes correctly (single-active, reply-to, picker, /switch)
+- **id:** tgh-reply-routing-01
+- **touches:** `backend/routers/telegram.py` (`_handle_host_reply`, `_handle_select_callback`, `_send_picker`, `_handle_host_switch`)
+- **layer:** 4
+- **action:** (1) exactly one active escalation, host types a plain message; (2) 2+ active, host types a plain message; (3) host taps a picker button; (4) host sends `/switch` while already locked; (5) host replies-to a specific alert directly
+- **host_expected:** (1) auto-routes silently, no picker shown, confirmation echo names the right guest; (2) picker appears (one button per guest, "name — property"), original message NOT delivered anywhere; (3) picker message edits to "🔗 Connected to X", lock set, subsequent plain messages go to that guest; (4) picker reopens regardless of current lock; (5) lock switches to that guest, message delivered, confirmation echo
+- **guest_expected:** only the correctly-routed guest receives the reply, never the wrong one
+- **status:** passing — founder-verified live, all 5 sub-cases, with 2 real simultaneous escalations
+
+### P5. Mark Resolved from Telegram matches the dashboard's Resolve button exactly
+- **id:** tgh-resolve-01
+- **touches:** `backend/routers/messages.py` (`_resolve_conversation_core`), `backend/routers/telegram.py` (`_handle_callback`), `frontend/lib/widgets/chat_live_dialog.dart` (`_computeEscalationWindow`)
+- **layer:** 4
+- **action:** tap "Mark Resolved" on a Telegram alert
+- **host_expected:** button's own message edits to "✅ Resolved" (keyboard removed — tapping again does nothing); if this was the host's locked conversation, the lock clears (`active_conversation_booking_id` → null) and the next plain message reopens the picker/auto-routes as if unlocked
+- **guest_expected:** "Alfred has resumed the conversation" appears in their chat (web) or is pushed to their channel (Telegram/WhatsApp guest)
+- **dashboard_expected:** the resolved message chain renders green, identically to a dashboard-triggered resolve
+- **status:** passing — founder-verified live; green-highlighting specifically double-checked via direct Supabase query across 3 conversations (see `_Context/` session history) after an initial one-off report of it not working, which did not reproduce
+
+### P6. WhatsApp delivery failure surfaces correctly on a Telegram-originated reply
+- **id:** tgh-wa-delivery-01
+- **touches:** `backend/routers/telegram.py` (`_handle_host_reply`), `backend/routers/messages.py` (`_host_send_core`, `_deliver_host_whatsapp`)
+- **layer:** 4
+- **setup:** a guest whose active channel is WhatsApp and whose 24h service window has closed (or Meta otherwise rejects delivery)
+- **action:** host replies to that guest from Telegram
+- **host_expected:** a ⚠️ warning with the real reason (e.g. "WhatsApp's 24-hour reply window has closed..."), NOT a false "✓ Sent"
+- **status:** passing — fixed via code audit (bug found by reading `_handle_host_reply` after two similar live-found bugs), accepted on code-symmetry with the already-proven dashboard code path per founder decision 2026-09-23 rather than a live repro — staging has no real guest check-in/out data to naturally produce a closed 24h window. Follow-up re-verification with real guests queued in `ROADMAP.md`.
+
+### P7. Non-Telegram-connected hosts see zero behavior change
+- **id:** tgh-noop-01
+- **touches:** `backend/routers/messages.py` (escalation block's `if host_chat_id:` guard)
+- **layer:** 4
+- **action:** an escalation occurs on a property whose host has never connected Telegram
+- **expected:** identical behavior to before this feature existed — dashboard-only, no Telegram calls attempted, no errors logged
+- **status:** passing — implicit in every pre-existing dashboard-only property tested this session (the guard is `if host_chat_id:`, never entered when unset) — not a dedicated separate test, just noting it's covered by construction
+
+---
+
+## Q. First-login onboarding
+
+### Q1. "Welcome to Alfred" modal shows once, on a genuinely empty dashboard
+- **id:** welcome-modal-first-login-01
+- **touches:** `frontend/lib/widgets/welcome_walkthrough_dialog.dart`, `frontend/lib/screens/dashboard_screen.dart` (`_maybeShowWelcomeModal`, `_markWelcomeModalSeen`), `host_profiles.welcome_modal_seen`
+- **layer:** 2 (Playwright — `_tests/runner/scenarios/q1.ts`)
+- **setup:** a host account with zero active properties and `welcome_modal_seen = false`
+- **action:** load the dashboard; tap "Maybe later"; reload
+- **host_expected:** modal appears with all 5 steps, an all-caps "ADD YOUR FIRST PROPERTY" button, and a "Maybe later" link; dismissing it clears the overlay immediately; `host_profiles.welcome_modal_seen` flips to `true`; reloading does NOT show it again
+- **status:** passing — real Playwright run against staging, 2026-09-24 (PASS on all 4 assertions: modal render, dismiss, no-reappear-after-reload, DB flag). guide.html's Add Property tab had claimed this modal existed since some earlier session, but a full git-history search found it had never actually been built — see `C:\Users\San_8\.claude\plans\snoopy-spinning-spindle.md` for the full investigation. Not yet exercised: tapping "ADD YOUR FIRST PROPERTY" itself (routes through the same already-covered `_openAddProperty()`/AddPropertyScreen path as every other entry point, so not independently re-verified here)
+
+---
+
 ## Index summary
 
 | Area | Scenarios | Layer 1 | Layer 2 | Layer 4 |
@@ -1268,7 +1351,9 @@ Guest-side WhatsApp (port of the Telegram channel onto Meta Cloud API direct). H
 | **M. Guest multimodal (photos & voice)** | **5** | — | **5** | — |
 | **N. Infrastructure & deploy** | **4** | **4** | — | — |
 | **O. WhatsApp** | **6** | — | — | **6** |
-| **Total** | **85** | **17** | **43** | **28** |
+| **P. Telegram host escalation** | **7** | — | **1** | **6** |
+| **Q. First-login onboarding** | **1** | — | **1** | — |
+| **Total** | **93** | **17** | **45** | **34** |
 
 **Open (not passing) — as of 2026-07-15:**
 - **C9** — the *Telegram* leg of the deleted-listing guard (a Telegram guest reading the closed notice) is untested. The RLS half is proven on staging; delete-account (**A7**) exercised the backend path. Does **not** gate the merge.
@@ -1335,6 +1420,8 @@ sections above, then delete the row.
 
 | Date | Commit(s) | Flow | What to assert | Group with |
 |---|---|---|---|---|
+| 2026-09-22 | staging `2ccef20` | Ingest/merge -- structured `location`/`safety`/`parking` fields now extracted into `master_json` via `UNIVERSAL_FIELDS_SCHEMA` (`gemini_merge_resolve.py`) | A freshly-trained property's `master_json.location` includes `country`/`city`/`state_region`/`postal_code` when the source states them (fixes: the welcome-message language picker was silently defaulting to English on every property because `location.country` never existed anywhere in the schema before this). `master_json.safety`/`.parking` populate when the source has that info, and are correctly *omitted* (not guessed) when it doesn't -- verified once via a throwaway script against a real Gemini call (not yet a permanent test; that's queued in `QUEUE.md` as the missing `_UNIVERSAL_FIELDS_TEST`). Does not backfill already-trained properties -- only applies on next merge/re-ingest. | Not grouped -- standalone schema addition, found while investigating a real founder-reported bug (English welcome message on a Mexican property) |
+| 2026-09-21 | main `6f7d2af`/`bfc1907`/`bb8342b` (merged, deployed) | Submit Resolutions on a real conflict -- fixed on PROD, founder-verified live | First fix (`6f7d2af`) added a 25s call_timeout to the resolver's Gemini call, reasoning it might be silently stalling like a past bug -- this was wrong and broke every real `/api/resolve` call in prod immediately after merge (confirmed via Cloud Run logs: `TimeoutError: No response after 2 attempts`, 4 consecutive founder-hit 500s). The call was never actually stalling, just legitimately slower than 25s -- Cloud Run's own request timeout is 300s, so there was no real ceiling forcing the cap. Reverted (`bfc1907`): removed call_timeout entirely, stopped sending `master_json`/`resolutions` twice in the same prompt (system_instruction + user content), and gave `/api/resolve` a 120s client-side timeout (`conflict_questionnaire.dart`, matching the pattern `/api/merge` already used). Also fixed the error copy (`bb8342b`) -- this widget has no actual retry button, so `RequestTimeoutException`'s generic "Tap retry" message was replaced with "Tap Submit Resolutions again." Founder live-verified on PROD after redeploy: resubmitted the same stuck property (`c1f321bd-35af-4a14-b8f2-c273b52cc964`), resolve completed successfully, confirmed working. Same session also fixed: `gemini_messenger.py` was still on the deprecated `gemini-3.8-flash` while every other call site had moved to `gemini-3.6-flash` (founder: "we proved 3.8 is faulty") -- pinned, plus `run_health_check.py`'s `EXPECTED_MODEL`; and `auth_screen.dart` now detects an already-registered-but-unconfirmed-nothing-to-confirm signup (`identities.isEmpty`) and shows a real notice routing to the existing password-reset form instead of a silent "check your email" that would never arrive. Not yet live-tested: the signup notice itself (diagnosed via prod `auth_logs`, not yet re-tried by the founder). | Not grouped -- this session's own fixes, first real prod test after the Cloud Run DB-split-era `staging->main` merge gap (last merge was `2026-09-07`, 106 commits behind) |
 | 2026-09-21 | staging (this session, not yet pushed) | Conflict-found popup "Resolve" -- routes straight to Edit Property now | Previously the popup's Resolve button cleared to dashboard then reopened the property drawer, whose own Overview-tab Resolve button then pushed to Edit Property -- a redundant two-click loop landing on the same screen either way. Fixed in `dashboard_screen.dart`'s `_checkTrainingCompletion`: `onResolve` now pushes `EditPropertyScreen` directly (with the same `popUntil(isFirst)` dashboard-clear first). Not yet live-tested against a real freshly-trained property with conflicts -- founder testing manually, per FIX_VERIFY exemption (Playwright step skipped this round). | Group with the trained-popup-delay row below (same flow, same root cause class) |
 | 2026-09-21 | staging (this session, not yet pushed) | "Alfred is now trained" popup, ~5-7s delay after resolving conflicts -- now fires immediately | The popup was exclusively realtime/10s-poll driven (`dashboard_screen.dart`'s `_checkTrainingCompletion`), so resolving conflicts on Edit Property or the drawer's Resolve tab left a visible gap before it appeared. Fixed via a new `_refreshAndCheck()` on the dashboard (reloads properties then runs the same transition-check functions immediately) wired into `EditPropertyScreen`'s new `onResolved` callback and `PropertyDetailDrawer`'s existing `onRefresh`. Reuses the existing transition-dedup guard (`_prevPropertyStatus`), so it's safe against realtime also firing later. Not yet live-tested -- founder testing manually. | Group with the Resolve-loop row above |
 | 2026-09-21 | staging (this session, not yet pushed) | Guest-link walkthrough (Host Chat), steps 6-7 -- Back/Next now leave consistent state | Step 6 ("Escalated"): clicking Back previously left the demo escalation (Intervene mode + injected guest/AI messages) live instead of returning to step 5's Autopilot state -- `_wtBack()` now resets mode/escalation/messages and re-arms `_wtEscalationShown` when leaving step 3. Step 7 ("Your turn"): clicking the tip panel's own Next instead of Send left the drafted reply unsent and the mode stuck on Intervene -- new `_wtHandleNext()` sends the pre-filled reply and resolves (mirrors the real Send + Mark Issue as Resolved path) before advancing. Not yet live-tested -- founder testing manually. | Not grouped -- distinct from the two rows above (walkthrough demo state, not real conflict-resolution data) |

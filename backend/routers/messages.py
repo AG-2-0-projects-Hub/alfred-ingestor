@@ -80,6 +80,31 @@ async def _notify_channel_transition(
         )
 
 
+def _escape_html(text: str) -> str:
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _build_host_alert_text(
+    property_name: str | None, escalation_reason: str | None,
+    guest_message: str, draft_reply: str, host_chat_url: str,
+    icon: str = "🔔",
+) -> str:
+    """Compose the HTML text of a Telegram escalation alert. Guest/AI content is
+    freeform and untrusted by Telegram's HTML parser (an unescaped `<`/`>`/`&`
+    would 400 the send) — everything interpolated here is escaped."""
+    lines = [f"{icon} <b>{_escape_html(property_name or 'Your property')}</b>"]
+    if escalation_reason:
+        lines.append(f"Reason: {_escape_html(escalation_reason.replace('_', ' '))}")
+    lines.append("")
+    lines.append(f"Guest: “{_escape_html(guest_message)}”")
+    if draft_reply:
+        lines.append("")
+        lines.append(f"Alfred's draft: “{_escape_html(draft_reply)}”")
+    lines.append("")
+    lines.append(f"Full conversation: {host_chat_url}")
+    return "\n".join(lines)
+
+
 class WebMediaItem(BaseModel):
     url: str
     kind: str  # 'image' | 'audio'
@@ -258,6 +283,53 @@ async def process_guest_message(
             conversation["id"],
             ai_status="paused",
         )
+
+        # The host needs every guest follow-up while already escalated, not
+        # just the one message that triggered it — otherwise Telegram is
+        # one-way (found live 2026-09-23): a web host sees these via
+        # realtime, but a Telegram-only host saw nothing after the first
+        # alert. Forward each one the same way, with its own Mark Resolved
+        # button, and re-point host_alert_message_id at it so a reply-to
+        # always targets the guest's latest message.
+        try:
+            owner_id = (property_data or {}).get("owner_id")
+            host_chat_id = (
+                await asyncio.to_thread(
+                    supabase_client.get_host_telegram_chat_id, owner_id
+                )
+                if owner_id else None
+            )
+            if host_chat_id:
+                followup_text = message or (
+                    (f"[{image_count} images]" if image_count > 1 else "[image]")
+                    if media_kind == "image"
+                    else "[voice message]" if media_kind == "audio" else ""
+                )
+                property_name, _ = _resolve_identity(property_data)
+                frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+                    .strip().rstrip("/")
+                host_chat_url = (
+                    f"{frontend_url}/chat-live?booking={booking_id}"
+                    f"&property={property_data['id']}"
+                )
+                alert_text = _build_host_alert_text(
+                    property_name or (property_data or {}).get("name"),
+                    None, followup_text, "", host_chat_url, icon="💬",
+                )
+                sent_message_id = await telegram_client.send_alert(
+                    host_chat_id, alert_text,
+                    [("✅ Mark Resolved", f"resolved_{booking_id}")],
+                )
+                if sent_message_id:
+                    await asyncio.to_thread(
+                        supabase_client.update_conversation,
+                        conversation["id"],
+                        host_alert_message_id=sent_message_id,
+                    )
+        except Exception as exc:
+            log.warning("telegram host follow-up alert failed for booking=%s: %s",
+                        booking_id, exc)
+
         return {
             "reply": None,
             "requires_escalation": False,
@@ -469,7 +541,44 @@ async def process_guest_message(
         # Telegram caller AFTER it delivers Alfred's reply — otherwise the notice
         # arrives first and Alfred's reply reads as if the host wrote it. Return
         # the host name so the caller can send it in the right order.
-        _, host_name = _resolve_identity(property_data)
+        property_name, host_name = _resolve_identity(property_data)
+
+        # Best-effort alert to the host's Telegram, if they've connected one —
+        # a bridge for beta hosts without the tab open (real push notifications
+        # are a separate project). Never blocks or breaks the guest-facing
+        # reply on any failure (see FIX_VERIFY_PROTOCOL FMEA for this change).
+        try:
+            owner_id = (property_data or {}).get("owner_id")
+            host_chat_id = (
+                await asyncio.to_thread(
+                    supabase_client.get_host_telegram_chat_id, owner_id
+                )
+                if owner_id else None
+            )
+            if host_chat_id:
+                frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+                    .strip().rstrip("/")
+                host_chat_url = (
+                    f"{frontend_url}/chat-live?booking={booking_id}"
+                    f"&property={property_data['id']}"
+                )
+                alert_text = _build_host_alert_text(
+                    property_name or (property_data or {}).get("name"),
+                    escalation_reason, message, reply, host_chat_url,
+                )
+                sent_message_id = await telegram_client.send_alert(
+                    host_chat_id, alert_text,
+                    [("✅ Mark Resolved", f"resolved_{booking_id}")],
+                )
+                if sent_message_id:
+                    await asyncio.to_thread(
+                        supabase_client.update_conversation,
+                        conversation["id"],
+                        host_alert_message_id=sent_message_id,
+                    )
+        except Exception as exc:
+            log.warning("telegram host alert failed for booking=%s: %s",
+                        booking_id, exc)
 
     return {
         "reply": reply,
@@ -580,22 +689,22 @@ async def flush_burst(req: Request):
     return {"ok": True}
 
 
-@router.post("/messages/host-send")
-async def host_send(req: HostSendRequest, authorization: str | None = Header(default=None)):
-    host_id = await _require_host(authorization)
-    if not await asyncio.to_thread(
-        supabase_client.host_owns_conversation, host_id, req.conversation_id
-    ):
-        raise HTTPException(status_code=403, detail="Not your conversation")
+async def _host_send_core(conversation_id: str, message: str) -> str | None:
+    """Insert the host's message, pause the AI, and deliver to the guest's
+    active channel. Shared by the JWT-authenticated HTTP route and the
+    Telegram-origin host-reply path (routers/telegram._handle_host_reply),
+    which authenticates by chat_id ownership instead of a bearer token.
+    Returns a WhatsApp delivery-failure explanation, or None on success/no
+    delivery needed."""
     await asyncio.to_thread(
         supabase_client.insert_message,
-        req.conversation_id,
+        conversation_id,
         "host",
-        req.message,
+        message,
     )
     await asyncio.to_thread(
         supabase_client.update_conversation,
-        req.conversation_id,
+        conversation_id,
         ai_status="paused",
     )
 
@@ -607,23 +716,34 @@ async def host_send(req: HostSendRequest, authorization: str | None = Header(def
     active_channel: str | None = None
     try:
         active_channel = await asyncio.to_thread(
-            supabase_client.get_active_channel, req.conversation_id
+            supabase_client.get_active_channel, conversation_id
         )
         if active_channel in ("telegram", "whatsapp"):
             guest = await asyncio.to_thread(
-                supabase_client.get_guest_by_conversation_id, req.conversation_id
+                supabase_client.get_guest_by_conversation_id, conversation_id
             )
             if active_channel == "telegram" and (guest or {}).get("telegram_chat_id"):
                 await telegram_client.send_message(
-                    guest["telegram_chat_id"], req.message
+                    guest["telegram_chat_id"], message
                 )
             elif active_channel == "whatsapp" and (guest or {}).get("whatsapp_wa_id"):
                 delivery = await _deliver_host_whatsapp(
-                    req.conversation_id, guest["whatsapp_wa_id"], req.message
+                    conversation_id, guest["whatsapp_wa_id"], message
                 )
     except Exception as exc:
         log.warning("host_send: %s delivery failed for conv=%s: %s",
-                    active_channel or "?", req.conversation_id, exc)
+                    active_channel or "?", conversation_id, exc)
+    return delivery
+
+
+@router.post("/messages/host-send")
+async def host_send(req: HostSendRequest, authorization: str | None = Header(default=None)):
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_conversation, host_id, req.conversation_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
+    delivery = await _host_send_core(req.conversation_id, req.message)
 
     # `delivery` is set only when the guest is on WhatsApp and Meta would not (or
     # did not) accept the message. The host must be told — silently reporting
@@ -693,20 +813,22 @@ class ResolveRequest(BaseModel):
     booking_id: str
 
 
-@router.post("/conversations/resolve")
-async def resolve_conversation(req: ResolveRequest, authorization: str | None = Header(default=None)):
-    host_id = await _require_host(authorization)
-    if not await asyncio.to_thread(
-        supabase_client.host_owns_booking, host_id, req.booking_id
-    ):
-        raise HTTPException(status_code=403, detail="Not your conversation")
-    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, req.booking_id)
+async def _resolve_conversation_core(booking_id: str) -> dict:
+    """Everything resolve_conversation does after ownership is verified.
+    Shared by the JWT-authenticated HTTP route and the Telegram "Mark Resolved"
+    callback handler (routers/telegram._handle_callback), which verifies
+    ownership itself via host_owns_booking before calling this. Idempotent on
+    a double-resolve: get_conversation_thread_for_resolve returns an empty
+    thread once the escalated messages are already marked resolved, so a
+    repeat call is a "dropped/no_content" no-op rather than a second
+    summarizer call or duplicate learned entry."""
+    guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, booking_id)
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     conv_id, thread, escalation_reason = await asyncio.to_thread(
         supabase_client.get_conversation_thread_for_resolve,
-        req.booking_id,
+        booking_id,
     )
     if not conv_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -745,7 +867,7 @@ async def resolve_conversation(req: ResolveRequest, authorization: str | None = 
                     "category": summary.get("category", "other"),
                     "language": summary.get("language", "en"),
                     "resolved_at": _now_iso(),
-                    "booking_id": req.booking_id,
+                    "booking_id": booking_id,
                     "reviewed": False,
                 }
                 event = ("learned", None, summary)
@@ -754,11 +876,11 @@ async def resolve_conversation(req: ResolveRequest, authorization: str | None = 
         except asyncio.TimeoutError:
             log.warning(
                 "Gemini summarizer exceeded %ss for booking=%s; resolving without learning",
-                GEMINI_TIMEOUT_S, req.booking_id,
+                GEMINI_TIMEOUT_S, booking_id,
             )
             event = ("dropped", "summarizer_timeout", None)
         except Exception as exc:
-            log.exception("Summarizer failed for booking=%s: %s", req.booking_id, exc)
+            log.exception("Summarizer failed for booking=%s: %s", booking_id, exc)
             event = ("dropped", "summarizer_error", None)
 
     await asyncio.to_thread(
@@ -776,7 +898,7 @@ async def resolve_conversation(req: ResolveRequest, authorization: str | None = 
             await asyncio.to_thread(
                 supabase_client.record_learning_event,
                 property_id,
-                req.booking_id,
+                booking_id,
                 escalation_reason,
                 disposition,
                 skip_reason,
@@ -787,16 +909,60 @@ async def resolve_conversation(req: ResolveRequest, authorization: str | None = 
             )
         except Exception as exc:
             log.warning("learning_events insert failed for booking=%s: %s",
-                        req.booking_id, exc)
+                        booking_id, exc)
 
-    # Telegram guest gets the same "Alfred has resumed" notice — only if TG is
-    # their active channel (a web guest sees the marker via realtime).
+    # __SYS_RESOLVED__ marker so a WEB guest sees "Alfred has resumed" via
+    # realtime (frontend/lib/utils/chat_system_messages.dart renders it).
+    # Used to be inserted by the frontend right after this endpoint returned —
+    # correct for the dashboard's own Resolve button, but a no-op for a
+    # Telegram-originated resolve (routers/telegram._handle_callback calls
+    # this function directly, no frontend involved) — found live 2026-09-23,
+    # same class of gap as the guest-follow-up-forwarding one. Owning the
+    # insert here instead makes it work regardless of caller; the frontend's
+    # own insert is removed in the same change to avoid a duplicate marker.
+    await asyncio.to_thread(
+        supabase_client.insert_message, conv_id, "system", "__SYS_RESOLVED__",
+    )
+
+    # Telegram guest gets the same notice pushed directly — only if TG is
+    # their active channel (a web guest just saw the marker above instead).
     active_channel = await asyncio.to_thread(
         supabase_client.get_active_channel, conv_id
     )
     await _notify_channel_transition(guest, None, "resume", active_channel)
 
+    # Clear the host's Telegram "locked-in conversation" if it was pointing at
+    # THIS one — resolving a different escalation must not touch it. Runs
+    # whether resolve came from the dashboard or the Telegram "Mark Resolved"
+    # callback, so a dashboard resolve doesn't leave a stale Telegram lock
+    # behind (routers/telegram._handle_host_reply's own stale-lock detection
+    # is only a backstop for this, not the primary mechanism). Best-effort —
+    # never fail the resolve itself over this.
+    try:
+        owner = await asyncio.to_thread(supabase_client.get_property_for_chat, property_id)
+        owner_id = (owner or {}).get("owner_id")
+        if owner_id:
+            locked_booking_id = await asyncio.to_thread(
+                supabase_client.get_host_active_conversation_booking_id, owner_id
+            )
+            if locked_booking_id == booking_id:
+                await asyncio.to_thread(
+                    supabase_client.set_host_active_conversation, owner_id, None
+                )
+    except Exception as exc:
+        log.warning("telegram lock clear failed for booking=%s: %s", booking_id, exc)
+
     return {"status": "resolved", "learned": learned_entry}
+
+
+@router.post("/conversations/resolve")
+async def resolve_conversation(req: ResolveRequest, authorization: str | None = Header(default=None)):
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_booking, host_id, req.booking_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your conversation")
+    return await _resolve_conversation_core(req.booking_id)
 
 
 class ArchiveRequest(BaseModel):

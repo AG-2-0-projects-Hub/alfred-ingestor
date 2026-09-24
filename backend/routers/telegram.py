@@ -1,8 +1,11 @@
-"""Telegram guest channel — webhook receiver.
+"""Telegram guest + host-escalation channel — webhook receiver.
 
-Guests chat with Alfred over Telegram exactly like the web messenger; the host
-keeps using the dashboard (escalations surface there, and the host's reply is
-delivered back to the guest's Telegram via messages.host_send).
+Guests chat with Alfred over Telegram exactly like the web messenger. A host
+who has connected their own Telegram (see routers/properties.py's
+/host/telegram/link-code and messages.py's escalation block) additionally gets
+an alert on escalation and can reply directly from that chat — see
+_handle_host_reply / _handle_callback below — without needing the dashboard
+open at all.
 
 Flow: validate the secret header → ack 200 immediately → do the real work
 (Gemini can take ~15-45s) in a SEPARATE request dispatched by Cloud Tasks.
@@ -16,8 +19,6 @@ the old BackgroundTasks reply until the next request thawed it (guests saw
 answers arrive minutes late, stacked). Cloud Tasks resolves both — see
 services/task_queue.py. Where it is not configured (staging on Render, local),
 we fall back to BackgroundTasks, which is safe on a non-throttled host.
-
-Host-side Telegram (relay + inline buttons) is intentionally out of scope.
 """
 import asyncio
 import logging
@@ -60,6 +61,17 @@ _NOT_LINKED = (
 _MEDIA_ONLY = "For now I can only read text messages — please type your question."
 _TOO_LONG = "Sorry, that took a little too long. Please send your message again."
 _GENERIC_ERR = "Sorry, something went wrong on my side. Please try again in a moment."
+
+# Host-side (escalation alerts + reply-from-Telegram) — see routers/messages.py's
+# escalation block for where the alert itself is sent.
+_HOST_LINK_EXPIRED = (
+    "This connection link has expired or was already used. Generate a new one "
+    "from your dashboard profile."
+)
+_HOST_LINKED = "✅ Connected! You'll get an alert here whenever a guest needs you."
+_HOST_REPLY_NONE_ACTIVE = "No conversation is currently waiting for a reply."
+_RESOLVED_PREFIX = "resolved_"
+_SELECT_PREFIX = "select_"
 
 
 def _check_secret(request: Request) -> None:
@@ -109,6 +121,15 @@ async def telegram_process(request: Request):
         await _flush_burst(job.get("chat_id"), job.get("seed") or [])
     elif kind == "update":
         await _handle_update(job.get("update") or {})
+    elif kind == "callback":
+        await _handle_callback(job.get("callback") or {})
+    elif kind == "host_reply":
+        await _handle_host_reply(
+            job.get("chat_id"), job.get("host_id"),
+            job.get("text") or "", job.get("reply_to_message_id"),
+        )
+    elif kind == "host_switch":
+        await _handle_host_switch(job.get("chat_id"), job.get("host_id"))
     return {"ok": True}
 
 
@@ -142,11 +163,59 @@ async def _dispatch(update: dict, background_tasks: BackgroundTasks) -> None:
     Tasks rejects the duplicate name, so the rest ride along instead of each
     triggering its own reply.
     """
+    callback = update.get("callback_query")
+    if callback:
+        if task_queue.enabled():
+            task_queue.enqueue("/api/telegram/process", {"kind": "callback", "callback": callback})
+        else:
+            background_tasks.add_task(_handle_callback, callback)
+        return
+
     message = update.get("message") or update.get("edited_message") or {}
     chat_id = (message.get("chat") or {}).get("id")
+    text = message.get("text")
+
+    # Host branch: a message from a chat_id already linked to a host account
+    # (via "Connect Telegram") is either a plain reply-to-guest attempt or the
+    # "/switch" command (reopens the multi-escalation picker on demand) —
+    # route both before any of the guest album/burst logic below. Any OTHER
+    # command ('/start H-...', or a stray '/start' from an already-linked
+    # host) falls through unchanged. Only plain text/'/switch' are handled
+    # here — hosts don't send photos/voice through this bot in V1 (see FMEA
+    # "out of scope" row).
+    if chat_id is not None and text:
+        host_id = await asyncio.to_thread(
+            supabase_client.get_host_by_telegram_chat_id, chat_id
+        )
+        if host_id:
+            normalized = text.strip().lower()
+            is_switch = normalized == "/switch" or normalized.startswith(("/switch@", "/switch "))
+            if is_switch:
+                if task_queue.enabled():
+                    task_queue.enqueue(
+                        "/api/telegram/process",
+                        {"kind": "host_switch", "chat_id": chat_id, "host_id": host_id},
+                    )
+                else:
+                    background_tasks.add_task(_handle_host_switch, chat_id, host_id)
+                return
+
+            if not text.startswith("/"):
+                reply_to_message_id = (message.get("reply_to_message") or {}).get("message_id")
+                job = {
+                    "kind": "host_reply", "chat_id": chat_id, "host_id": host_id,
+                    "text": text, "reply_to_message_id": reply_to_message_id,
+                }
+                if task_queue.enabled():
+                    task_queue.enqueue("/api/telegram/process", job)
+                else:
+                    background_tasks.add_task(
+                        _handle_host_reply, chat_id, host_id, text, reply_to_message_id
+                    )
+                return
+
     group_id = message.get("media_group_id")
     photo = message.get("photo")
-    text = message.get("text")
 
     if group_id and isinstance(photo, list) and photo and chat_id is not None:
         file_id = photo[-1].get("file_id")
@@ -263,7 +332,7 @@ async def set_webhook(request: Request):
             json={
                 "url": webhook_url,
                 "secret_token": expected,
-                "allowed_updates": ["message", "edited_message"],
+                "allowed_updates": ["message", "edited_message", "callback_query"],
             },
         )
     return {"requested_url": webhook_url, "telegram": resp.json()}
@@ -273,7 +342,7 @@ async def _handle_update(update: dict) -> None:
     """Process a single Telegram update. Guest text only (MVP)."""
     message = update.get("message") or update.get("edited_message")
     if not isinstance(message, dict):
-        return  # callback_query / other update types are out of scope for MVP
+        return  # callback_query is intercepted earlier in _dispatch; anything else is a no-op
 
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
@@ -334,10 +403,16 @@ def _error_reply(he: HTTPException) -> str:
 
 
 async def _handle_start(chat_id, text: str) -> None:
-    """`/start <booking_id>` links this Telegram chat to the guest booking."""
+    """`/start <booking_id>` links this Telegram chat to the guest booking.
+    `/start H-<code>` (uppercase prefix — booking_ids are always a lowercase
+    slug, so the two can never collide) links it to a host account instead."""
     payload = text[len("/start"):].strip()
     if not payload:
         await telegram_client.send_message(chat_id, _INCOMPLETE_START)
+        return
+
+    if payload.startswith("H-"):
+        await _handle_host_start(chat_id, payload[len("H-"):])
         return
 
     guest = await asyncio.to_thread(supabase_client.get_guest_by_booking_id, payload)
@@ -372,6 +447,260 @@ async def _handle_start(chat_id, text: str) -> None:
         payload, guest["property_id"], welcome_text,
     )
     await telegram_client.send_message(chat_id, welcome_text)
+
+
+async def _handle_host_start(chat_id, code: str) -> None:
+    """`/start H-<code>` links this Telegram chat to a host account (the
+    "Connect Telegram" flow on the dashboard). The code is short-lived and
+    single-use — see supabase_client.create_host_telegram_link_code."""
+    host_id = await asyncio.to_thread(supabase_client.resolve_host_telegram_code, code)
+    if not host_id:
+        await telegram_client.send_message(chat_id, _HOST_LINK_EXPIRED)
+        return
+    await asyncio.to_thread(supabase_client.link_host_telegram, host_id, chat_id)
+    await telegram_client.send_message(chat_id, _HOST_LINKED)
+
+
+def _conversation_label(conversation: dict) -> str:
+    label = conversation.get("guest_name") or "your guest"
+    if conversation.get("property_name"):
+        label = f"{label} — {conversation['property_name']}"
+    return label
+
+
+async def _send_picker(chat_id, active: list[dict], prefix: str = "") -> None:
+    """One inline button per active escalation (select_<booking_id>), each its
+    own row — the multi-escalation picker. Ported from the legacy Make.com
+    blueprint's design (button-per-guest, tap-to-lock), adapted onto this
+    project's booking_id/host_profiles.active_conversation_booking_id."""
+    count = len(active)
+    text = (
+        f"{prefix}You have {count} active conversation{'s' if count != 1 else ''}. "
+        "Choose one to reply to:"
+    )
+    buttons = [
+        (_conversation_label(a), f"{_SELECT_PREFIX}{a['booking_id']}")
+        for a in active
+    ]
+    await telegram_client.send_alert(chat_id, text, buttons)
+
+
+async def _handle_host_switch(chat_id, host_id: str) -> None:
+    """`/switch` — reopen the picker on demand, regardless of any current
+    lock. Does not itself change or clear the lock; only a picker tap (or a
+    reply-to) does that — see _handle_select_callback / _handle_host_reply."""
+    try:
+        active = await asyncio.to_thread(
+            supabase_client.get_active_intervene_conversations, host_id
+        )
+        if not active:
+            await telegram_client.send_message(chat_id, _HOST_REPLY_NONE_ACTIVE)
+            return
+        await _send_picker(chat_id, active)
+    except Exception as exc:
+        log.exception("telegram host switch failed for host=%s: %s", host_id, exc)
+        await telegram_client.send_message(chat_id, _GENERIC_ERR)
+
+
+async def _handle_host_reply(
+    chat_id, host_id: str, text: str, reply_to_message_id: int | None,
+) -> None:
+    """A typed message from a linked host's chat — deliver it to the guest.
+
+    Routing (the "locked-in conversation" model, added 2026-09-23 after live
+    testing found the original reply-to-only routing confusing with 3+
+    simultaneous escalations):
+    1. A reply-to a specific alert always wins, AND sets it as the new lock
+       (host_profiles.active_conversation_booking_id) — reply-to doubles as
+       "select," same as tapping a picker button.
+    2. Otherwise, the current lock is used if it still points at a live
+       (mode=intervene) conversation.
+    3. A stale lock (resolved some other way, e.g. the dashboard) is cleared
+       and treated the same as no lock at all: zero active escalations →
+       nothing to do; exactly one → auto-lock to it and deliver, no picker
+       needed; more than one → show the picker instead of guessing, and this
+       typed message is NOT delivered anywhere (there's no way to know who it
+       was for).
+    Every successfully routed reply gets a lightweight echo so the host is
+    never unsure which guest/property it reached.
+    """
+    try:
+        conversation = None
+        note = ""
+
+        if reply_to_message_id:
+            conversation = await asyncio.to_thread(
+                supabase_client.get_conversation_by_host_alert_message_id,
+                host_id, reply_to_message_id,
+            )
+            if conversation and conversation.get("mode") == "intervene":
+                await asyncio.to_thread(
+                    supabase_client.set_host_active_conversation,
+                    host_id, conversation["booking_id"],
+                )
+            elif conversation:
+                # Stale/already-resolved alert — still deliver (harmless), but
+                # don't touch whatever the current lock already is.
+                log.warning(
+                    "telegram host reply: conv=%s from reply-to=%s is not in "
+                    "intervene mode (mode=%s)",
+                    conversation["id"], reply_to_message_id, conversation.get("mode"),
+                )
+
+        if not conversation:
+            locked_booking_id = await asyncio.to_thread(
+                supabase_client.get_host_active_conversation_booking_id, host_id
+            )
+            if locked_booking_id:
+                locked = await asyncio.to_thread(
+                    supabase_client.get_conversation_for_host_lock,
+                    host_id, locked_booking_id,
+                )
+                if locked and locked.get("mode") == "intervene":
+                    conversation = locked
+                else:
+                    await asyncio.to_thread(
+                        supabase_client.set_host_active_conversation, host_id, None
+                    )
+                    note = "That conversation was already resolved. "
+
+        if not conversation:
+            active = await asyncio.to_thread(
+                supabase_client.get_active_intervene_conversations, host_id
+            )
+            if not active:
+                await telegram_client.send_message(chat_id, note + _HOST_REPLY_NONE_ACTIVE)
+                return
+            if len(active) > 1:
+                await _send_picker(chat_id, active, prefix=note)
+                return
+            conversation = active[0]
+            await asyncio.to_thread(
+                supabase_client.set_host_active_conversation,
+                host_id, conversation["booking_id"],
+            )
+
+        # _host_send_core's own DB calls (insert_message/update_conversation)
+        # are NOT wrapped in try/except — that mirrors the original host_send
+        # HTTP route, where an uncaught exception just 500s to the host's own
+        # browser. There is no such backstop here: this runs off a Cloud Tasks
+        # callback, so an uncaught exception would both leave the host with no
+        # feedback at all AND risk Cloud Tasks retrying the job (a retry after
+        # insert_message already succeeded would re-deliver the same reply to
+        # the guest a second time). Catch it here instead.
+        # `delivery` is set only when the guest is on WhatsApp and Meta would
+        # not (or did not) accept the message — same contract as host_send's
+        # HTTP route, which shows this as a warning snackbar rather than a
+        # success toast. Discarding it here would tell the host "sent" for a
+        # message the guest never actually received (found live 2026-09-23
+        # auditing for this exact class of gap after two earlier ones).
+        delivery = await messages_router._host_send_core(conversation["id"], text)
+        label = _conversation_label(conversation)
+        if delivery:
+            await telegram_client.send_message(chat_id, f"{note}⚠️ {delivery}")
+        else:
+            await telegram_client.send_italic(chat_id, f"{note}✓ Sent to {label}")
+    except Exception as exc:
+        log.exception("telegram host reply failed for host=%s: %s", host_id, exc)
+        await telegram_client.send_message(chat_id, _GENERIC_ERR)
+
+
+async def _handle_select_callback(
+    callback_id: str | None, chat_id, message_id: int | None, booking_id: str,
+) -> None:
+    """Picker button tap (callback_data 'select_<booking_id>') — lock the host
+    onto this conversation, same effect as replying-to its alert directly."""
+    try:
+        host_id = await asyncio.to_thread(
+            supabase_client.get_host_by_telegram_chat_id, chat_id
+        )
+        target = host_id and await asyncio.to_thread(
+            supabase_client.get_conversation_for_host_lock, host_id, booking_id
+        )
+        if not target or target.get("mode") != "intervene":
+            # Picker button for a conversation that's no longer active (e.g.
+            # resolved elsewhere between the picker being sent and tapped), or
+            # a callback from a chat_id that isn't a linked host / doesn't own
+            # this booking — same generic rejection either way, never confirms
+            # which case it was.
+            if callback_id:
+                await telegram_client.answer_callback_query(
+                    callback_id, "That conversation is no longer active"
+                )
+            if message_id is not None:
+                await telegram_client.edit_message(
+                    chat_id, message_id, "That conversation is no longer active."
+                )
+            return
+
+        await asyncio.to_thread(
+            supabase_client.set_host_active_conversation, host_id, booking_id
+        )
+        if callback_id:
+            await telegram_client.answer_callback_query(callback_id, "Connected")
+        if message_id is not None:
+            await telegram_client.edit_message(
+                chat_id, message_id,
+                f"🔗 Connected to {_conversation_label(target)}. Type your reply here.",
+            )
+    except Exception as exc:
+        log.exception("telegram select callback failed for booking=%s: %s", booking_id, exc)
+        if callback_id:
+            await telegram_client.answer_callback_query(callback_id, "Something went wrong")
+
+
+async def _handle_callback(callback: dict) -> None:
+    """Inline-button press on a host's escalation alert or picker. 'Mark
+    Resolved' (callback_data 'resolved_<booking_id>') and a picker selection
+    ('select_<booking_id>') are the only two kinds in V1; anything else is
+    answered as unsupported rather than silently ignored, so the button never
+    just spins forever client-side."""
+    callback_id = callback.get("id")
+    data = callback.get("data") or ""
+    message = callback.get("message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    message_id = message.get("message_id")
+
+    if data.startswith(_SELECT_PREFIX) and chat_id is not None:
+        await _handle_select_callback(
+            callback_id, chat_id, message_id, data[len(_SELECT_PREFIX):]
+        )
+        return
+
+    if not data.startswith(_RESOLVED_PREFIX) or chat_id is None:
+        if callback_id:
+            await telegram_client.answer_callback_query(callback_id, "Unsupported action")
+        return
+
+    booking_id = data[len(_RESOLVED_PREFIX):]
+    try:
+        host_id = await asyncio.to_thread(
+            supabase_client.get_host_by_telegram_chat_id, chat_id
+        )
+        owns = host_id and await asyncio.to_thread(
+            supabase_client.host_owns_booking, host_id, booking_id
+        )
+        if not owns:
+            # Rejected silently (generic toast only) — never confirms whether
+            # the booking exists, so this can't be used to probe other hosts'
+            # data.
+            if callback_id:
+                await telegram_client.answer_callback_query(callback_id, "Not your conversation")
+            return
+
+        await messages_router._resolve_conversation_core(booking_id)
+    except Exception as exc:
+        log.exception("telegram resolve callback failed for booking=%s: %s", booking_id, exc)
+        if callback_id:
+            await telegram_client.answer_callback_query(
+                callback_id, "Something went wrong — try the dashboard"
+            )
+        return
+
+    if callback_id:
+        await telegram_client.answer_callback_query(callback_id, "Resolved ✓")
+    if message_id is not None:
+        await telegram_client.edit_message(chat_id, message_id, "✅ Resolved")
 
 
 async def _handle_guest_message(

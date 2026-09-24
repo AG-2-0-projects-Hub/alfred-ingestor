@@ -14,6 +14,39 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
+      feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
+      PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
+      `display: standalone`, Flutter web already registers a service worker) — the real work is a
+      responsive layout pass across the dashboard/chat screens. Also directly shortens a future
+      native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
+      Stitch draft during the week; not urgent, but goes first when picked up.
+- [ ] Guest hostility/profanity doesn't reliably escalate. Founder-flagged + confirmed live
+      2026-09-23 with real test messages, same conversations, minutes apart: "a chingar a su
+      madre!#" and "fuckng fucking fuckkkkk!" did NOT escalate (`is_escalated_interaction: false`),
+      while "todo esta de la vergaaa!!!!" and "Odio esta estancia! esta de l verga!!" DID
+      (`true`, `resolution_status: resolved`) — so it's not "never escalates on profanity," it's
+      inconsistent. `requires_escalation` is a Gemini judgment call from `gemini_messenger.
+      first_pass`'s prompt, not a keyword rule, so this is likely a prompt-wording gap rather than
+      a code bug. Investigate the actual escalation criteria in that prompt; test any change
+      empirically against a batch of real hostile messages before committing to it (per this
+      project's own evidence-over-assumption practice, see CLAUDE.md's "Competing approaches"
+      rule) rather than guessing at new wording.
+- [ ] Write the missing `_UNIVERSAL_FIELDS_TEST` (`backend/services/gemini_merge_resolve.py` —
+      a comment at the schema definition claims this smoke test exists and verifies Gemini omits
+      ungrounded fields instead of hallucinating them; it doesn't actually exist anywhere in the
+      repo). Two fixture inputs through `_extract_universal_fields()` — one with clear
+      country/safety/parking facts stated, one with none — asserting facts get extracted when
+      present and fields are omitted (not guessed) when absent. Flagged 2026-09-22 while adding
+      structured `location`/`safety`/`parking` fields to the same schema.
+- [ ] Wire up Sentry error tracking (backend + frontend) — reuse the existing reflip pipeline/setup
+      as the template (same Sentry org, `alonso-vazquez-ng`, already has `reflip-backend`/
+      `reflip-frontend` projects; the-ingestor needs its own two). Motivated by the 2026-09-21
+      resolver call_timeout regression: it broke every `/api/resolve` call in prod immediately after
+      merge and was only found because the founder reported it live — nothing alerted us. Cheaper
+      near-term fallback discussed but not chosen: a GCP log-based alert on 500s for `/api/resolve`
+      and `/api/merge` (uses existing Cloud Logging, no new dependency, ~15 min setup, but no
+      frontend errors/grouping/session context).
 - [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
       expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
       dumps them back on the plain form with only a "Train Now" button — no way to check progress,

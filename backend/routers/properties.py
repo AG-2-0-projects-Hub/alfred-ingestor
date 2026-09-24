@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from services import supabase_client
@@ -54,6 +55,27 @@ async def upload_host_avatar(
         supabase_client.upload_host_avatar, uid, data, content_type, ext
     )
     return {"url": url}
+
+
+@router.post("/host/telegram/link-code")
+async def create_host_telegram_link(authorization: str | None = Header(default=None)):
+    """Mint a one-time Telegram-connect deep link for the authenticated host.
+
+    Same deep-link shape as create_guest's (backend-only, since the bot
+    username/domain env vars aren't exposed to the frontend), namespaced with
+    an 'H-' prefix so routers/telegram.py's /start handler can tell a host code
+    from a guest booking_id (booking_ids are always fully lowercase-slug, never
+    'H-' prefixed).
+    """
+    uid = await _require_host_id(authorization)
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@").strip()
+    tg_domain = os.environ.get("TELEGRAM_LINK_DOMAIN", "t.me").strip().strip("/")
+    if not bot_username:
+        raise HTTPException(status_code=500, detail="Telegram is not configured")
+    code = await asyncio.to_thread(
+        supabase_client.create_host_telegram_link_code, uid
+    )
+    return {"telegram_link": f"https://{tg_domain}/{bot_username}?start=H-{code}"}
 
 
 @router.post("/property/{property_id}/soft-delete")

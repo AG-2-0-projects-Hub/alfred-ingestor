@@ -702,7 +702,10 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
           _escalationReason = null;
           _requiresAttention = false;
         });
-        await _insertSystemMessage(ChatSystemMessages.resumeAfterResolve);
+        // The __SYS_RESOLVED__ marker is now inserted by the backend itself
+        // (routers/messages._resolve_conversation_core) so it also fires for
+        // a Telegram-originated resolve — inserting it here too would leave a
+        // duplicate marker for this (dashboard) path.
         widget.onResolved?.call();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

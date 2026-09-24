@@ -83,6 +83,47 @@ async def send_chat_action(chat_id, action: str = "typing") -> dict | None:
     return await _post("sendChatAction", {"chat_id": chat_id, "action": action})
 
 
+async def send_alert(chat_id, text: str, buttons: list[tuple[str, str]]) -> int | None:
+    """Send a host escalation alert with inline buttons (label, callback_data).
+    HTML parse mode — callers must escape any guest/AI-generated text themselves
+    (see routers/messages._build_host_alert_text). Returns the sent message's
+    message_id so the caller can store it on conversations.host_alert_message_id
+    for reply-to routing, or None on failure (best-effort, never raises)."""
+    keyboard = {
+        "inline_keyboard": [[{"text": label, "callback_data": data}]
+                             for label, data in buttons]
+    }
+    result = await _post("sendMessage", {
+        "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": True, "reply_markup": keyboard,
+    })
+    if not result or not result.get("ok"):
+        return None
+    return (result.get("result") or {}).get("message_id")
+
+
+async def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+    """Dismiss Telegram's loading spinner on an inline button press, optionally
+    with a small toast. Must be called even on failure paths — otherwise the
+    button stays in a spinning state client-side until Telegram times it out."""
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    await _post("answerCallbackQuery", payload)
+
+
+async def edit_message(chat_id, message_id: int, text: str) -> None:
+    """Rewrite an already-sent message's text AND remove its inline keyboard.
+    Every current caller edits a message specifically to retire its buttons
+    after they've been acted on (resolved, or a picker choice made) — Telegram
+    keeps the original keyboard attached unless a reply_markup is explicitly
+    supplied on the edit, so this always clears it."""
+    await _post("editMessageText", {
+        "chat_id": chat_id, "message_id": message_id, "text": text,
+        "reply_markup": {"inline_keyboard": []},
+    })
+
+
 async def download_file(file_id: str) -> bytes | None:
     """Fetch a Telegram file's raw bytes by file_id (two steps: getFile resolves
     the file_path, then the file endpoint serves the bytes). Returns None on any
