@@ -1318,6 +1318,15 @@ testing plus one direct DB-query verification pass (see P6's note) — not yet r
 - **expected:** identical behavior to before this feature existed — dashboard-only, no Telegram calls attempted, no errors logged
 - **status:** passing — implicit in every pre-existing dashboard-only property tested this session (the guard is `if host_chat_id:`, never entered when unset) — not a dedicated separate test, just noting it's covered by construction
 
+### P8. Host disconnects Telegram
+- **id:** tgh-disconnect-01
+- **touches:** `frontend/lib/widgets/profile_dialog.dart` (`_confirmDisconnectTelegram`, `_disconnectTelegram`, `_buildTelegramSection`)
+- **layer:** 2 (Playwright — see `_tests/runner/scenarios/p8.ts`)
+- **setup:** a host account force-linked to a fake `telegram_chat_id` via direct REST PATCH (no real Telegram client needed for this UI-only flow)
+- **action:** open profile dialog → tap "Disconnect" → confirm in the dialog
+- **host_expected:** confirmation dialog shows correct copy, then the section reverts to "Connect Telegram"; `host_profiles.telegram_chat_id` and `active_conversation_booking_id` both cleared to `null`
+- **status:** passing — automated via `_tests/runner/scenarios/p8.ts`, run against staging 2026-09-25: connected-state render, confirm dialog, reverted state (all via the OpenRouter vision judge) and a direct DB check all PASS. No backend endpoint needed — `host_profiles`' RLS update policy is row-level only (`id = auth.uid()`), so the frontend writes directly, same pattern `_save()` already uses. The active-escalation warning copy branch (when `active_conversation_booking_id` is set) is not independently exercised here — only the no-active-conversation copy path is covered.
+
 ---
 
 ## Q. First-login onboarding
