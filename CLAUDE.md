@@ -300,3 +300,11 @@ read the file itself for the full sequence and why it exists.
 - Pure cosmetic changes (spacing, colour tweaks) with no assertable state
 - Changes already covered by an existing passing scenario
 - Changes to this file or other docs
+
+---
+
+## Feedback Triage
+
+Follow `FEEDBACK_TRIAGE_PROTOCOL_INGESTOR.md` (project root) — it declares this project's
+feedback sources and points to the base `_protocols/FEEDBACK_TRIAGE_PROTOCOL.md` for the full
+sequence. Invoked on-demand only ("run the feedback triage protocol"); no cron yet.
