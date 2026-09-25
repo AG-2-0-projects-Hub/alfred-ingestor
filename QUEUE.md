@@ -33,16 +33,6 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       `coordinates` guard). Full log + a ready-to-paste cross-LLM consultation prompt:
       `_Context/Universal_Fields_Extraction_Reliability_Investigation_2026-09-25.md` (gitignored,
       local only). Nothing has shipped from this investigation yet — still test-harness-only.
-- [ ] Wire up Sentry error tracking (backend + frontend + scraper) — reuse the existing reflip pipeline/setup
-      as the template (same Sentry org, `alonso-vazquez-ng`, already has `reflip-backend`/
-      `reflip-frontend` projects; the-ingestor needs its own three — backend, frontend, AND
-      scraper, decided 2026-09-25 since scraper is a real mid-pipeline service that can fail
-      silently the same way the resolver regression did). Motivated by the 2026-09-21
-      resolver call_timeout regression: it broke every `/api/resolve` call in prod immediately after
-      merge and was only found because the founder reported it live — nothing alerted us. Cheaper
-      near-term fallback discussed but not chosen: a GCP log-based alert on 500s for `/api/resolve`
-      and `/api/merge` (uses existing Cloud Logging, no new dependency, ~15 min setup, but no
-      frontend errors/grouping/session context).
 - [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
       expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
       dumps them back on the plain form with only a "Train Now" button — no way to check progress,
@@ -119,10 +109,25 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       the new "Country/location extraction reliability" item above, still open
 - [x] ~~Guest hostility/profanity doesn't reliably escalate~~ — fixed 2026-09-25, staging
       `a9f1dc0`, FIX_VERIFY'd (real Gemini calls, founder's exact 2 failing messages + an 8-message
-      battery, before/after, zero regressions) — **not yet pushed**, confirm before next push.
-      Root cause: Category 4's exclusion clause required both "no target" AND "no clear anger" to
-      skip escalation; repeated/emphasized profanity with no target was wrongly treated as
-      insufficient on its own
+      battery, before/after, zero regressions), pushed. Root cause: Category 4's exclusion clause
+      required both "no target" AND "no clear anger" to skip escalation; repeated/emphasized
+      profanity with no target was wrongly treated as insufficient on its own
+- [x] ~~Wire up Sentry error tracking (backend + frontend + scraper)~~ — shipped 2026-09-25,
+      staging `4bcdbb9`. 3 new Sentry projects under org `alonso-vazquez-ng` (`alfred-backend`,
+      `alfred-scraper`, `alfred-frontend`), gated on empty `SENTRY_DSN` = off (same convention as
+      reflip). Went beyond bootstrap: added explicit `capture_exception()` at every existing
+      except block across `ingest_worker.py`/`gemini_merge_resolve.py`/`telegram.py`/
+      `whatsapp.py`/`scraper/main.py` that previously only logged and swallowed a real failure —
+      the same silent-failure pattern behind the 2026-09-21 resolver `call_timeout` incident that
+      motivated this item. Live-verified end-to-end for all 3 projects: real
+      `capture_message()`/triggered-error events sent and confirmed server-side via the Sentry
+      MCP, including a real Playwright-triggered uncaught error proving `SentryFlutter.init`'s
+      automatic zone-based capture actually fires (not just present in the bundle). `SENTRY_DSN`/
+      `ENVIRONMENT` set on all 4 Cloud Run services + both Vercel projects; `alfred-backend-staging`/
+      `alfred-scraper-staging` redeployed and health-checked live. Prod Cloud Run still needs its
+      own manual `gcloud run deploy --source` after the next `staging→main` merge (no auto-deploy
+      on this project, confirmed via `CONTEXT.md`'s existing note) — frontend prod deploys via
+      Vercel's normal auto-deploy-on-push.
 - [x] ~~Overview tab manual walkthrough replay toggle~~ — shipped 2026-09-10, staging `6835304`, Playwright-verified live
 - [x] ~~Dev/User (beta) view split for Add Property~~ — shipped 2026-09-09, staging
 - [x] ~~Post-training walkthrough panel~~ — shipped 2026-09-09 (Parts A/B/C), staging

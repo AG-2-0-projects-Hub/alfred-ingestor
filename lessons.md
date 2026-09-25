@@ -3,6 +3,40 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-25 — Verifying Sentry Flutter's automatic zone-based capture needs a real triggered error, and `Future.delayed` must be scheduled *inside* `SentryFlutter.init`'s `appRunner`
+
+**Context:** Wiring up Sentry error tracking across backend/scraper/frontend. Backend/scraper
+verification was straightforward — a direct `sentry_sdk.capture_message()` call against the real
+DSN, confirmed landed server-side via the Sentry MCP. The frontend (`sentry_flutter`) needed a
+different approach: its value is the *automatic* capture hooks (`FlutterError.onError`,
+`PlatformDispatcher.instance.onError`, and Dart's zone-based uncaught-error handler) that
+`SentryFlutter.init` installs — calling `Sentry.captureException()` directly would only prove the
+SDK *can* send events, not that the automatic wiring actually works.
+
+**Discovery:** Built a throwaway, URL-gated trigger (`?sentry_verify=1` → `throw StateError(...)`
+inside a `Future.delayed`) to produce a real uncaught error automatable via Playwright, without
+needing to click through the app's auth flow. The one non-obvious part: the `Future.delayed` call
+has to be placed *inside* `SentryFlutter.init`'s `appRunner` callback, not scheduled before
+`SentryFlutter.init` runs — `SentryFlutter.init` wraps `appRunner` in its own Dart zone
+internally, and a `Future`/`Timer` callback runs in whatever zone was current *when it was
+scheduled*, not when it fires. Scheduling it outside `appRunner` would have silently escaped
+Sentry's zone entirely — no error, just nothing captured, and it would have looked identical to
+a broken DSN or a broken init call. Verified via a real headless-Chromium Playwright run:
+navigated to the locally-served fresh build with the query param, intercepted the actual outbound
+`POST .../envelope/` request, and confirmed via the Sentry MCP that the event landed server-side
+with the right message and timestamp. Removed the trigger before committing.
+
+**Impact:** This is now the template for verifying any future Flutter-side automatic-capture
+change in this project (or a similar Sentry Flutter rollout elsewhere) — a query-param-gated
+throw inside `appRunner`, Playwright network interception on the request, Sentry MCP confirmation
+server-side. Direct `captureException()` calls remain fine for testing the SDK/DSN plumbing
+itself, just not sufficient for proving the automatic hooks are live.
+
+**Global Candidate:** No — specific to `sentry_flutter`'s zone-wrapping behavior, not a general
+principle beyond this project's own Sentry rollout.
+
+---
+
 ## 2026-09-19 — Full `Read` on a known secrets file is still a leak, not just raw `grep`/`cat`
 
 **Context:** Mid-session, writing a new Playwright scenario for the Stop/Delete UI fixes, needed
