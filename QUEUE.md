@@ -14,10 +14,6 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
-- [ ] Telegram "Disconnect" feature (founder-flagged 2026-09-24) — the profile dialog's Telegram
-      section only ever offers Connect; there's no way for a host to break the link once set
-      (`host_profiles.telegram_chat_id`/`active_conversation_booking_id`). Needs a Disconnect
-      action that clears both.
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
       PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
@@ -25,27 +21,23 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       responsive layout pass across the dashboard/chat screens. Also directly shortens a future
       native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
       Stitch draft during the week; not urgent, but goes first when picked up.
-- [ ] Guest hostility/profanity doesn't reliably escalate. Founder-flagged + confirmed live
-      2026-09-23 with real test messages, same conversations, minutes apart: "a chingar a su
-      madre!#" and "fuckng fucking fuckkkkk!" did NOT escalate (`is_escalated_interaction: false`),
-      while "todo esta de la vergaaa!!!!" and "Odio esta estancia! esta de l verga!!" DID
-      (`true`, `resolution_status: resolved`) — so it's not "never escalates on profanity," it's
-      inconsistent. `requires_escalation` is a Gemini judgment call from `gemini_messenger.
-      first_pass`'s prompt, not a keyword rule, so this is likely a prompt-wording gap rather than
-      a code bug. Investigate the actual escalation criteria in that prompt; test any change
-      empirically against a batch of real hostile messages before committing to it (per this
-      project's own evidence-over-assumption practice, see CLAUDE.md's "Competing approaches"
-      rule) rather than guessing at new wording.
-- [ ] Write the missing `_UNIVERSAL_FIELDS_TEST` (`backend/services/gemini_merge_resolve.py` —
-      a comment at the schema definition claims this smoke test exists and verifies Gemini omits
-      ungrounded fields instead of hallucinating them; it doesn't actually exist anywhere in the
-      repo). Two fixture inputs through `_extract_universal_fields()` — one with clear
-      country/safety/parking facts stated, one with none — asserting facts get extracted when
-      present and fields are omitted (not guessed) when absent. Flagged 2026-09-22 while adding
-      structured `location`/`safety`/`parking` fields to the same schema.
-- [ ] Wire up Sentry error tracking (backend + frontend) — reuse the existing reflip pipeline/setup
+- [ ] Country/location extraction reliability (opened 2026-09-25, mid-investigation, paused
+      waiting on cross-LLM feedback) — `location.country` extraction is unreliable (30-67%
+      depending on stage/prompt variant across many test rounds) even when clearly stated, and
+      real hallucinations were found independently (`coordinates: {0,0}`, invented `state_region`
+      values like "Otago" never stated in the source). Root cause identified: the SCRAPER's own
+      structuring prompt (`scraper/GEMINI_PROMPT_AIRBNB.md`) crams City+State+Country into one
+      mislabeled `**City:** [City, State, Country]` field — splitting it into 3 real fields
+      measurably helped (56%→67% country-recall) but wasn't combined with the merge-step fixes
+      also found (a world-knowledge-leakage rule, a `state_region` scope definition, a
+      `coordinates` guard). Full log + a ready-to-paste cross-LLM consultation prompt:
+      `_Context/Universal_Fields_Extraction_Reliability_Investigation_2026-09-25.md` (gitignored,
+      local only). Nothing has shipped from this investigation yet — still test-harness-only.
+- [ ] Wire up Sentry error tracking (backend + frontend + scraper) — reuse the existing reflip pipeline/setup
       as the template (same Sentry org, `alonso-vazquez-ng`, already has `reflip-backend`/
-      `reflip-frontend` projects; the-ingestor needs its own two). Motivated by the 2026-09-21
+      `reflip-frontend` projects; the-ingestor needs its own three — backend, frontend, AND
+      scraper, decided 2026-09-25 since scraper is a real mid-pipeline service that can fail
+      silently the same way the resolver regression did). Motivated by the 2026-09-21
       resolver call_timeout regression: it broke every `/api/resolve` call in prod immediately after
       merge and was only found because the founder reported it live — nothing alerted us. Cheaper
       near-term fallback discussed but not chosen: a GCP log-based alert on 500s for `/api/resolve`
@@ -120,6 +112,17 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md` item 8. Ongoing Train Now
       reliability is now tracked via the 🔴 item at the top of Open, not this one.
 
+- [x] ~~Telegram "Disconnect" feature~~ — shipped 2026-09-25, staging `d90724e`, FIX_VERIFY'd with
+      a real Playwright scenario (`p8.ts`, commit `aca57b9`), pushed to staging
+- [x] ~~Write the missing `_UNIVERSAL_FIELDS_TEST`~~ — shipped 2026-09-25, staging `0c67f81`,
+      pushed. Running it for real surfaced a much bigger reliability problem than expected — see
+      the new "Country/location extraction reliability" item above, still open
+- [x] ~~Guest hostility/profanity doesn't reliably escalate~~ — fixed 2026-09-25, staging
+      `a9f1dc0`, FIX_VERIFY'd (real Gemini calls, founder's exact 2 failing messages + an 8-message
+      battery, before/after, zero regressions) — **not yet pushed**, confirm before next push.
+      Root cause: Category 4's exclusion clause required both "no target" AND "no clear anger" to
+      skip escalation; repeated/emphasized profanity with no target was wrongly treated as
+      insufficient on its own
 - [x] ~~Overview tab manual walkthrough replay toggle~~ — shipped 2026-09-10, staging `6835304`, Playwright-verified live
 - [x] ~~Dev/User (beta) view split for Add Property~~ — shipped 2026-09-09, staging
 - [x] ~~Post-training walkthrough panel~~ — shipped 2026-09-09 (Parts A/B/C), staging

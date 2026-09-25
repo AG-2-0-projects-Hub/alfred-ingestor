@@ -10,6 +10,12 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
+- 🟢 2026-09-25 session shipped Telegram Disconnect + `_UNIVERSAL_FIELDS_TEST` + a guest-hostility
+  escalation prompt fix (all FIX_VERIFY'd, see QUEUE.md Done). Pushed through `0c67f81`;
+  **`a9f1dc0` (escalation fix) is NOT pushed yet** — confirm before next push.
+- 🟡 Country/location extraction reliability mid-investigation, paused waiting on cross-LLM
+  feedback (see QUEUE.md Open + `_Context/Universal_Fields_Extraction_Reliability_Investigation_
+  2026-09-25.md`, gitignored/local-only). Nothing from it has shipped.
 - 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
   untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
   Must use `FIX_VERIFY_PROTOCOL.md`.
