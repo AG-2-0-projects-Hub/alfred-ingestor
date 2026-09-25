@@ -13,10 +13,6 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 - 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
   untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
   Must use `FIX_VERIFY_PROTOCOL.md`.
-- 🟢 **Telegram host-escalation — FIX_VERIFY closed (staging `ad87535`).** Only the staging→main
-  merge sequence remains (prod migrations, PR, founder-merge, prod webhook re-registration — easy
-  to forget, would silently break Mark Resolved/the picker on prod): `C:\Users\San_8\.claude\plans\
-  telegram-host-escalation-merge-readiness.md` §4.
 - 🟡 Stray property "Bungalowww" didn't actually delete — worth a quick look at the delete path.
 - 🟡 Walkthrough opacity Fix 2 not started — likely root cause is `GlassPanel` silently dropping
   `color` app-wide when `gradient` is also set (still unfixed).
@@ -29,7 +25,40 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-22 (**Fixed a real founder-reported bug (English welcome message on a
+**Last Session:** 2026-09-24 (**Closed out Telegram host-escalation's FIX_VERIFY, merged
+staging→main to PROD, and built the real first-login "Welcome to Alfred" modal after
+discovering it had never actually existed.**) — staging + main pushed/merged; PROD updated.
+> **✅ Telegram host-escalation FIX_VERIFY closed and merged to prod.** Added `_tests/scenarios.md`
+> §P (P1-P7) and a real Playwright scenario (`p1.ts`) for the Connect-Telegram UI. Building it
+> surfaced a real bug (not a coordinate issue): the deep-link text (and everything below it,
+> including Delete account) was silently below the profile dialog's scrollable fold once the QR
+> section grew past the visible height — two earlier fixes (missing color, then wrong font family)
+> were real but insufficient; root cause was isolated via a RenderBox position diagnostic and
+> confirmed by manually scrolling staging. Fixed with `Scrollable.ensureVisible`. Both migrations
+> applied + verified on prod; PR #9 merged (`1ec095a`); prod backend/frontend redeployed; **prod
+> Telegram webhook re-registered** — confirmed `allowed_updates` now includes `callback_query`
+> (was silently missing; would have made Mark Resolved/the picker do nothing on prod with zero
+> errors anywhere). Founder smoke-tested prod live — confirmed working.
+> **✅ Built the real first-login "Welcome to Alfred" modal.** Founder reported it wasn't showing
+> after deleting+recreating their account. Investigation found it had **never actually been
+> built** — a full git-history search across every distinctive line of its copy found zero matches
+> on any branch, ever. `guide.html`'s Add Property tab documents it as if it were a live capture,
+> very likely a leftover from the troubled guide.html rework
+> (`_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`). Built for real per Plan
+> Mode (`C:\Users\San_8\.claude\plans\snoopy-spinning-spindle.md`): new
+> `host_profiles.welcome_modal_seen` column (server-side, not `SharedPreferences`, deliberately —
+> must reset correctly on account delete+recreate, which a browser-local flag would not), new
+> `welcome_walkthrough_dialog.dart`, wired into `dashboard_screen.dart`. Verified via a new
+> Playwright scenario (`q1.ts`) — PASS on all 4 assertions, after fixing the vision judge's own
+> prompt ambiguity (it confused the real modal with the app's always-present inline empty-state,
+> which also says "Welcome to Alfred"). Founder then had the dev jargon copy-edited out ("Ingest,
+> then Merge"/"scrapes" → plain language) and the existing post-training "Tell me something
+> directly" walkthrough tip reworded to explicitly invite ongoing use, based on real beta-tester
+> feedback (a host is already using voice notes heavily to keep adding small details).
+> **🟡 Queued, not built:** a Telegram "Disconnect" feature (profile dialog only offers Connect, no
+> way to break the link) — founder-flagged, added to `QUEUE.md`.
+
+**Prior Session:** 2026-09-22 (**Fixed a real founder-reported bug (English welcome message on a
 Mexican property), audited the schema against Airbnb's own mandatory host fields, shipped a
 structured location/safety/parking extension (staging `2ccef20`), then planned a full
 Telegram host-escalation pipeline for tomorrow — corrected mid-session after the founder caught

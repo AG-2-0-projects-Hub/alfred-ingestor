@@ -14,6 +14,10 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] Telegram "Disconnect" feature (founder-flagged 2026-09-24) — the profile dialog's Telegram
+      section only ever offers Connect; there's no way for a host to break the link once set
+      (`host_profiles.telegram_chat_id`/`active_conversation_booking_id`). Needs a Disconnect
+      action that clears both.
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
       PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has

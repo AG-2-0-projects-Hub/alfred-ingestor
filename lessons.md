@@ -744,3 +744,34 @@ actually running the grep as a literal first tool call on any infra/secrets/depl
 mental note that's easy to skip under task momentum.
 
 ---
+
+## 2026-09-24 — `git push` needs WSL specifically; local git ops (commit/diff/status) work fine from either shell
+
+**Context:** Committing and pushing several fix commits to `staging` during the Telegram
+merge-readiness work. Local git operations (`git status`, `git diff`, `git add`, `git commit`) had
+all been running successfully via the plain Bash tool all session, against the project's UNC path
+(`\\wsl.localhost\Ubuntu\...`) working directory.
+
+**Discovery:** `git push origin staging` via the same plain Bash tool failed with `Host key
+verification failed. fatal: Could not read from remote repository.` — this repo's remote is SSH
+(`git@github.com:...`), and the Bash tool here is Windows Git Bash, whose SSH client/known_hosts
+live under `C:\Users\<user>\.ssh`, not WSL's `~/.ssh` where this project's actual GitHub SSH key
+and trusted host key are configured. Local-only git commands never touch the network, so they work
+identically from either shell against the same UNC-mounted `.git` directory — it's specifically
+`push`/`fetch`/`pull` (anything invoking SSH) that requires routing through `wsl bash -lc
+"git push ..."` instead. Confirmed by re-running the identical push command via `wsl bash -lc` from
+the WSL-side path immediately after the failure — succeeded on the first try.
+
+**Impact:** Every push this session (after the first failure) went through `wsl bash -lc 'cd
+~/AG_master_files/projects/the-ingestor && git push origin staging'` instead of the plain Bash
+tool. No lost work — the commits existed locally in the shared `.git` either way, this only
+affected the network step.
+
+**Global Candidate:** Yes — this is a specific, previously-undocumented corollary of the already-
+established "WSL2 tools need `wsl bash -c`" rule (root `CLAUDE.md` §2): git itself is a partial
+exception, since Windows Git Bash bundles its own git.exe that works fine for anything local. The
+network-dependent subset (`push`/`fetch`/`pull`/`clone` over SSH) is the part that specifically
+needs WSL's own SSH identity — worth stating explicitly rather than leaving "git" as a blanket
+WSL-only tool, since that overstates the restriction and undersells why push specifically fails.
+
+---
