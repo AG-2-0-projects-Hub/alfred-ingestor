@@ -53,8 +53,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   // Telegram "Connect" (host-escalation alerts + reply-from-Telegram).
   String? _telegramChatId; // non-null once linked
+  String? _activeConversationBookingId; // non-null while a Telegram reply is locked to a guest
   String? _telegramLink; // set after generating a connect link this session
   bool _connectingTelegram = false;
+  bool _disconnectingTelegram = false;
   Timer? _telegramPollTimer;
   final _tgHelpDockLink = LayerLink();
   OverlayEntry? _tgHelpOverlay;
@@ -85,7 +87,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
     try {
       final row = await _db
           .from('host_profiles')
-          .select('display_name, nickname, bio, avatar_url, telegram_chat_id')
+          .select('display_name, nickname, bio, avatar_url, telegram_chat_id, '
+              'active_conversation_booking_id')
           .eq('id', _uid ?? '')
           .maybeSingle();
       // row == null here is a clean "no profile row yet" — expected for a
@@ -96,6 +99,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _bioController.text = row['bio'] as String? ?? '';
         _avatarUrl = row['avatar_url'] as String?;
         _telegramChatId = row['telegram_chat_id'] as String?;
+        _activeConversationBookingId =
+            row['active_conversation_booking_id'] as String?;
       }
     } catch (_) {
       // A real failure (network, RLS) is NOT the same as "no row yet" — that
@@ -266,6 +271,69 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
   }
 
+  Future<void> _confirmDisconnectTelegram() async {
+    final hasActive = _activeConversationBookingId != null;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Disconnect Telegram?'),
+        content: Text(
+          hasActive
+              ? "You'll stop getting guest alerts here. You currently have "
+                'an active Telegram conversation — reply from the dashboard '
+                'instead after disconnecting.'
+              : "You'll stop getting guest alerts here. You can reconnect "
+                'anytime.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _disconnectTelegram();
+  }
+
+  Future<void> _disconnectTelegram() async {
+    final uid = _uid;
+    if (uid == null) return;
+    setState(() => _disconnectingTelegram = true);
+    try {
+      // Same RLS-scoped direct-write pattern as _save() -- host_profiles'
+      // update policy is row-level only (id = auth.uid()), no column
+      // restriction, so this needs no backend endpoint (unlike Connect,
+      // which mints a server-only secret code).
+      await _db.from('host_profiles').update({
+        'telegram_chat_id': null,
+        'active_conversation_booking_id': null,
+      }).eq('id', uid);
+      if (mounted) {
+        setState(() {
+          _telegramChatId = null;
+          _activeConversationBookingId = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not disconnect Telegram. Please try again.'),
+            backgroundColor: context.palette.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _disconnectingTelegram = false);
+    }
+  }
+
   static const List<List<String>> _telegramHelpLines = [
     ['When a guest needs you, you\'ll get an alert here with their message, '
         'Alfred\'s draft, and a ', 'Mark Resolved', ' button.'],
@@ -411,15 +479,36 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Widget _buildTelegramSection(AppPalette palette) {
     if (_telegramChatId != null) {
-      return Row(
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Telegram connected — you'll get an alert there when a guest "
-              'needs you.',
-              style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+          Row(
+            children: [
+              Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Telegram connected — you'll get an alert there when a guest "
+                  'needs you.',
+                  style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 0),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _disconnectingTelegram ? null : _confirmDisconnectTelegram,
+              child: Text(
+                _disconnectingTelegram ? 'Disconnecting…' : 'Disconnect',
+                style: TextStyle(fontSize: 12, color: palette.danger),
+              ),
             ),
           ),
         ],
