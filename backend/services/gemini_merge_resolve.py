@@ -828,6 +828,89 @@ async def _extract_universal_fields(
     return json.loads(response.text)
 
 
+# ── Smoke test: verifies UNIVERSAL_FIELDS_SCHEMA's "omit, don't guess" contract ──
+# Referenced by the comment at UNIVERSAL_FIELDS_SCHEMA's definition above. This
+# project has no pytest suite (see _tests/health/run_health_check.py for the
+# established pattern of standalone live-Gemini smoke scripts, which this
+# mirrors) — run directly:
+#   backend/venv/bin/python -m services.gemini_merge_resolve
+# Requires local Vertex ADC (gcloud auth application-default login), same as
+# run_health_check.py's Layer 2 checks — a mocked response would prove nothing
+# here, since the whole point is verifying Gemini ITSELF (not a stand-in)
+# respects "omit if not found," not that this module's own plumbing works.
+
+_FIXTURE_WITH_FACTS = (
+    "# Casa Tulum\n"
+    "Located in Tulum, Quintana Roo, Mexico, five minutes from the beach.\n"
+    "Free private parking for 2 cars is available on site, uncovered.\n"
+    "Safety: the property has a working smoke alarm in the kitchen and a "
+    "security camera covering the front gate (not facing any interior space "
+    "or the pool).\n"
+)
+
+_FIXTURE_NO_FACTS = (
+    "# Cozy Studio\n"
+    "A comfortable studio with a queen bed, a small kitchenette, and a "
+    "private balcony. Guests love the neighborhood's cafes and the rooftop "
+    "pool.\n"
+)
+
+
+async def _UNIVERSAL_FIELDS_TEST() -> None:
+    """Two real Gemini calls, no mocks: one fixture states country/safety/parking
+    facts explicitly, the other states none of them at all. Asserts facts are
+    extracted when present and the corresponding fields are structurally absent
+    (never guessed) when not -- the "omit if not found" contract
+    UNIVERSAL_FIELDS_SYSTEM_PROMPT asks for, and that this schema's
+    `required`-less design depends on actually being true (see the comment at
+    UNIVERSAL_FIELDS_SCHEMA's definition for why `required` was rejected)."""
+    import os
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_UNIVERSAL_FIELDS_TEST: SKIP (no local ADC — run: "
+              f"gcloud auth application-default login) — {exc}")
+        return
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    with_facts = await _extract_universal_fields(_FIXTURE_WITH_FACTS, "", "Casa Tulum")
+    no_facts = await _extract_universal_fields(_FIXTURE_NO_FACTS, "", "Cozy Studio")
+
+    location = with_facts.get("location", {})
+    safety = with_facts.get("safety", {})
+    parking = with_facts.get("parking", {})
+    assert location.get("country"), f"expected country to be extracted, got {location!r}"
+    assert "mexico" in location["country"].lower(), f"unexpected country value: {location['country']!r}"
+    assert safety.get("smoke_alarm") is True, f"expected smoke_alarm=True, got {safety!r}"
+    assert safety.get("security_camera", {}).get("present") is True, \
+        f"expected security_camera.present=True, got {safety!r}"
+    assert parking.get("type") or parking.get("capacity"), \
+        f"expected parking details to be extracted, got {parking!r}"
+
+    no_location = no_facts.get("location", {})
+    no_safety = no_facts.get("safety", {})
+    no_parking = no_facts.get("parking", {})
+    assert "country" not in no_location, \
+        f"hallucinated country with no source support: {no_location!r}"
+    assert "smoke_alarm" not in no_safety, \
+        f"hallucinated smoke_alarm with no source support: {no_safety!r}"
+    assert "co_alarm" not in no_safety, \
+        f"hallucinated co_alarm with no source support: {no_safety!r}"
+    assert "type" not in no_parking and "capacity" not in no_parking, \
+        f"hallucinated parking details with no source support: {no_parking!r}"
+
+    print("_UNIVERSAL_FIELDS_TEST: PASS")
+    print(f"  with_facts -> {json.dumps(with_facts, ensure_ascii=False)}")
+    print(f"  no_facts   -> {json.dumps(no_facts, ensure_ascii=False)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(_UNIVERSAL_FIELDS_TEST())
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def _run_freeform_merge(
