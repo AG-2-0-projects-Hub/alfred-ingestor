@@ -1,4 +1,5 @@
 import os
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -7,6 +8,13 @@ from routers import (
 )
 
 load_dotenv()
+
+# Crash/error visibility. Empty SENTRY_DSN means Sentry is off -- local dev
+# doesn't send events by default. ENVIRONMENT distinguishes staging/production
+# events since those run as separate Cloud Run services, not a runtime flag.
+_sentry_dsn = os.getenv("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(dsn=_sentry_dsn, environment=os.getenv("ENVIRONMENT", "local"))
 
 app = FastAPI(title="The Ingestor")
 

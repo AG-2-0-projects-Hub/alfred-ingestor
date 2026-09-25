@@ -6,11 +6,19 @@ import re
 import time
 
 import httpx
+import sentry_sdk
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from firecrawl import FirecrawlApp
 from google import genai
+
+# Crash/error visibility. Empty SENTRY_DSN means Sentry is off -- local dev
+# doesn't send events by default. ENVIRONMENT distinguishes staging/production
+# events since those run as separate Cloud Run services, not a runtime flag.
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(dsn=_sentry_dsn, environment=os.environ.get("ENVIRONMENT", "local"))
 
 app = FastAPI(title="Alfred Airbnb Scraper")
 
@@ -114,6 +122,7 @@ def upsert_to_ingestor_supabase(url: str, structured_output: str):
         client.table("properties").upsert(payload, on_conflict="airbnb_url").execute()
     except Exception as e:
         print(f"Ingestor Supabase upsert failed (non-critical): {e}")
+        sentry_sdk.capture_exception(e)
 
 
 def get_gemini_prompt(markdown_data: str) -> str:
@@ -121,7 +130,8 @@ def get_gemini_prompt(markdown_data: str) -> str:
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         template = "Please analyze the following data:\n[INSERT_DATA_HERE]"
     return template.replace("[INSERT_DATA_HERE]", markdown_data)
 
@@ -172,6 +182,7 @@ def _download_image(url: str) -> tuple[bytes, str] | None:
         return resp.content, content_type
     except Exception as e:
         print(f"Photo triage: download failed for {url}: {e}")
+        sentry_sdk.capture_exception(e)
         return None
 
 
@@ -195,6 +206,7 @@ async def _download_image_async(
             return resp.content, content_type
         except Exception as e:
             print(f"Photo triage: download failed for {url}: {e}")
+            sentry_sdk.capture_exception(e)
             return None
 
 
@@ -438,6 +450,7 @@ async def _triage_photos(client, raw_markdown: str, property_context: str) -> tu
         return curated, rejected1 + rejected2
     except Exception as e:
         print(f"Photo triage failed (non-fatal, scrape continues): {e}")
+        sentry_sdk.capture_exception(e)
         return [], []
 
 
@@ -518,6 +531,7 @@ async def scrape_airbnb(req: ScrapeRequest):
             # request, so a network blip on attempt 2 doesn't turn an
             # already-good-enough attempt 1 into a hard 500.
             print(f"ERROR: scrape/structure attempt {attempt + 1}/2 failed: {e}")
+            sentry_sdk.capture_exception(e)
             last_error = e
             continue
         last_error = None

@@ -12,3 +12,4 @@ python-multipart==0.0.17
 python-dotenv==1.0.1
 PyJWT==2.9.0
 Pillow==11.0.0
+sentry-sdk==2.66.1

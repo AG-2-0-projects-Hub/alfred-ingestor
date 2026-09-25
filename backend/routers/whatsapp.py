@@ -48,6 +48,7 @@ import re
 import time
 from collections import deque
 
+import sentry_sdk
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
@@ -179,6 +180,7 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         payload = await request.json()
     except Exception:
+        sentry_sdk.capture_exception()
         return {"ok": True}
 
     # Always 200 from here on. Meta retries anything else, and a payload we cannot
@@ -189,6 +191,7 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
                 await _dispatch(change.get("value") or {}, background_tasks)
     except Exception as exc:
         log.exception("whatsapp: dispatch failed: %s", exc)
+        sentry_sdk.capture_exception(exc)
     return {"ok": True}
 
 
@@ -203,6 +206,7 @@ async def whatsapp_process(request: Request):
     try:
         job = await request.json()
     except Exception:
+        sentry_sdk.capture_exception()
         return {"ok": True}
 
     kind = job.get("kind")

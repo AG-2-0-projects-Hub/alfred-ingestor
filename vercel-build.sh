@@ -22,6 +22,10 @@ flutter config --no-analytics
 #   e.g. +5215512345678. Enables the guest WhatsApp link in the host chat view;
 #   the link is hidden when unset. Must match the number the backend sends from,
 #   or guests will message a number that never answers.)
+#   SENTRY_DSN (optional — crash/error visibility. Empty disables Sentry, the
+#   SDK default for local dev.) VERCEL_ENV is set automatically by Vercel
+#   itself ("production"/"preview"/"development") and reused as the Sentry
+#   environment tag, so no separate ENVIRONMENT var is needed here.
 #
 # TELEGRAM_LINK_DOMAIN is deliberately NOT emitted. Both the client
 # (chat_live_dialog.dart) and the backend (messages.py) default to `t.me`, which
@@ -34,6 +38,8 @@ SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
 BACKEND_URL=${BACKEND_URL}
 TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
 WHATSAPP_NUMBER=${WHATSAPP_NUMBER:-}
+SENTRY_DSN=${SENTRY_DSN:-}
+ENVIRONMENT=${VERCEL_ENV:-local}
 EOF
 
 echo "frontend/.env written with BACKEND_URL=${BACKEND_URL}"

@@ -26,6 +26,7 @@ import os
 import time
 
 import httpx
+import sentry_sdk
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from services import (
@@ -92,6 +93,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         update = await request.json()
     except Exception:
+        sentry_sdk.capture_exception()
         return {"ok": True}
 
     await _dispatch(update, background_tasks)
@@ -109,6 +111,7 @@ async def telegram_process(request: Request):
     try:
         job = await request.json()
     except Exception:
+        sentry_sdk.capture_exception()
         return {"ok": True}
 
     kind = job.get("kind")
@@ -385,6 +388,7 @@ async def _handle_update(update: dict) -> None:
         await _handle_guest_message(chat_id, text)
     except Exception as exc:
         log.exception("telegram: failed handling update for chat=%s: %s", chat_id, exc)
+        sentry_sdk.capture_exception(exc)
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
 
 
@@ -499,6 +503,7 @@ async def _handle_host_switch(chat_id, host_id: str) -> None:
         await _send_picker(chat_id, active)
     except Exception as exc:
         log.exception("telegram host switch failed for host=%s: %s", host_id, exc)
+        sentry_sdk.capture_exception(exc)
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
 
 
@@ -602,6 +607,7 @@ async def _handle_host_reply(
             await telegram_client.send_italic(chat_id, f"{note}✓ Sent to {label}")
     except Exception as exc:
         log.exception("telegram host reply failed for host=%s: %s", host_id, exc)
+        sentry_sdk.capture_exception(exc)
         await telegram_client.send_message(chat_id, _GENERIC_ERR)
 
 
@@ -645,6 +651,7 @@ async def _handle_select_callback(
             )
     except Exception as exc:
         log.exception("telegram select callback failed for booking=%s: %s", booking_id, exc)
+        sentry_sdk.capture_exception(exc)
         if callback_id:
             await telegram_client.answer_callback_query(callback_id, "Something went wrong")
 
@@ -691,6 +698,7 @@ async def _handle_callback(callback: dict) -> None:
         await messages_router._resolve_conversation_core(booking_id)
     except Exception as exc:
         log.exception("telegram resolve callback failed for booking=%s: %s", booking_id, exc)
+        sentry_sdk.capture_exception(exc)
         if callback_id:
             await telegram_client.answer_callback_query(
                 callback_id, "Something went wrong — try the dashboard"

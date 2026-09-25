@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sentry_sdk
 from google import genai
 from google.genai import types
 
@@ -968,6 +969,7 @@ async def run_merger(
         raise freeform_result
     if isinstance(universal_result, BaseException):
         log.warning("universal-fields extraction failed (non-fatal): %s", universal_result)
+        sentry_sdk.capture_exception(universal_result)
         return freeform_result
     return _deep_merge_universal(freeform_result, universal_result)
 

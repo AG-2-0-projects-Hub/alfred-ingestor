@@ -32,6 +32,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import sentry_sdk
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -185,6 +186,7 @@ async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
             await asyncio.to_thread(supabase_client.save_scraped_markdown, property_id, scraped_markdown)
         except Exception as exc:
             print(f"save_scraped_markdown failed (non-fatal): {exc}")
+            sentry_sdk.capture_exception(exc)
     if curated_photos or rejected_photos:
         try:
             await asyncio.to_thread(
@@ -192,12 +194,14 @@ async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
             )
         except Exception as exc:
             print(f"save_photo_triage failed (non-fatal): {exc}")
+            sentry_sdk.capture_exception(exc)
     thumbnail_url = _parse_thumbnail_url(scraped_markdown)
     if thumbnail_url:
         try:
             await asyncio.to_thread(supabase_client.upload_hero_image, property_id, thumbnail_url)
         except Exception as exc:
             print(f"Hero image upload failed (non-fatal): {exc}")
+            sentry_sdk.capture_exception(exc)
 
     return scrape_data
 
@@ -218,6 +222,7 @@ async def run_start(property_id: str, run_id: str) -> None:
             scrape_data = await _scrape_and_save(property_id, airbnb_url)
         except Exception as exc:
             print(f"ingest_worker.run_start: scrape failed for {property_id}: {exc}")
+            sentry_sdk.capture_exception(exc)
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
             # Same give-up shape the Low-completeness path below uses (reason
             # differs) -- reuses the existing warning-icon/fix-link UI on the
@@ -347,6 +352,7 @@ async def run_process_file(property_id: str, run_id: str, filename: str, retry_c
         succeeded = True
     except Exception as exc:
         if is_final_attempt:
+            sentry_sdk.capture_exception(exc)
             await asyncio.to_thread(
                 supabase_client.record_ingest_file_result,
                 property_id, run_id, filename, "failed", error=str(exc),
@@ -391,6 +397,7 @@ async def run_merge_step(property_id: str, run_id: str) -> None:
         await run_merge_and_save(property_id, prop, expected_run_id=run_id)
     except ValueError as exc:
         print(f"ingest_worker.run_merge_step: merge failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
         await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
 
 
@@ -415,6 +422,7 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
         scrape_data = await _scrape_and_save(property_id, airbnb_url)
     except Exception as exc:
         print(f"ingest_worker.run_retry_scrape: scrape failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
         await asyncio.to_thread(
             supabase_client.set_scrape_retry,
             property_id,
@@ -454,6 +462,7 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
         await run_merge_and_save(property_id, {**fresh, "name": prop.get("name") or ""})
     except ValueError as exc:
         print(f"ingest_worker.run_retry_scrape: re-merge failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
     finally:
         # Whatever happened above (clean merge, a new conflict, or a
         # swallowed re-merge failure that left status unchanged) is already
