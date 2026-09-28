@@ -211,6 +211,9 @@ This applies to ALL commits — documentation, fixes, features, everything. No e
 This project is a standalone git repo (`projects/the-ingestor/.git`, remote
 `origin` → `AG-2-0-projects-Hub/alfred-ingestor`) — it is not tracked by
 AG_master_files' root repo.
+
+**Before any `staging → main` merge, follow `MERGE_TO_MAIN_PROTOCOL.md`** (pre-merge QA checklist,
+the founder-merges-manually rule, and what actually needs a manual prod redeploy afterward).
 1. **Pushing to `staging`** — plain `git push origin staging` (or
    `git -C projects/the-ingestor push origin staging` from the AG root) works
    directly, no PR needed.
@@ -280,8 +283,8 @@ first for anything beyond a single small diff, since cost is now non-zero either
 ### Full-suite QA
 `cd _tests/runner && npm run full` runs every scenario that currently has code — explicit-ask
 only, no cron yet. The real `staging → main` merge gate is the smaller Critical Path set in
-`_tests/scenarios.md` (picked by blast radius, not by what's already automated) — see the
-Promotion rule below.
+`_tests/scenarios.md` (picked by blast radius, not by what's already automated) — see
+`MERGE_TO_MAIN_PROTOCOL.md`'s Promotion rule.
 
 ### FIX-VERIFY Protocol (opt-in, mechanically enforced)
 When the founder says "fix X with FIX_VERIFY_PROTOCOL.md" (or names the protocol), follow
@@ -293,22 +296,10 @@ trailer is present without a real `Verified:` line or, for a frontend change, a 
 changed file under `_tests/runner/scenarios/`. Optional, not the silent default for every fix —
 read the file itself for the full sequence and why it exists.
 
-### Promotion rule — run before every `staging → main` merge
-0. Before starting: proactively ask whether to run the Critical Path check first — don't wait to
-   be asked for it by name.
-1. Review the pending intake table
-2. Group rows by flow using the `Group with` column
-3. For each group: create one proper scenario (or extend an existing one) in the relevant A–H section of `_tests/scenarios.md` — multi-step assertions are preferred over micro-scenarios
-4. Delete the promoted intake rows
-5. Run every Critical Path scenario (`_tests/scenarios.md`'s "## Critical Path" section) —
-   automated ones via `npm run full`, unautomated ones manually until they're built. Run any
-   other new Layer 1 scenarios immediately too; schedule non-critical Layer 2 scenarios for the
-   next Playwright run as before.
-
-### What does NOT need a pending-intake entry
-- Pure cosmetic changes (spacing, colour tweaks) with no assertable state
-- Changes already covered by an existing passing scenario
-- Changes to this file or other docs
+### Promotion rule, deploy reality, and everything else pre-merge
+Moved to `MERGE_TO_MAIN_PROTOCOL.md` (project root) — the full checklist to run before every
+`staging → main` merge, plus what actually needs a manual step afterward (prod Cloud Run does not
+auto-deploy on merge; Vercel does).
 
 ---
 
