@@ -8,6 +8,8 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-09-28 | Aggregate accuracy scores hide real regressions — manual old-vs-new side-by-side + real production-data validation caught 2 real gaps + a live bug an aggregate score missed | validation, llm-pipeline, testing, methodology, global-candidate |
+| 2026-09-28 | QUEUE.md item sat stale 2 weeks after its bug was fixed as a side effect of unrelated work — added a `touches:` convention + wrap_up.sh nudge | queue, staleness, process, wrap-up, recurrence |
 | 2026-09-25 | Sentry Flutter auto-capture verification needs a real triggered error inside `SentryFlutter.init`'s `appRunner` zone, not a direct `captureException()` call | sentry, flutter, zones, playwright, verification |
 | 2026-09-19 | Full `Read` on a secrets file leaks it too, not just `grep`/`cat` — use `env.ts`'s exports or anchored grep instead | secrets, redaction, env.test, recurrence, lessons-discipline |
 | 2026-04-14 | RESOLVED — flutter run -d chrome crashes on Windows Chrome's CP1252 stdout in WSL2; use web-server or native Linux Chrome | flutter, chrome, wsl2, utf8, resolved |

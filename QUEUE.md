@@ -21,27 +21,28 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       responsive layout pass across the dashboard/chat screens. Also directly shortens a future
       native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
       Stitch draft during the week; not urgent, but goes first when picked up.
-- [ ] Consider JSON-native for the host-uploaded-document ingestion leg too (`ingested_markdown`,
-      from PDFs/docs hosts upload) — opened 2026-09-25, scoped as its own mini-project 2026-09-28.
-      Checked `file_processor.py`: **not** pure deterministic parsing as originally assumed — PDFs/
-      images/audio each go through their own Gemini call ("Prompt A/B/C/D") that restructures
-      content into markdown before it ever reaches the merge step, the same architectural shape
-      the scraper's old design had. Real reason to suspect the same placeholder/hallucination bug
-      class could live here too, not just a symmetry nice-to-have — investigate before deciding.
-- [ ] Merge step's `_extract_universal_fields` call: now that the scraper produces clean typed
-      JSON directly (see Done below), this call's job shifts from "extract canonical fields from
-      prose" to "reconcile scraper's JSON against the host's ingested doc" — same quote-first/
-      evidence-grounding principle applied one level up, not yet done. Free optimization noted:
-      when a property has zero ingested files (scrape-only), this call is pure redundant
-      re-derivation of what the scraper JSON already has and could just short-circuit to a
-      pass-through. Opened 2026-09-28, not scoped/tested yet.
-- [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
-      expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
-      dumps them back on the plain form with only a "Train Now" button — no way to check progress,
-      resume watching, or know if it's really still running vs. dead. The dashboard card then just
-      shows "Processing…" with nothing clickable, for however long it takes (minutes, possibly
-      longer). Recurring, founder-flagged live 2026-09-15/16 across multiple real runs. Root cause +
-      full context: `_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md` item 3
+- [ ] Host-uploaded-document ingestion leg + merge step reconciliation reframing — full handoff
+      plan, baseline data already measured, and concrete next steps:
+      `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`. Two separate
+      sub-items (do sequentially, not together — founder's explicit instruction): (1)
+      `file_processor.py`'s Prompt A/B/C/D (PDF/image/audio → markdown) may have the same
+      placeholder/hallucination bug class the old scraper had — not yet investigated at all. (2)
+      merge step's `_extract_universal_fields`: baseline measured 2026-09-28 (N=3) — clean scraper
+      JSON input alone already lifted location recall 58-60%→77% with zero prompt changes, but the
+      exact Otago world-knowledge-leakage hallucination reproduced independently inside the merge
+      step's own prompt (not fixed by cleaner input alone) — needs the same grounding-rule fix
+      already proven on the scraper leg. Reconciliation logic itself already works correctly
+      (verified: a conflicting host document correctly overrides scraped check-in/capacity).
+      Reusable test harness saved: `_Context/merge_pipeline_harness/`.
+      touches: `backend/services/gemini_merge_resolve.py`, `backend/services/file_processor.py`
+- [ ] 🔴 Train Now UX — partially resolved: a Delete button now exists on the dashboard card to
+      wipe a stuck property and clear the card, closing the original "no recovery action at all"
+      complaint (root cause + history: `_Context/Train_Now_Reliability_and_QA_Process_Plan_
+      2026-09-15.md` item 3). Remaining, not yet scoped: broader UX issues around the wait
+      dialog/dashboard card during a long-running Train Now (no progress view, no "resume
+      watching") — founder wants a full UX/UI audit eventually, not a piecemeal fix. Low priority
+      until that audit happens.
+      touches: `frontend/lib/screens/dashboard_screen.dart`, `frontend/lib/widgets/training_wait_dialog.dart`
       ("Recovery path for a genuinely stuck backend") — not yet implemented, this is the same issue
       surfacing again, not a new one.
 - [ ] Wire prod support into `_tests/health/run_health_check.py` — needs a separate `.env.prod` file for `PROD_BACKEND_URL`/`PROD_SCRAPER_URL` etc. (not just prefixed vars in `.env.test`); the 4 Gemini smoke checks no longer need a separate prod variant — they moved to Vertex/ADC on 2026-09-10 and that transport is already shared by staging + prod

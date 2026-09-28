@@ -10,20 +10,17 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🟢 2026-09-25 session shipped Telegram Disconnect + `_UNIVERSAL_FIELDS_TEST` + a guest-hostility
-  escalation prompt fix (all FIX_VERIFY'd, see QUEUE.md Done). Pushed through `0c67f81`;
-  **`a9f1dc0` (escalation fix) is NOT pushed yet** — confirm before next push.
-- 🟡 Country/location extraction reliability mid-investigation, paused waiting on cross-LLM
-  feedback (see QUEUE.md Open + `_Context/Universal_Fields_Extraction_Reliability_Investigation_
-  2026-09-25.md`, gitignored/local-only). Nothing from it has shipped.
-- 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
-  untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
-  Must use `FIX_VERIFY_PROTOCOL.md`.
-- 🟡 Stray property "Bungalowww" didn't actually delete — worth a quick look at the delete path.
-- 🟡 Walkthrough opacity Fix 2 not started — likely root cause is `GlassPanel` silently dropping
-  `color` app-wide when `gradient` is also set (still unfixed).
+- 🟢 2026-09-28 shipped Sentry (all 3 services, live-verified) + scraper JSON-native rewrite
+  (staging, deployed+verified against real prod data). Both fully pushed.
+- 🟡 Merge + host-document pipeline enhancement next up — full plan/baseline/harness saved:
+  `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`. Read before starting.
+- 🔴 guide.html screenshots still broken — untouched. Handoff:
+  `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. Must use FIX_VERIFY.
+- 🟡 Stray property "Bungalowww" didn't actually delete — worth a look at the delete path.
+- 🟡 Walkthrough opacity Fix 2 not started — likely `GlassPanel` dropping `color` when `gradient`
+  is also set.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
-- 🟡 Auth "email already registered" notice (new) deployed, not yet clicked through by the founder.
+- 🟡 Auth "email already registered" notice deployed, not yet clicked through by the founder.
 
 ## Unresolved Decisions
 - guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
@@ -31,7 +28,50 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-24 (**Closed out Telegram host-escalation's FIX_VERIFY, merged
+**Last Session:** 2026-09-28 (**Sentry rollout across all 3 services + scraper JSON-native
+rewrite, both shipped/deployed/live-verified; merge-step baseline measured for next session.**
+Continued from 2026-09-25's session (Telegram Disconnect, `_UNIVERSAL_FIELDS_TEST`, escalation
+fix, extraction-reliability investigation paused on cross-LLM feedback).
+  - **Sentry** (item 5 of the original 4+1 list): 3 new projects under org `alonso-vazquez-ng`
+    (`alfred-backend`/`alfred-scraper`/`alfred-frontend`), SDK bootstrap gated on empty
+    `SENTRY_DSN`, plus explicit `capture_exception()` at every existing except block across 4
+    backend routers + the scraper that previously only logged and swallowed a real failure (the
+    2026-09-21 resolver `call_timeout` incident's own pattern). Live-verified end-to-end: real
+    events confirmed server-side via the Sentry MCP for all 3 projects, including a real
+    Playwright-triggered uncaught error proving `SentryFlutter.init`'s zone-based auto-capture
+    actually fires (temporary URL-gated trigger, removed before commit — see lessons.md). Deployed
+    to all 4 Cloud Run services + both Vercel projects. Staging `4bcdbb9`.
+  - **Country/location extraction reliability, resolved via architecture change, not more prompt
+    tweaking.** Cross-LLM consultation (Gemini/Perplexity/Gemini Pro) converged: the scraper's
+    `GEMINI_PROMPT_AIRBNB.md` markdown intermediate — a Make.com formatting workaround, not a
+    real requirement per the founder — was itself the bug source (placeholder-string type
+    coercion into fabricated `0`/`False`/`{lat:0,lng:0}`; a combined `[City, State, Country]`
+    field causing entity-hierarchy collisions). Founder's call, invoking "no-patching, fix at
+    origin": dropped markdown entirely, scraper's own Gemini call is now `response_schema`-
+    constrained JSON (`SCRAPER_STRUCTURED_SCHEMA`, `scraper/main.py`). Built a real old-vs-new
+    comparison harness (5 fixtures including the exact previously-failing ones), two independent
+    N=5 rounds: location recall 58-60%→**100%**, the documented Otago world-knowledge-leakage
+    hallucination 1/25→**0/50**. Found+fixed 2 real gaps via direct side-by-side inspection before
+    calling it validated (`meta` self-assessment fields, missing `emergency_contact` field). Added
+    a permanent smoke test (`_SCRAPER_STRUCTURED_TEST`). Live-verified against a real trained
+    production property ("Bungalow") — caught and fixed a live coordinate-fabrication bug already
+    sitting in that property's `master_json` (old scraper literally said "Not specified in
+    listing" for coordinates; the final merged JSON had a confident fabricated lat/lng anyway).
+    Fixed a real downstream break this surfaced: `ingest_worker.py`'s `_parse_thumbnail_url`
+    regexed markdown that no longer exists in JSON output — would have silently broken hero-image
+    upload. Staging `433bc66`, deployed to `alfred-scraper-staging`.
+  - **Merge-step baseline measured** (N=3, real Gemini calls) for the next session's handoff:
+    clean scraper JSON input alone lifted merge-step location recall 58-60%→77% with zero prompt
+    changes, but the Otago hallucination reproduced independently inside the merge step's own
+    prompt — needs the same grounding-rule fix, not just cleaner input. Reconciliation logic
+    itself already works correctly (verified with a deliberately conflicting host document). Full
+    plan + reusable harness: `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`.
+  - **Process fix**: added a `touches:` convention to `QUEUE.md` Open items (mirrors
+    `_tests/scenarios.md`'s own) + a `wrap_up.sh` nudge, after the Train Now stranded-host item sat
+    stale for two weeks post-fix (a Delete button resolved it as a side effect of unrelated work,
+    never crossed off).
+
+**Prior Session:** 2026-09-24 (**Closed out Telegram host-escalation's FIX_VERIFY, merged
 staging→main to PROD, and built the real first-login "Welcome to Alfred" modal after
 discovering it had never actually existed.**) — staging + main pushed/merged; PROD updated.
 > **✅ Telegram host-escalation FIX_VERIFY closed and merged to prod.** Added `_tests/scenarios.md`

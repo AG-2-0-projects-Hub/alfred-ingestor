@@ -116,6 +116,12 @@ This file holds the **last 5 sessions** as separate dated entries (newest first)
    Point to `QUEUE.md`/`ROADMAP.md` for the standing feature/bug backlog instead of duplicating
    it here — this section is for session-continuity state that doesn't fit a backlog line (an
    in-flight investigation, a pending commit approval), and should often be short or empty.
+   **Tag each `QUEUE.md` Open item with a `touches: file/path, ...` line** (mirrors
+   `_tests/scenarios.md`'s own `touches:` convention) — this is what lets `wrap_up.sh` nudge a
+   future session to double-check an item instead of it silently going stale after the underlying
+   bug gets fixed as a side effect of unrelated work (confirmed recurrence 2026-09-28: the Train
+   Now stranded-host item sat Open for two weeks after a Delete button had already resolved its
+   core complaint).
 3. `_Context/session-digest.md` — prepend a new dated entry per the Session Start rules above (cap at 5).
 4. **Lessons check, before any commit.** Ask explicitly: did this session hit a real discovery,
    failure, constraint, or piece of feedback that would help a future session (not routine work)?
@@ -142,8 +148,11 @@ This file holds the **last 5 sessions** as separate dated entries (newest first)
    content quality: `## Pending`/`## Unresolved Decisions` headings exist, `## Pending` is
    ≤15 lines, `session-digest.md` has ≤5 entries, this file's Stack/Data Schema lines aren't
    still placeholder text, whether this session's commits touched `backend/**`/`frontend/lib/**`
-   without a matching diff in `_tests/scenarios.md`, **and (added 2026-09-16)
-   whether `lessons_index.md`'s row count matches `lessons.md`'s entry count.**
+   without a matching diff in `_tests/scenarios.md`, **(added 2026-09-16)
+   whether `lessons_index.md`'s row count matches `lessons.md`'s entry count, and (added
+   2026-09-28) prints a NOTE — never a FAIL, it can't judge relevance, only surface it — when this
+   session changed a file an Open `QUEUE.md` item's `touches:` line also lists, so a possibly-stale
+   item doesn't sit unnoticed.**
    - On every other FAIL: fix the underlying doc and rerun.
    - **On the QA-gate FAIL: go back and actually run the missing same-session targeted replay**
      (see `## QA Workflow` above) **and log the pending-intake row now** — do not just silence the

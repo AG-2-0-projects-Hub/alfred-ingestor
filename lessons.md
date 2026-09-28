@@ -3,6 +3,63 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-28 — Aggregate accuracy scores hide real regressions; a manual old-vs-new side-by-side catches what scoring doesn't
+
+**Context:** Rewriting the scraper's Gemini call from markdown prose to `response_schema`-
+constrained JSON (root cause of the country/location extraction-reliability investigation). Built
+a comparison harness scoring old-vs-new pipeline output against ground-truth fixtures (location
+recall, hallucination count).
+
+**Discovery:** The aggregate scores looked great immediately (100% location recall, populated-
+field count roughly doubled) — but the populated-field count was comparing two *different-sized*
+schemas (old pipeline's small ~10-domain merge output vs. new pipeline's much larger raw scraper
+schema), which made it look like a bigger win than it honestly was for that specific metric. Only
+a direct manual side-by-side (same fixture, full old markdown output next to full new JSON output,
+read line by line) surfaced two real, concrete gaps the aggregate score was blind to: `meta.
+language_detected`/`data_completeness` coming back empty, and a missing `emergency_contact` field
+that the old pipeline had captured. Both were real schema gaps, not scoring noise — fixed and
+re-verified before shipping.
+
+**Impact:** Added a mandatory manual side-by-side inspection step to this kind of validation, not
+just trusting the aggregate metric. Same technique reused immediately after for the merge-step
+baseline measurement and for live-verifying against real production data (a real trained property,
+"Bungalow") — which caught an actual coordinate-fabrication bug already sitting in production,
+that no fixture-based test had specifically been designed to catch.
+
+**Global Candidate:** Yes — general principle for validating any LLM-pipeline rewrite: aggregate
+scores can hide real regressions in fields the scoring doesn't cover; always spot-check full raw
+output side-by-side on at least one representative case, and validate against real production data
+when available, not just synthetic fixtures, before calling a change validated.
+
+---
+
+## 2026-09-28 — A backlog item can go stale silently when its bug gets fixed as a side effect of unrelated work
+
+**Context:** `QUEUE.md`'s Train Now stranded-host item (host gets no recovery action when a run
+hangs) had sat Open since 2026-09-15/16. Revisiting it this session, the founder said it was
+already resolved — a Delete button on the dashboard card now wipes the stuck property — but nobody
+had ever gone back to cross it off, because the fix landed as a side effect of other Train Now UX
+work, not from someone directly working this specific item.
+
+**Discovery:** This project already lived this exact failure mode once before with the QA-scenario
+logging discipline (`lessons_index.md` drifting out of sync with `lessons.md`, now mechanically
+checked by `wrap_up.sh`) — the same root cause (a backlog/index file only updated by whoever
+happens to be looking at it, not by whoever actually changes the underlying thing) recurred here in
+a different file. `_tests/scenarios.md` already solves an adjacent problem with its `touches:`
+convention (grep scenarios whose files overlap a session's changes, replay them) — that pattern
+was never extended to `QUEUE.md` itself.
+
+**Impact:** Added a `touches: file/path, ...` convention to `QUEUE.md` Open items (`CLAUDE.md`
+Session End step 2) plus a `wrap_up.sh` nudge that prints (never fails — it can't judge relevance,
+only surface it) when a session changes a file an Open item's `touches:` also lists.
+
+**Global Candidate:** No — the underlying principle (a manual backlog file drifts stale unless
+something mechanically prompts a recheck) is already covered by the existing lessons-index-sync
+global pattern; this is just the same lesson recurring in a new file within this project, not a
+new principle.
+
+---
+
 ## 2026-09-25 — Verifying Sentry Flutter's automatic zone-based capture needs a real triggered error, and `Future.delayed` must be scheduled *inside* `SentryFlutter.init`'s `appRunner`
 
 **Context:** Wiring up Sentry error tracking across backend/scraper/frontend. Backend/scraper
