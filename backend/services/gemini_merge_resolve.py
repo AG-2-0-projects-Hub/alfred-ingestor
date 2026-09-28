@@ -645,6 +645,7 @@ UNIVERSAL_FIELDS_SCHEMA = {
         "location": {
             "type": "OBJECT",
             "properties": {
+                "location_evidence_quote": {"type": "STRING"},
                 "address": {"type": "STRING"},
                 "country": {"type": "STRING"},
                 "city": {"type": "STRING"},
@@ -756,9 +757,27 @@ the source data below, into the exact JSON shape given by the response schema.
 
 Rules:
 - Only extract what is actually stated in the sources — never guess or infer a \
-plausible-sounding value.
+plausible-sounding value, even if it's a well-known fact (e.g. do not add a \
+state/region/province just because you recognize the city — if a source says \
+"Queenstown" and never says "Otago", state_region must be omitted, not filled \
+from your own world knowledge).
 - If a field genuinely has no source support, OMIT it entirely (do not include \
 it with an empty, "N/A", "Not specified", or made-up value).
+- location.location_evidence_quote: before filling any other location field, \
+copy the exact sentence(s) from the sources that state the property's location. \
+If the sources state no location at all, leave this empty and omit every other \
+location field too.
+- location.country is the sovereign nation (e.g. "Mexico", "Portugal", "United \
+Kingdom"). location.city is the municipality/town (e.g. "Tulum", "Lisbon", \
+"Queenstown") — not a neighborhood. A neighborhood is a district within a city \
+(e.g. "Alfama" is a neighborhood of Lisbon, not the city itself) and has no \
+dedicated field here, so fold it into address if it's stated. location.\
+state_region is the state/province/county between city and country. A region \
+name that spans multiple administrative divisions (e.g. "Cotswolds") is not \
+itself a state_region.
+- location.coordinates: only include if a source states explicit numeric \
+latitude/longitude values. Never estimate or geocode coordinates from a city or \
+address name.
 - Property identity: if no real listing title exists in either source, use the \
 host-provided nickname instead of leaving it out — but do not invent a name if \
 neither exists.
@@ -805,6 +824,123 @@ def _deep_merge_universal(freeform: dict, universal: dict) -> dict:
     return result
 
 
+_COORD_TOLERANCE_DEGREES = 1e-4  # ~11m -- float roundtrip through JSON/Gemini, not a real-world diff
+
+
+def _guard_coordinates(universal: dict, scraped_markdown: str, source_text: str) -> dict:
+    """Strips location.coordinates from the universal-fields result unless
+    they're actually grounded -- the merge step must never be ABLE to invent
+    coordinates the scraper didn't already supply, not just asked nicely not
+    to (confirmed live: a trained property's stored master_json had fabricated
+    coordinates + a derived Google Maps URL, even though the scraper's own
+    output correctly omitted them -- see the 2026-09-28 redesign plan).
+
+    Grounding sources, in order:
+    1. scraped_markdown parsed as the scraper's own JSON (SCRAPER_STRUCTURED_
+       SCHEMA) -- if it has location.coordinates, that's the authoritative
+       value; float-tolerant match, not exact-string.
+    2. If scraped_markdown isn't valid JSON (legacy pre-433bc66 property) or
+       has no coordinates, fall back to checking whether the claimed lat/lng
+       appear literally in the combined source text.
+    Neither source supports the claim -> the field is dropped entirely."""
+    location = universal.get("location")
+    if not isinstance(location, dict) or "coordinates" not in location:
+        return universal
+    coords = location.get("coordinates") or {}
+    lat, lng = coords.get("lat"), coords.get("lng")
+    if lat is None or lng is None:
+        location.pop("coordinates", None)
+        return universal
+
+    try:
+        scraper_json = json.loads(scraped_markdown)
+        scraper_coords = (scraper_json.get("location") or {}).get("coordinates") or {}
+        s_lat, s_lng = scraper_coords.get("lat"), scraper_coords.get("lng")
+        if s_lat is not None and s_lng is not None:
+            if abs(s_lat - lat) <= _COORD_TOLERANCE_DEGREES and abs(s_lng - lng) <= _COORD_TOLERANCE_DEGREES:
+                return universal  # grounded in the scraper's own JSON
+            log.warning("coordinates guard: merge output %r doesn't match scraper JSON %r -- stripping",
+                        coords, scraper_coords)
+            location.pop("coordinates", None)
+            return universal
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass  # scraped_markdown isn't JSON (legacy property) -- fall through to text check
+
+    if str(lat) in source_text and str(lng) in source_text:
+        return universal  # grounded literally in the combined source text
+    log.warning("coordinates guard: merge output %r not grounded in any source -- stripping", coords)
+    location.pop("coordinates", None)
+    return universal
+
+
+def _norm_grounding(s: str) -> str:
+    return " ".join((s or "").split()).lower()
+
+
+def _token_overlap_ratio(value: str, source_text: str) -> float:
+    """Fraction of value's alphanumeric tokens (len>=3) that individually
+    appear in source_text -- the fallback check for composite fields like
+    `address`, which the model legitimately assembles from several separate
+    source facts (city/state/street) rather than quoting verbatim, so a
+    strict whole-string substring match would false-reject real, grounded
+    content."""
+    import re as _re
+    tokens = [t for t in _re.findall(r"[a-z0-9]+", value.lower()) if len(t) >= 3]
+    if not tokens:
+        return 1.0
+    norm_source = _norm_grounding(source_text)
+    hits = sum(1 for t in tokens if t in norm_source)
+    return hits / len(tokens)
+
+
+_COMPOSITE_FIELD_KEYS = {"address"}  # legitimately assembled from several source facts, not quoted verbatim
+_ADDRESS_TOKEN_OVERLAP_THRESHOLD = 0.7
+
+
+def _verify_grounded_strings(data: dict, source_text: str, nickname: str, path: str = "") -> dict:
+    """Recursively drops any string leaf in `data` that isn't grounded in
+    `source_text` -- a 100%-reliable code-level catch for the exact Otago-
+    style world-knowledge leak, independent of whether the prompt-level
+    grounding rule holds on any given run. Scoped to _extract_universal_
+    fields's own result only: every field in UNIVERSAL_FIELDS_SCHEMA is
+    already short/categorical, so no long-free-text exemption is needed here
+    (that concern applies to the separate freeform merge output, untouched)."""
+    norm_source = _norm_grounding(source_text)
+    result = {}
+    for key, val in data.items():
+        field_path = f"{path}.{key}" if path else key
+        if isinstance(val, dict):
+            nested = _verify_grounded_strings(val, source_text, nickname, field_path)
+            if nested:
+                result[key] = nested
+            continue
+        if isinstance(val, str):
+            if not val.strip():
+                # An empty string trivially "grounds" against any source text
+                # (empty is a substring of everything) -- drop it here so the
+                # schema's own "omit entirely, never an empty value" contract
+                # (UNIVERSAL_FIELDS_SYSTEM_PROMPT) holds even when the model
+                # emits "" instead of actually omitting the key (confirmed
+                # live: state_region/postal_code came back as "" rather than
+                # absent on a fixture with no such facts stated).
+                continue
+            if field_path == "property_identity.property_name":
+                if _norm_grounding(val) in norm_source or _norm_grounding(val) in _norm_grounding(nickname):
+                    result[key] = val
+                else:
+                    log.info("grounding guard: dropping ungrounded property_name %r (no source/nickname match)", val)
+                continue
+            if _norm_grounding(val) in norm_source:
+                result[key] = val
+            elif key in _COMPOSITE_FIELD_KEYS and _token_overlap_ratio(val, source_text) >= _ADDRESS_TOKEN_OVERLAP_THRESHOLD:
+                result[key] = val
+            else:
+                log.info("grounding guard: dropping ungrounded %s=%r (not found in source)", field_path, val)
+            continue
+        result[key] = val  # numbers, booleans, lists -- not a substring-grounding target
+    return result
+
+
 async def _extract_universal_fields(
     scraped_markdown: str, ingested_markdown: str, nickname: str
 ) -> dict:
@@ -826,7 +962,11 @@ async def _extract_universal_fields(
             response_schema=UNIVERSAL_FIELDS_SCHEMA,
         ),
     )
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    source_text = f"{scraped_markdown or ''}\n{ingested_markdown or ''}"
+    result = _guard_coordinates(result, scraped_markdown or "", source_text)
+    result = _verify_grounded_strings(result, source_text, nickname or "")
+    return result
 
 
 # ── Smoke test: verifies UNIVERSAL_FIELDS_SCHEMA's "omit, don't guess" contract ──
@@ -856,15 +996,32 @@ _FIXTURE_NO_FACTS = (
     "pool.\n"
 )
 
+# Location-hallucination regression fixture -- added 2026-09-28 after the
+# baseline in _Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md
+# reproduced this exact Otago world-knowledge leak independently inside this
+# module's own prompt, even fed clean scraper-JSON input. Mirrors scraper/
+# main.py's _FIXTURE_NO_WORLD_KNOWLEDGE fixture.
+_FIXTURE_QUEENSTOWN = (
+    "Lakeview Lodge -- Queenstown, New Zealand, gateway to Milford Sound\n"
+    "Entire home, 8 guests, 4 bedrooms\n\n"
+    "Perched above Lake Wakatipu in Queenstown, New Zealand -- gateway to "
+    "Milford Sound. Queenstown is New Zealand's adventure capital.\n"
+    "Amenities: Wifi, Fireplace, Hot tub, Smoke alarm.\n"
+)
+
 
 async def _UNIVERSAL_FIELDS_TEST() -> None:
-    """Two real Gemini calls, no mocks: one fixture states country/safety/parking
-    facts explicitly, the other states none of them at all. Asserts facts are
-    extracted when present and the corresponding fields are structurally absent
-    (never guessed) when not -- the "omit if not found" contract
-    UNIVERSAL_FIELDS_SYSTEM_PROMPT asks for, and that this schema's
-    `required`-less design depends on actually being true (see the comment at
-    UNIVERSAL_FIELDS_SCHEMA's definition for why `required` was rejected)."""
+    """Real Gemini calls, no mocks: one fixture states country/safety/parking
+    facts explicitly, one states none of them at all, and one (Queenstown)
+    tests the specific world-knowledge-leakage + coordinate-fabrication bug
+    this module reproduced live. Asserts facts are extracted when present,
+    fields are structurally absent (never guessed) when not, and the
+    grounding guards (_guard_coordinates, _verify_grounded_strings) actually
+    strip an ungrounded value rather than just asking the prompt nicely --
+    the "omit if not found" contract UNIVERSAL_FIELDS_SYSTEM_PROMPT asks for,
+    and that this schema's `required`-less design depends on actually being
+    true (see the comment at UNIVERSAL_FIELDS_SCHEMA's definition for why
+    `required` was rejected)."""
     import os
     try:
         import google.auth
@@ -879,6 +1036,7 @@ async def _UNIVERSAL_FIELDS_TEST() -> None:
 
     with_facts = await _extract_universal_fields(_FIXTURE_WITH_FACTS, "", "Casa Tulum")
     no_facts = await _extract_universal_fields(_FIXTURE_NO_FACTS, "", "Cozy Studio")
+    queenstown = await _extract_universal_fields(_FIXTURE_QUEENSTOWN, "", "Lakeview Lodge")
 
     location = with_facts.get("location", {})
     safety = with_facts.get("safety", {})
@@ -903,9 +1061,20 @@ async def _UNIVERSAL_FIELDS_TEST() -> None:
     assert "type" not in no_parking and "capacity" not in no_parking, \
         f"hallucinated parking details with no source support: {no_parking!r}"
 
+    qs_location = queenstown.get("location", {})
+    state_region = (qs_location.get("state_region") or "").lower()
+    for forbidden in ("otago", "south island", "milford sound", "wakatipu"):
+        assert forbidden not in state_region, \
+            f"world-knowledge leakage: state_region={qs_location.get('state_region')!r} contains {forbidden!r}"
+    assert "coordinates" not in qs_location, \
+        f"fabricated coordinates: {qs_location.get('coordinates')!r} (source states none)"
+    assert (qs_location.get("city") or "").lower() == "queenstown", \
+        f"expected city='Queenstown' (actually stated), got {qs_location.get('city')!r}"
+
     print("_UNIVERSAL_FIELDS_TEST: PASS")
     print(f"  with_facts -> {json.dumps(with_facts, ensure_ascii=False)}")
     print(f"  no_facts   -> {json.dumps(no_facts, ensure_ascii=False)}")
+    print(f"  queenstown -> {json.dumps(queenstown, ensure_ascii=False)}")
 
 
 if __name__ == "__main__":
