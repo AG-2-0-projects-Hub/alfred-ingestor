@@ -21,20 +21,40 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       responsive layout pass across the dashboard/chat screens. Also directly shortens a future
       native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
       Stitch draft during the week; not urgent, but goes first when picked up.
-- [ ] Host-uploaded-document ingestion leg + merge step reconciliation reframing — full handoff
-      plan, baseline data already measured, and concrete next steps:
-      `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`. Two separate
-      sub-items (do sequentially, not together — founder's explicit instruction): (1)
-      `file_processor.py`'s Prompt A/B/C/D (PDF/image/audio → markdown) may have the same
-      placeholder/hallucination bug class the old scraper had — not yet investigated at all. (2)
-      merge step's `_extract_universal_fields`: baseline measured 2026-09-28 (N=3) — clean scraper
-      JSON input alone already lifted location recall 58-60%→77% with zero prompt changes, but the
-      exact Otago world-knowledge-leakage hallucination reproduced independently inside the merge
-      step's own prompt (not fixed by cleaner input alone) — needs the same grounding-rule fix
-      already proven on the scraper leg. Reconciliation logic itself already works correctly
-      (verified: a conflicting host document correctly overrides scraped check-in/capacity).
-      Reusable test harness saved: `_Context/merge_pipeline_harness/`.
-      touches: `backend/services/gemini_merge_resolve.py`, `backend/services/file_processor.py`
+- [x] ~~Host-uploaded-document ingestion leg + merge step reconciliation reframing~~ — shipped
+      2026-09-28, staging `1610f1e` (ingestion: grounding rules on all 4 prompts, zip-corruption
+      pandas fix, multi-file separator fix) + `604570f` (merge: grounding rules ported +
+      `_guard_coordinates`/`_verify_grounded_strings` structural guards). Full 3-leg redesign plan:
+      `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md`. Measured: ingestion's one real
+      baseline bug (weekday/weekend overgeneralization) 30%→0/10; merge recall 77%→89% combined,
+      0/100 hallucination, 0 fabricated coordinates across two N=5 rounds each. Both have permanent
+      smoke tests (`_INGESTION_GROUNDING_TEST`, extended `_UNIVERSAL_FIELDS_TEST`).
+- [x] ~~Phase 2 — ground the freeform merge (MERGER_SYSTEM_PROMPT, the bulk of master_json,
+      untouched by the item above)~~ — shipped 2026-09-28, staging (commit pending founder
+      approval). Full-document fidelity testing (not narrow field fixtures) across the 5 existing
+      fixtures + a real trained property's actual documents (Bungalow), 2 independent rounds,
+      judged by Claude subagents after an initial cheap OpenRouter judge proved unreliable on long
+      documents. One real fix confirmed (Casa Tulum: eliminated a fabricated conflated
+      "years_hosting" number + an invented alternate-name guess); every other case a wash, 0
+      hallucinations both conditions, no regressions. Also validated multi-file aggregation and
+      voice-note end-to-end fidelity, both PASS. New permanent smoke test: `_FREEFORM_MERGE_TEST`.
+      touches: `backend/services/gemini_merge_resolve.py`
+- [ ] 🔵 Low priority (found 2026-09-28 during Phase 2 fidelity testing, identical in old and new
+      merge prompts so unrelated to the grounding fix above): the merge sometimes drops a host's
+      "hosting since [year]" fact entirely (seen across several fixtures, ~1 in 2 runs) — likely a
+      merge-prompt/schema coverage gap, not a hallucination-guard issue. One run also dropped an
+      entire safety-alarms category (smoke/CO alarm, camera) that was present in source — same in
+      both baseline and fixed, so a separate, intermittent omission bug worth a dedicated look.
+      touches: `backend/services/gemini_merge_resolve.py`
+- [ ] 🔵 Maybe (founder-flagged 2026-09-28, low priority — still in Beta, no urgency): backfill/
+      re-verify already-trained properties' stored `master_json` against the new grounding guards.
+      The ingestion+merge grounding fix above only prevents *future* merges from fabricating
+      data — it doesn't retroactively clean properties trained before it shipped. Confirmed one
+      real (though more nuanced than first thought) example while validating the fix: property
+      "Bungalow" (staging `e6d4f0c6-6ca1-4622-9559-e21f0b4a80f6`) has a `security_gate_code: "XXXX"`
+      placeholder sitting in its stored `ingested_markdown`, predating this fix — would need
+      re-ingesting the host's original photo through the now-fixed Prompt B to resolve, not just a
+      re-merge. Needs explicit approval before touching any already-trained production/staging data.
 - [ ] 🔴 Train Now UX — partially resolved: a Delete button now exists on the dashboard card to
       wipe a stuck property and clear the card, closing the original "no recovery action at all"
       complaint (root cause + history: `_Context/Train_Now_Reliability_and_QA_Process_Plan_

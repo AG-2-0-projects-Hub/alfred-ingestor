@@ -49,12 +49,30 @@ You are a meticulous data extraction agent. Merge two property information sourc
 
 ## CRITICAL RULES
 
+### 0. GROUNDING (MANDATORY — applies to every rule below)
+- Every fact in your output must be traceable to the literal content of SCRAPED DATA, INGESTED
+  DATA, or SCRAPED_PHOTOS below — never to outside/world knowledge about the property, host,
+  brand, or location.
+- Never invent, guess, or "correct" a value to a plausible-sounding standard — a rounded price, a
+  completed phone number, a typical brand name, a geocoded coordinate, an assumed state/region for
+  a known city. If a detail is unclear, incomplete, or ambiguous in the source, either quote it
+  exactly as given or omit it — do not smooth it into something cleaner or more complete than what
+  was actually stated.
+- Communication style (Section 4) and any other interpretive characterization must be grounded in
+  actual example phrases/patterns present in the source conversation — do not assign a tone or
+  style that isn't evidenced by real examples you can point to.
+- "When in doubt, INCLUDE IT" (Rule 1 below) governs exhaustiveness of what's *already stated* —
+  it is not license to add a detail that isn't stated. When in doubt about what an unclear or
+  missing value actually is, omit it (Section 6) or flag it as a conflict (Section 3) — never fill
+  the gap with a guess.
+
 ### 1. EXHAUSTIVE EXTRACTION (MANDATORY)
 - Extract ALL information from both sources—no summarizing, paraphrasing, or omitting
 - Include ALL URLs, numbers, measurements, prices, times, names, phone numbers, addresses
 - Include ALL amenities, features, items visible in images
 - Include ALL brands, colors, materials mentioned
-- When in doubt, INCLUDE IT
+- When in doubt about whether a real, stated detail is worth including, INCLUDE IT (see Rule 0 —
+  this means real stated details, never invented ones)
 
 ### 2. ENTITY AWARENESS (PREVENTS FALSE CONFLICTS)
 Before comparing values, identify if data describes:
@@ -206,6 +224,9 @@ The host's communication patterns are essential for chatbot personality. Extract
 - Build JSON based on what EXISTS—no empty sections or placeholders
 - If property has X → create X field
 - Let data shape structure, not templates
+- Omitting a field and guessing a plausible value for it are BOTH violations of this rule —
+  guessing is the worse one. If a checklist item below has zero support in either source, leave
+  it out entirely; do not fill it with a placeholder OR a fabricated real-looking value.
 
 ### 7. MEDIA EXTRACTION
 Include complete media section:
@@ -306,11 +327,13 @@ Include `_conflicts_summary` at root if conflicts exist:
 
 ## FINAL REMINDERS
 ✅ If it's in the source → it's in the JSON
+✅ If it's NOT in the source → it's NOT in the JSON, no matter how plausible it sounds
 ✅ Listing data ≠ Host data (separate entities, no false conflicts)
 ✅ If sources contradict for SAME entity → flag conflict
 ✅ If image shows something → extract it
 ✅ If sign has text → include verbatim + translation
-✅ Communication style is CRITICAL → extract deeply
+✅ Communication style is CRITICAL → extract deeply, but only from real example phrases present
+  in the source — never characterize a tone/style you can't point to an actual example of
 
 **Generate the complete JSON now.\
 """
@@ -1077,8 +1100,88 @@ async def _UNIVERSAL_FIELDS_TEST() -> None:
     print(f"  queenstown -> {json.dumps(queenstown, ensure_ascii=False)}")
 
 
-if __name__ == "__main__":
-    asyncio.run(_UNIVERSAL_FIELDS_TEST())
+def _flatten_to_text(obj) -> str:
+    """Recursively stringify a dict/list into one lowercase blob -- freeform
+    merge output has no fixed schema (unlike UNIVERSAL_FIELDS_SCHEMA), so a
+    single field-path assertion can't reliably target where a hallucination
+    would land; a whole-output substring/keyword check is the only check that
+    survives the model choosing a different key layout run to run."""
+    if isinstance(obj, dict):
+        return " ".join(_flatten_to_text(v) for v in obj.values())
+    if isinstance(obj, list):
+        return " ".join(_flatten_to_text(v) for v in obj)
+    return str(obj).lower()
+
+
+def _find_fabricated_coordinates(obj) -> list:
+    """Recursively hunts for a lat/lng-shaped numeric pair anywhere in the
+    freeform output -- used against a fixture that states no coordinates at
+    all, so ANY hit here is fabricated by definition."""
+    hits = []
+    if isinstance(obj, dict):
+        keys_lower = {k.lower(): v for k, v in obj.items()}
+        lat = next((v for k, v in keys_lower.items() if k in ("lat", "latitude")), None)
+        lng = next((v for k, v in keys_lower.items() if k in ("lng", "lon", "long", "longitude")), None)
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            hits.append({"lat": lat, "lng": lng})
+        for v in obj.values():
+            hits.extend(_find_fabricated_coordinates(v))
+    elif isinstance(obj, list):
+        for v in obj:
+            hits.extend(_find_fabricated_coordinates(v))
+    return hits
+
+
+async def _FREEFORM_MERGE_TEST() -> None:
+    """Real Gemini calls, no mocks: validates MERGER_SYSTEM_PROMPT's freeform
+    output (the bulk of master_json, untouched by _guard_coordinates /
+    _verify_grounded_strings -- those only cover UNIVERSAL_FIELDS_SCHEMA)
+    against the same Otago-style world-knowledge-leak + coordinate-
+    fabrication failure mode _UNIVERSAL_FIELDS_TEST checks for the schema-
+    constrained half. Added 2026-09-28 after the Phase 2 freeform-merge
+    grounding fix (see _Context/full_fidelity_harness/) -- full-document
+    LLM-judge testing caught the REAL issues (a conflated hosting-duration
+    number, an unverified alternate-name guess -- see that harness's Casa
+    Tulum results) that this fast, deterministic smoke test intentionally
+    does NOT attempt to catch; semantic conflation isn't something a
+    substring assertion can reliably detect, and re-running an LLM judge on
+    every commit isn't a smoke test's job. This test's scope is deliberately
+    narrower: the two failure modes that ARE substring-detectable."""
+    import os
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_FREEFORM_MERGE_TEST: SKIP (no local ADC — run: "
+              f"gcloud auth application-default login) — {exc}")
+        return
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    result = await _run_freeform_merge(_FIXTURE_QUEENSTOWN, "", "Lakeview Lodge", None)
+    flattened = _flatten_to_text(result)
+
+    # "Milford Sound" / "Wakatipu" ARE stated in the fixture (scenic context)
+    # and are legitimately extractable by the exhaustive freeform prompt --
+    # only "Otago"/"South Island" (never stated) are the hallucination signal.
+    failures = []
+    for forbidden in ("otago", "south island"):
+        if forbidden in flattened:
+            failures.append(f"world-knowledge leakage: {forbidden!r} found anywhere in freeform output")
+
+    fabricated_coords = _find_fabricated_coordinates(result)
+    if fabricated_coords:
+        failures.append(f"fabricated coordinates: {fabricated_coords!r} (source states none)")
+
+    if failures:
+        print("_FREEFORM_MERGE_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+        print(f"  full output -> {json.dumps(result, ensure_ascii=False)}")
+    else:
+        print("_FREEFORM_MERGE_TEST: PASS")
+        print(f"  queenstown (freeform) -> {json.dumps(result, ensure_ascii=False)}")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -1219,4 +1322,9 @@ async def run_knowledge_injection(
             f"Gemini Knowledge Injector returned invalid JSON: {exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
         ) from exc
+
+
+if __name__ == "__main__":
+    asyncio.run(_UNIVERSAL_FIELDS_TEST())
+    asyncio.run(_FREEFORM_MERGE_TEST())
 
