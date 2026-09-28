@@ -350,10 +350,15 @@ async def run_process_file(property_id: str, run_id: str, filename: str, retry_c
                 elapsed += 10
                 await asyncio.to_thread(supabase_client.touch_ingest_heartbeat, property_id, run_id)
         markdown = await current_task
+        # ingest_record_file_result's SQL appends this straight onto
+        # ingested_markdown with no separator across multiple files (found in
+        # the 2026-09-28 ingestion audit) -- a filename header here is the
+        # cheapest fix, no migration needed.
+        markdown_with_header = f"<!-- source_file: {filename} -->\n\n{markdown}"
 
         await asyncio.to_thread(
             supabase_client.record_ingest_file_result,
-            property_id, run_id, filename, "done", markdown=markdown, fingerprint_size=size,
+            property_id, run_id, filename, "done", markdown=markdown_with_header, fingerprint_size=size,
         )
         succeeded = True
     except Exception as exc:
