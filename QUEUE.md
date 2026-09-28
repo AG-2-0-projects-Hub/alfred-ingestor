@@ -21,18 +21,20 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       responsive layout pass across the dashboard/chat screens. Also directly shortens a future
       native Android/iOS build later (same Flutter codebase, same widgets). Founder is working the
       Stitch draft during the week; not urgent, but goes first when picked up.
-- [ ] Country/location extraction reliability (opened 2026-09-25, mid-investigation, paused
-      waiting on cross-LLM feedback) — `location.country` extraction is unreliable (30-67%
-      depending on stage/prompt variant across many test rounds) even when clearly stated, and
-      real hallucinations were found independently (`coordinates: {0,0}`, invented `state_region`
-      values like "Otago" never stated in the source). Root cause identified: the SCRAPER's own
-      structuring prompt (`scraper/GEMINI_PROMPT_AIRBNB.md`) crams City+State+Country into one
-      mislabeled `**City:** [City, State, Country]` field — splitting it into 3 real fields
-      measurably helped (56%→67% country-recall) but wasn't combined with the merge-step fixes
-      also found (a world-knowledge-leakage rule, a `state_region` scope definition, a
-      `coordinates` guard). Full log + a ready-to-paste cross-LLM consultation prompt:
-      `_Context/Universal_Fields_Extraction_Reliability_Investigation_2026-09-25.md` (gitignored,
-      local only). Nothing has shipped from this investigation yet — still test-harness-only.
+- [ ] Consider JSON-native for the host-uploaded-document ingestion leg too (`ingested_markdown`,
+      from PDFs/docs hosts upload) — opened 2026-09-25, scoped as its own mini-project 2026-09-28.
+      Checked `file_processor.py`: **not** pure deterministic parsing as originally assumed — PDFs/
+      images/audio each go through their own Gemini call ("Prompt A/B/C/D") that restructures
+      content into markdown before it ever reaches the merge step, the same architectural shape
+      the scraper's old design had. Real reason to suspect the same placeholder/hallucination bug
+      class could live here too, not just a symmetry nice-to-have — investigate before deciding.
+- [ ] Merge step's `_extract_universal_fields` call: now that the scraper produces clean typed
+      JSON directly (see Done below), this call's job shifts from "extract canonical fields from
+      prose" to "reconcile scraper's JSON against the host's ingested doc" — same quote-first/
+      evidence-grounding principle applied one level up, not yet done. Free optimization noted:
+      when a property has zero ingested files (scrape-only), this call is pure redundant
+      re-derivation of what the scraper JSON already has and could just short-circuit to a
+      pass-through. Opened 2026-09-28, not scoped/tested yet.
 - [ ] 🔴 Train Now leaves the host stranded with no recovery action when a run takes longer than
       expected: the wait dialog's own safety-timeout message ("still working, check the dashboard")
       dumps them back on the plain form with only a "Train Now" button — no way to check progress,
@@ -92,6 +94,30 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Done (came off the queue)
 
+- [x] ~~Country/location extraction reliability -- scraper JSON-native rewrite~~ — shipped
+      2026-09-28. Retired `scraper/GEMINI_PROMPT_AIRBNB.md` (a Make.com formatting workaround, not
+      a real requirement) entirely; the scraper's own Gemini call is now `response_schema`-
+      constrained JSON (`SCRAPER_STRUCTURED_SCHEMA`, `scraper/main.py`) instead of free-text
+      markdown, so there's no lossy prose intermediate left for the merge step to re-parse.
+      Empirically verified against a real comparison harness (old pipeline vs. new, same fixtures,
+      two independent N=5 rounds, 25 runs/path/round): location recall 58-60% → **100%** (100/100
+      across both rounds); the documented Otago world-knowledge-leakage hallucination, 1/25 old-path
+      runs → **0/50** new-path runs across both rounds. Found and fixed 2 real gaps during a direct
+      old-vs-new side-by-side (not just the aggregate score): `meta.language_detected`/
+      `data_completeness` were coming back empty (added an explicit self-assess-always rule) and
+      `emergency_contact` had no dedicated field (added one, matching the merge step's own
+      top-level field) — re-verified clean after both fixes. Added a permanent smoke test
+      (`_SCRAPER_STRUCTURED_TEST` in `scraper/main.py`, mirrors `_UNIVERSAL_FIELDS_TEST`'s
+      pattern) so this doesn't regress silently later. Also fixed a real downstream break this
+      surfaced: `ingest_worker.py`'s `_parse_thumbnail_url` regexed markdown bold syntax that no
+      longer exists in the new JSON output — would have silently broken hero-image upload for
+      every future scrape; now parses `media.thumbnail_url` from the JSON directly. `scraped_markdown`
+      DB column name kept as-is (now holds a JSON string, not markdown — deliberate, to avoid a
+      migration + multi-file rename on top of an already-large change). Full investigation log +
+      cross-LLM consultation + responses: `_Context/Universal_Fields_Extraction_Reliability_
+      Investigation_2026-09-25.md` (gitignored, local only). Two real follow-ups spun off into
+      their own Open items above (host-document ingestion leg, merge step's reconciliation-call
+      reframing) rather than scope-creeping into this change.
 - [x] ~~User-mode Add Property "Ingest" vs "Train Now" button label~~ — closed 2026-09-16, never
       actually broken: `widget.isDev ? 'INGEST NOW' : 'TRAIN NOW'` has been in the code unchanged
       since the original dashboard commit (`721dd3e`); the 2026-09-15 flag was a false read, not a

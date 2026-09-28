@@ -27,6 +27,7 @@ makes a duplicate/zombie task safe rather than something to deduplicate.
 """
 
 import asyncio
+import json
 import os
 import re
 import uuid
@@ -154,8 +155,13 @@ def _is_stale(heartbeat_iso: str | None) -> bool:
 
 
 def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
-    match = re.search(r'\*\*Thumbnail:\*\*\s*(\S+)', scraped_markdown)
-    return match.group(1).strip() if match else None
+    """scraped_markdown is now a JSON string (scraper's SCRAPER_STRUCTURED_SCHEMA
+    output, 2026-09-28) -- see scraper/main.py's schema comment."""
+    try:
+        url = json.loads(scraped_markdown).get("media", {}).get("thumbnail_url")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return url.strip() if url else None
 
 
 async def _call_scraper(airbnb_url: str) -> dict:

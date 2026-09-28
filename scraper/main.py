@@ -125,15 +125,263 @@ def upsert_to_ingestor_supabase(url: str, structured_output: str):
         sentry_sdk.capture_exception(e)
 
 
-def get_gemini_prompt(markdown_data: str) -> str:
-    prompt_path = os.path.join(os.path.dirname(__file__), "GEMINI_PROMPT_AIRBNB.md")
-    try:
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            template = f.read()
-    except FileNotFoundError as e:
-        sentry_sdk.capture_exception(e)
-        template = "Please analyze the following data:\n[INSERT_DATA_HERE]"
-    return template.replace("[INSERT_DATA_HERE]", markdown_data)
+# ── Structured scraper extraction (2026-09-28) ──────────────────────────────
+# Replaces the old GEMINI_PROMPT_AIRBNB.md markdown-template approach (a
+# Make.com formatting workaround, not a real requirement -- see
+# _Context/Universal_Fields_Extraction_Reliability_Investigation_2026-09-25.md
+# for the full investigation). That design forced a lossy structured-data ->
+# prose -> structured-data-again round trip: the merge step had to re-parse
+# free text the scraper itself produced, and the markdown template's
+# "Not specified in listing" placeholder got coerced into fabricated 0/False/
+# {lat:0,lng:0} values once that text hit a typed schema downstream, and its
+# combined `**City:** [City, State, Country]` field caused the country-recall
+# failures on neighborhood/region-ambiguous listings (Alfama, Cotswolds).
+# response_schema-constrained JSON, straight from the scraper, removes that
+# whole lossy hop. Empirically verified (N=5, two independent rounds) against
+# the exact previously-failing fixtures: location recall 58-60% -> 100%,
+# the documented Otago world-knowledge-leakage hallucination 1/25 runs -> 0/50.
+SCRAPER_STRUCTURED_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "meta": {
+            "type": "OBJECT",
+            "properties": {
+                "listing_id": {"type": "STRING"},
+                "listing_url": {"type": "STRING"},
+                "language_detected": {"type": "STRING"},
+                "data_completeness": {"type": "STRING"},  # "High" | "Medium" | "Low"
+            },
+        },
+        "property_identity": {
+            "type": "OBJECT",
+            "properties": {
+                "property_name": {"type": "STRING"},
+                "property_type": {"type": "STRING"},
+                "summary": {"type": "STRING"},
+            },
+        },
+        "capacity": {
+            "type": "OBJECT",
+            "properties": {
+                "max_guests": {"type": "INTEGER"},
+                "bedrooms": {"type": "INTEGER"},
+                "beds": {"type": "INTEGER"},
+                "bathrooms": {"type": "NUMBER"},
+            },
+        },
+        "location": {
+            "type": "OBJECT",
+            "properties": {
+                # Quote-first grounding: placed BEFORE the structured fields so
+                # the model must ground itself in an exact source excerpt
+                # before filling typed location fields -- the mechanism that
+                # suppresses "Otago"-style world-knowledge leakage into
+                # state_region/country (cross-LLM consensus recommendation,
+                # empirically confirmed above).
+                "location_evidence_quote": {"type": "STRING"},
+                "address": {"type": "STRING"},
+                "neighborhood": {"type": "STRING"},
+                "neighborhood_description": {"type": "STRING"},
+                "city": {"type": "STRING"},
+                "state_region": {"type": "STRING"},
+                "country": {"type": "STRING"},
+                "postal_code": {"type": "STRING"},
+                "coordinates": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "lat": {"type": "NUMBER"},
+                        "lng": {"type": "NUMBER"},
+                    },
+                },
+                "parking": {"type": "STRING"},
+            },
+        },
+        "host": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {"type": "STRING"},
+                "host_id": {"type": "STRING"},
+                "is_superhost": {"type": "BOOLEAN"},
+                "is_verified": {"type": "BOOLEAN"},
+                "bio": {"type": "STRING"},
+                "response_rate": {"type": "STRING"},
+                "response_time": {"type": "STRING"},
+                "years_hosting": {"type": "INTEGER"},
+                "total_reviews": {"type": "INTEGER"},
+            },
+        },
+        "check_in_out": {
+            "type": "OBJECT",
+            "properties": {
+                "check_in_time": {"type": "STRING"},
+                "check_out_time": {"type": "STRING"},
+                "check_in_method": {"type": "STRING"},
+                "cancellation_policy": {"type": "STRING"},
+            },
+        },
+        "amenities": {
+            "type": "OBJECT",
+            "properties": {
+                "highlights": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "title": {"type": "STRING"},
+                            "description": {"type": "STRING"},
+                        },
+                    },
+                },
+                "kitchen_dining": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "entertainment": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "climate_control": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "bathroom": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "bedroom_laundry": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "outdoor_pool": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "safety_security": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "parking_facilities": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "not_available": {"type": "ARRAY", "items": {"type": "STRING"}},
+            },
+        },
+        "house_rules": {
+            "type": "OBJECT",
+            "properties": {
+                "guest_capacity_note": {"type": "STRING"},
+                "allowed": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "not_allowed": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "quiet_hours": {"type": "STRING"},
+                "other_rules": {"type": "STRING"},
+            },
+        },
+        "description_full_text": {"type": "STRING"},
+        "media": {
+            "type": "OBJECT",
+            "properties": {
+                "total_photos": {"type": "INTEGER"},
+                "thumbnail_url": {"type": "STRING"},
+                "gallery": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "caption": {"type": "STRING"},
+                            "url": {"type": "STRING"},
+                        },
+                    },
+                },
+            },
+        },
+        "reviews": {
+            "type": "OBJECT",
+            "properties": {
+                "overall_rating": {"type": "NUMBER"},
+                "total_reviews": {"type": "INTEGER"},
+                "rating_breakdown": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "accuracy": {"type": "NUMBER"},
+                        "cleanliness": {"type": "NUMBER"},
+                        "check_in": {"type": "NUMBER"},
+                        "communication": {"type": "NUMBER"},
+                        "location": {"type": "NUMBER"},
+                        "value": {"type": "NUMBER"},
+                    },
+                },
+                "guest_recognition": {"type": "STRING"},
+            },
+        },
+        "pricing": {
+            "type": "OBJECT",
+            "properties": {
+                "base_rate": {"type": "STRING"},
+                "cleaning_fee": {"type": "STRING"},
+                "service_fee": {"type": "STRING"},
+                "total": {"type": "STRING"},
+            },
+        },
+        "additional_info": {
+            "type": "OBJECT",
+            "properties": {
+                "availability": {"type": "STRING"},
+                "special_notes": {"type": "STRING"},
+            },
+        },
+        # Meta-commentary about gaps -- NOT a per-field placeholder, so it
+        # doesn't trigger the type-coercion bug. Safe to keep as-is.
+        "data_quality_notes": {"type": "ARRAY", "items": {"type": "STRING"}},
+        # Preserves the old template's "Additional Categories Discovered"
+        # escape hatch for listing data that doesn't fit any fixed section.
+        "additional_categories": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "category_name": {"type": "STRING"},
+                    "items": {"type": "ARRAY", "items": {"type": "STRING"}},
+                },
+            },
+        },
+        # Top-level, matching UNIVERSAL_FIELDS_SCHEMA's own top-level field --
+        # often buried inside a host bio's free text, so it needs its own
+        # explicit slot rather than relying on host.bio alone to carry it
+        # through to the merge step.
+        "emergency_contact": {"type": "STRING"},
+    },
+}
+
+SCRAPER_STRUCTURED_SYSTEM_PROMPT = """\
+You are an expert Data Architect for vacation rental systems. Extract ALL \
+information from the raw Airbnb listing data below into the exact JSON shape \
+given by the response schema. No filtering, no summarization -- every fact \
+present in the source belongs in some field or category below.
+
+Rules:
+- Only extract what is actually stated in the source -- never guess or infer a \
+plausible-sounding value, even if it's a well-known fact (e.g. do not add a \
+state/region/province just because you recognize the city -- if the source \
+says "Queenstown" and never says "Otago", state_region must be omitted, not \
+filled from your own world knowledge).
+- If a field genuinely has no source support, OMIT it entirely. Never write \
+"Not specified in listing", "N/A", or any placeholder -- an omitted field and a \
+placeholder-filled field must never be confused downstream.
+- location.location_evidence_quote: before filling any other location field, \
+copy the exact sentence(s) from the source that state the property's location. \
+If the source states no location at all, leave this empty and omit every other \
+location field too.
+- location.country is the sovereign nation (e.g. "Mexico", "Portugal", "United \
+Kingdom"). location.city is the municipality/town (e.g. "Tulum", "Lisbon", \
+"Queenstown") -- not a neighborhood. location.neighborhood is a district within \
+a city (e.g. "Alfama" is a neighborhood of Lisbon, not the city itself). \
+location.state_region is the state/province/county between city and country. A \
+region name like "Cotswolds" that spans multiple administrative divisions is \
+not itself a state_region -- if the source only says "Cotswolds, England", \
+country is "United Kingdom", state_region is "England", and neighborhood or \
+address may carry "Cotswolds".
+- location.coordinates: only include if the source states explicit numeric \
+latitude/longitude values. Never estimate or geocode coordinates from a city \
+or address name.
+- Property name is required and must never be omitted or "Not specified in \
+listing" -- search the entire input thoroughly (it is virtually always present \
+near the top, e.g. a page title/H1). Only if truly absent after an exhaustive \
+search, use the most specific location/property-type description available \
+from the source (e.g. "Entire bungalow in Tulum") instead.
+- meta.language_detected and meta.data_completeness are self-assessments, not \
+extractions -- always determine and fill both from the source text itself \
+(what language is it written in; how complete does the listing data look), \
+never omit these two specifically just because they aren't literally labeled \
+in the source.
+- emergency_contact: if the source gives any explicit contact info for \
+emergencies or urgent issues (a phone number, email, etc. -- often embedded \
+inside a host bio paragraph rather than its own labeled field), extract it \
+into this field as its own distinct value, in addition to leaving the \
+original sentence intact in host.bio.
+- Preserve host bio and the full property description verbatim -- do not \
+paraphrase or summarize those two fields.
+- additional_categories: if the source contains data that doesn't fit any \
+fixed field/category above, add it here rather than dropping it or forcing it \
+into an unrelated field.
+- Output valid JSON only, matching the response schema exactly.
+"""
 
 
 # ── Photo triage ─────────────────────────────────────────────────────────────
@@ -454,12 +702,12 @@ async def _triage_photos(client, raw_markdown: str, property_context: str) -> tu
         return [], []
 
 
-_COMPLETENESS_RE = re.compile(r"data_completeness:\s*(\w+)", re.IGNORECASE)
-
-
 def _extract_completeness(structured_output: str) -> str | None:
-    match = _COMPLETENESS_RE.search(structured_output)
-    return match.group(1).strip().title() if match else None
+    try:
+        value = json.loads(structured_output).get("meta", {}).get("data_completeness")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return value.strip().title() if value else None
 
 
 def _fetch_and_structure(client, url: str) -> tuple[str, str]:
@@ -470,23 +718,24 @@ def _fetch_and_structure(client, url: str) -> tuple[str, str]:
     listing (only nav chrome, no real content) and kept serving that same
     stale copy on every subsequent request indefinitely. Airbnb listing
     pages change per-request anyway (pricing/availability/share tokens), so
-    there's no good reason to ever trust the cache here."""
+    there's no good reason to ever trust the cache here.
+
+    `structured_output` is now a JSON string (SCRAPER_STRUCTURED_SCHEMA),
+    not markdown prose — see that schema's comment for why."""
     fc = get_firecrawl_client()
     scrape_result = fc.scrape(url, formats=["markdown"], max_age=0)
     extracted_markdown = getattr(scrape_result, "markdown", "")
     if not extracted_markdown:
         raise RuntimeError("Firecrawl returned empty markdown content")
 
-    final_prompt = get_gemini_prompt(extracted_markdown)
     response = _generate_with_retry(
         client,
         model="gemini-3.6-flash",
-        contents=final_prompt,
+        contents=f"INPUT DATA (raw scrape):\n{extracted_markdown}",
         config=genai.types.GenerateContentConfig(
-            system_instruction=(
-                "You are an expert Data Architect for vacation rental systems. "
-                "You strictly follow instructions to output structured Markdown."
-            ),
+            system_instruction=SCRAPER_STRUCTURED_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=SCRAPER_STRUCTURED_SCHEMA,
             temperature=0.0,
         ),
     )
@@ -564,3 +813,104 @@ async def scrape_airbnb(req: ScrapeRequest):
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok"}
+
+
+# ── Smoke test: verifies SCRAPER_STRUCTURED_SCHEMA's "omit, don't guess" +
+# location-hierarchy contract, real Gemini calls ────────────────────────────
+# This project has no pytest suite (see backend/services/gemini_merge_resolve.py's
+# _UNIVERSAL_FIELDS_TEST for the established pattern, which this mirrors, and
+# _tests/health/run_health_check.py for the live-Gemini-smoke-test idiom in
+# general). A mocked response would prove nothing here -- the whole point is
+# verifying Gemini itself respects the anti-hallucination rules, not that this
+# module's own plumbing works. Requires local Vertex ADC and scraper/requirements.txt
+# installed. Run:
+#   python -m venv venv && venv/bin/pip install -r requirements.txt
+#   venv/bin/python main.py
+
+_FIXTURE_WITH_FACTS = """
+Charming flat in Alfama, the oldest neighborhood in Lisbon
+Entire rental unit in Lisbon, Portugal
+3 guests, 1 bedroom, 2 beds, 1 bath
+
+Tucked into the winding cobblestone streets of Alfama, Lisbon's oldest and
+most authentic neighborhood. Hosted by Joao, Superhost. "I grew up two
+streets from this flat -- reach me at +351 91 234 5678 for anything urgent."
+Amenities: Wifi, Kitchen, Washer, Air conditioning, Smoke alarm.
+"""
+
+_FIXTURE_NO_WORLD_KNOWLEDGE = """
+Lakeview Lodge -- Queenstown, New Zealand, gateway to Milford Sound
+Entire home, 8 guests, 4 bedrooms
+
+Perched above Lake Wakatipu in Queenstown, New Zealand -- gateway to
+Milford Sound. Queenstown is New Zealand's adventure capital.
+Amenities: Wifi, Fireplace, Hot tub, Smoke alarm.
+"""
+
+
+async def _SCRAPER_STRUCTURED_TEST() -> None:
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_SCRAPER_STRUCTURED_TEST: SKIP (no local ADC -- run "
+              f"'gcloud auth application-default login') -- {exc}")
+        return
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    client = genai.Client()
+
+    async def _extract(raw: str) -> dict:
+        response = await client.aio.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=f"INPUT DATA (raw scrape):\n{raw}",
+            config=genai.types.GenerateContentConfig(
+                system_instruction=SCRAPER_STRUCTURED_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=SCRAPER_STRUCTURED_SCHEMA,
+                temperature=0.0,
+            ),
+        )
+        return json.loads(response.text)
+
+    with_facts = await _extract(_FIXTURE_WITH_FACTS)
+    no_world_knowledge = await _extract(_FIXTURE_NO_WORLD_KNOWLEDGE)
+
+    failures = []
+
+    loc = with_facts.get("location", {})
+    if loc.get("city") != "Lisbon":
+        failures.append(f"expected location.city='Lisbon', got {loc.get('city')!r}")
+    if loc.get("country") != "Portugal":
+        failures.append(f"expected location.country='Portugal', got {loc.get('country')!r}")
+    if loc.get("neighborhood") != "Alfama":
+        failures.append(f"expected location.neighborhood='Alfama', got {loc.get('neighborhood')!r}")
+    if with_facts.get("emergency_contact") != "+351 91 234 5678":
+        failures.append(f"expected emergency_contact='+351 91 234 5678', got "
+                         f"{with_facts.get('emergency_contact')!r}")
+    meta = with_facts.get("meta", {})
+    if not meta.get("language_detected") or not meta.get("data_completeness"):
+        failures.append(f"expected meta.language_detected/data_completeness both filled, got {meta!r}")
+
+    nwk_loc = no_world_knowledge.get("location", {})
+    state_region = (nwk_loc.get("state_region") or "").lower()
+    for forbidden in ("otago", "south island", "milford sound", "wakatipu"):
+        if forbidden in state_region:
+            failures.append(f"world-knowledge leakage: state_region={nwk_loc.get('state_region')!r} "
+                             f"contains {forbidden!r} (never stated in the source)")
+    coords = nwk_loc.get("coordinates") or {}
+    if coords.get("lat") or coords.get("lng"):
+        failures.append(f"fabricated coordinates: {coords!r} (source states no coordinates)")
+
+    if failures:
+        print("_SCRAPER_STRUCTURED_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_SCRAPER_STRUCTURED_TEST: PASS")
+
+
+if __name__ == "__main__":
+    asyncio.run(_SCRAPER_STRUCTURED_TEST())
