@@ -1327,6 +1327,15 @@ testing plus one direct DB-query verification pass (see P6's note) — not yet r
 - **host_expected:** confirmation dialog shows correct copy, then the section reverts to "Connect Telegram"; `host_profiles.telegram_chat_id` and `active_conversation_booking_id` both cleared to `null`
 - **status:** passing — automated via `_tests/runner/scenarios/p8.ts`, run against staging 2026-09-25: connected-state render, confirm dialog, reverted state (all via the OpenRouter vision judge) and a direct DB check all PASS. No backend endpoint needed — `host_profiles`' RLS update policy is row-level only (`id = auth.uid()`), so the frontend writes directly, same pattern `_save()` already uses. The active-escalation warning copy branch (when `active_conversation_booking_id` is set) is not independently exercised here — only the no-active-conversation copy path is covered.
 
+### P9. Host enables email escalation alerts (fallback for hosts without Telegram)
+- **id:** host-esc-email-01
+- **touches:** `frontend/lib/widgets/profile_dialog.dart` (email field, opt-in checkbox, `_save`), `backend/routers/messages.py` (`POST /host/escalation-email`, `_notify_host_escalation`), `backend/services/supabase_client.py` (`get_host_notification_settings`, `update_host_escalation_email`), `backend/services/email_client.py`
+- **layer:** 2 (Playwright — see `_tests/runner/scenarios/p9.ts`)
+- **setup:** test host reset to no email-escalation config via direct REST PATCH
+- **action:** open profile dialog → type an email into "Email alerts" → check "Send escalation notifications via Email" → Save
+- **host_expected:** email field + checkbox render and reflect input correctly; after Save, `host_profiles.notification_email`/`escalation_email_enabled` match, and `escalation_email_unsub_token` is non-null — the token can only be minted by the new backend endpoint (never by the plain RLS-direct upsert the rest of the dialog uses), so this is real proof the endpoint executed, not just that some write happened
+- **status:** passing — automated via `_tests/runner/scenarios/p9.ts`, run against staging 2026-09-29 (backend redeployed `alfred-backend-staging-00035-dd8`, frontend Vercel auto-deploy on push): empty-state and filled-state screenshot judges both PASS, direct DB check PASS on all three fields. Does **not** prove a real email is delivered — `RESEND_API_KEY` isn't configured on staging yet, so the send leg fails soft (by design, same as an unconfigured Telegram token) and was not independently exercised; that's a follow-up once a Resend account exists. The Telegram code path (`_build_host_alert_text`/`send_alert`) was extracted into a shared `_notify_host_escalation` helper alongside this feature with unchanged logic/call signatures (verified via code review + `py_compile`, no new Sentry issues on `alfred-backend` post-deploy) but not independently re-triggered live this session — next real Telegram use (P2/P3) should confirm no regression.
+
 ---
 
 ## Q. First-login onboarding
