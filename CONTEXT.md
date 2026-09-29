@@ -12,8 +12,10 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
 - 🟢 2026-09-28 shipped Sentry (all 3 services, live-verified) + scraper JSON-native rewrite
   (staging, deployed+verified against real prod data). Both fully pushed.
-- 🟡 Merge + host-document pipeline enhancement next up — full plan/baseline/harness saved:
-  `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`. Read before starting.
+- 🟢 2026-09-29 shipped Phase 3/4 of the ingestion/merge grounding work (6 commits, staging) — 4
+  real bugs found+fixed via real-property testing, a JSON-mode reliability fix, a size-aware
+  timeout fix, and FIX_VERIFY's new Step 0 (root-cause-first) + a universal protocol extraction.
+  Full writeup: `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md`.
 - 🔴 guide.html screenshots still broken — untouched. Handoff:
   `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. Must use FIX_VERIFY.
 - 🟡 Stray property "Bungalowww" didn't actually delete — worth a look at the delete path.
@@ -28,7 +30,44 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-28 (**Sentry rollout across all 3 services + scraper JSON-native
+**Last Session:** 2026-09-29 (**Real-property ingestion + full old-vs-new pipeline testing on 3
+actual trained properties' real documents — found, root-caused, and fixed 4 real bugs, shipped a
+new self-grounding critique pass, fixed a JSON-mode reliability gap and a large-file timeout risk,
+then codified the root-cause methodology into `FIX_VERIFY_PROTOCOL.md` as a new Step 0 and
+extracted a project-agnostic version for other AG projects.** 6 commits to staging, all pushed, all
+validated 2+ independent rounds against real data. Full detail (every bug, root cause, and
+validation evidence) in `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md` — this entry is
+the terse summary.
+  - Continued from 2026-09-28's Phase 1/2 (ingestion + merge grounding, already shipped). Founder
+    asked whether ingestion had real-document testing rigor to match merge — it didn't. Built
+    `_Context/full_fidelity_harness/` against 3 real properties' actual uploaded files, judged by
+    Claude subagents (the cheap OpenRouter judge from Phase 2 proved unreliable on long real docs).
+  - **2 ingestion bugs fixed** (`gemini_client.py`): a conditional rule ("code sent 1hr before
+    arrival") getting resolved against an unrelated nearby absolute; and the anti-fabrication
+    caution from 2026-09-28 over-rejecting a legitimate in-document identity inference (a host's
+    name only ever appearing via repeated guest address, never self-declared).
+  - **2 merge bugs fixed** (`gemini_merge_resolve.py`): the already-shipped grounding fix still let
+    the freeform merge fabricate a bathroom shower on real Sta Prisca data — fixed with a new
+    mechanism (a self-grounding critique pass, one extra schema-free Gemini call stripping
+    unsupported claims, deliberately no static fields) rather than another prompt patch; and a
+    conflict-scoping bug where the prompt's own worked example modeled the wrong (too-coarse)
+    behavior — confirmed via re-running the *unmodified* prompt 3x that this was latent, not a new
+    regression, then fixed by rewriting the example.
+  - **1 new reliability bug found+fixed, off the original list:** the main merge call was the only
+    one of 3 JSON-producing calls missing `response_mime_type="application/json"`, causing a real
+    unretried crash on a malformed response. Also fixed a large-real-PDF timeout risk (now
+    size-aware: >3MB gets one 70s attempt instead of 35s×2).
+  - **2 suspected regressions did NOT reproduce on re-test** — logged as non-issues, not silently
+    dropped.
+  - **Process:** added Step 0 ("root-cause it, don't patch it") to `FIX_VERIFY_PROTOCOL.md`, ahead
+    of FMEA — reproduce against real data, trace to the literal mechanism, isolate the variable by
+    re-running unmodified code before accepting a diagnosis. Extracted a project-agnostic version
+    (full Playwright pattern + from-scratch setup guide included) to root's own
+    `_protocols/FIX_VERIFY_PROTOCOL_UNIVERSAL.md` — uncommitted, founder committing separately.
+  - Hit a sustained Vertex 429 quota exhaustion from the day's call volume during final validation
+    — cleared after ~15 min across 2 retries; budget recovery time for similarly dense future runs.
+
+**Prior Session:** 2026-09-28 (**Sentry rollout across all 3 services + scraper JSON-native
 rewrite, both shipped/deployed/live-verified; merge-step baseline measured for next session.**
 Continued from 2026-09-25's session (Telegram Disconnect, `_UNIVERSAL_FIELDS_TEST`, escalation
 fix, extraction-reliability investigation paused on cross-LLM feedback).

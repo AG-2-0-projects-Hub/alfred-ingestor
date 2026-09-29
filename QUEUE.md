@@ -46,6 +46,32 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       entire safety-alarms category (smoke/CO alarm, camera) that was present in source — same in
       both baseline and fixed, so a separate, intermittent omission bug worth a dedicated look.
       touches: `backend/services/gemini_merge_resolve.py`
+- [x] ~~Phase 3/4 — real-property ingestion + full old-vs-new pipeline testing, root-cause fixes,
+      self-grounding critique pass~~ — shipped 2026-09-29, staging (`853af45`, `7b91b6f`, `381085a`,
+      `d69402c`, `1a203f8`, `612fbdf`). Tested against 3 real trained properties' actual uploaded
+      documents (not synthetic fixtures) at both the ingestion leg and the full scraper+ingestion+
+      merge pipeline. Found and fixed, all validated 2+ independent real-Gemini rounds against real
+      data: (1) ingestion collapsing a conditional/relative rule ("code sent 1hr before YOUR
+      arrival") onto an unrelated nearby absolute; (2) ingestion over-cautious on a legitimate
+      in-document identity inference (host's name only ever appears via repeated guest address,
+      never self-declared); (3) merge-level fabrication (Sta Prisca: invented bathroom shower) —
+      fixed with a new self-grounding critique pass (`_ground_freeform_output`, one extra
+      schema-free Gemini call auditing the freeform merge output against its own source); (4) merge
+      conflict-detection bundling a settled multi-tier fact with a genuinely disputed value into
+      one conflict blob, traced to the prompt's own misleading worked example; (5) a real JSON-mode
+      gap causing an outright crash on a malformed response, no retry; (6) large real PDF (~5MB)
+      borderline on the ingestion timeout, now size-aware (>3MB gets a single 70s attempt). Two
+      other suspected regressions (Sta Prisca WiFi-photo fact, Dos Rios no-Airbnb-account policy)
+      did NOT reproduce on re-test — logged as non-issues, not silently dropped. New permanent
+      tests: `_CONFLICT_SCOPING_TEST`, `_GROUNDING_CRITIQUE_TEST`. Also added a Root-Cause-It-First
+      step to `FIX_VERIFY_PROTOCOL.md` (Step 0) codifying the methodology used throughout. Full
+      writeup: `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md`.
+      touches: `backend/services/gemini_client.py`, `backend/services/gemini_merge_resolve.py`
+- [ ] 🔵 Low priority: Prompt C (audio) and Prompt D (spreadsheet) ingestion grounding rules are
+      only validated against synthetic fixtures — none of the 3 real properties used for Phase 3/4
+      testing had audio or spreadsheet uploads. Real-document validation for those 2 paths remains
+      an open gap whenever a real property with that upload type is available to test against.
+      touches: `backend/services/gemini_client.py`
 - [ ] 🔵 Maybe (founder-flagged 2026-09-28, low priority — still in Beta, no urgency): backfill/
       re-verify already-trained properties' stored `master_json` against the new grounding guards.
       The ingestion+merge grounding fix above only prevents *future* merges from fabricating

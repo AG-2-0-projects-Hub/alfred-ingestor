@@ -3,6 +3,103 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-29 — Re-run the unmodified code before accepting a "regression" diagnosis
+
+**Context:** Real-property testing (Phase 3/4) surfaced several suspected new bugs in the freeform
+merge and ingestion prompts — a coarse conflict-scoping bug, two ingestion facts that seemed
+dropped by the new prompts.
+
+**Discovery:** Before touching the pool-heating conflict-scoping bug, ran the *unmodified* prompt
+3 times against the same real source data: 1/3 runs collapsed everything into one conflict blob,
+1/3 scoped it correctly. This proved the bug was model non-determinism interacting with a
+misleading worked example already baked into the prompt — not a regression introduced by any of
+this session's earlier grounding fixes. The same re-run-unmodified check on two other suspected
+ingestion "regressions" (a WiFi-delivery fact, a booking-policy fact) showed both were actually
+present when re-tested — one-off misses on the original baseline run, not real bugs. Treating
+either as confirmed without this check would have meant "fixing" things that weren't broken, and
+in the pool-heating case, chasing the wrong theory entirely (a regression) instead of the real one
+(a misleading example, present all along).
+
+**Impact:** Made this an explicit, named step (Step 0) in `FIX_VERIFY_PROTOCOL.md`, ahead of FMEA:
+reproduce against real data, trace to the literal mechanism, then isolate the variable by
+re-running the unmodified code multiple times before accepting any diagnosis. Also extracted a
+project-agnostic version to `_protocols/FIX_VERIFY_PROTOCOL_UNIVERSAL.md` so other AG projects get
+the same discipline without depending on the-ingestor's own test infrastructure.
+
+**Global Candidate:** Yes — this is a general debugging discipline, not specific to LLM prompts or
+this project. Already promoted structurally via `FIX_VERIFY_PROTOCOL_UNIVERSAL.md`.
+
+---
+
+## 2026-09-29 — A prompt's own worked example can silently teach the wrong behavior, even when the surrounding rules are correct
+
+**Context:** Root-causing why the merge sometimes bundled a settled fact (tiered pool-heating
+packages) together with a genuinely disputed one (a single-night rate) into one `_conflict` blob.
+
+**Discovery:** `MERGER_SYSTEM_PROMPT`'s own worked example for conflict-report generation — using
+data almost identical to this exact real property's real numbers — modeled exactly the wrong
+(coarse) scoping: 4 different pricing figures bundled into one question. The surrounding rule text
+("flag as conflict ONLY when...") was fine; the concrete example contradicted it. Confirmed this
+text was byte-identical between the OLD and NEW prompt (not introduced by any recent edit) —
+purely a pre-existing latent defect that non-deterministically won or lost against the correct
+general instruction depending on the run.
+
+**Impact:** Fixed by rewriting the example to demonstrate the correct behavior, not just adding
+more abstract rule text — a model appears to weight a concrete worked example at least as heavily
+as the surrounding prose rules describing the same behavior.
+
+**Global Candidate:** Yes — worth checking on any prompt with hand-written worked examples: an
+example that predates a later rule addition can quietly keep demonstrating the old, wrong pattern
+even after the rule itself is fixed.
+
+---
+
+## 2026-09-29 — Grounding/self-critique guards can't fix a fact that's wrong but genuinely present in source — only ingestion-level accuracy can
+
+**Context:** Dos Rios's real check-in-code timing rule was subtly wrong in `ingested_markdown`
+itself (resolved against the wrong nearby absolute time). Investigated why neither the merge's
+conflict-detection nor the new self-grounding critique pass (Phase 4) caught it.
+
+**Discovery:** Conflict-detection requires two disagreeing sources — here, the scraped source
+never mentioned check-in codes at all, so there was nothing to disagree with. The self-grounding
+critique pass checks whether a claim is *supported by source*, not whether the source itself is
+*correct* — since the wrong phrasing was verbatim-present in `ingested_markdown`, the critique pass
+correctly judged it grounded. Both mechanisms are structurally blind to this failure class by
+design, not by a bug in either.
+
+**Impact:** Confirms ingestion-level accuracy and merge-level grounding are complementary, not
+substitutes — a merge-level guard can prevent invention, but cannot resurrect or correct a fact
+that ingestion already got wrong. The actual fix for this class of bug has to happen at ingestion.
+
+**Global Candidate:** Yes — applies to any multi-stage extract→verify pipeline (RAG or otherwise):
+a downstream "check against source" pass has a hard ceiling at whatever accuracy the source itself
+carries.
+
+---
+
+## 2026-09-29 — Audit every Gemini JSON-producing call for `response_mime_type`, don't assume a sibling call already covers it
+
+**Context:** A real merge call crashed outright on a malformed (truncated mid-token) Gemini
+response, with no retry, during Phase 3/4 real-data testing.
+
+**Discovery:** `_run_freeform_merge`'s main call was the only one of `gemini_merge_resolve.py`'s
+3 JSON-producing Gemini calls not using `response_mime_type="application/json"` — both
+`_extract_universal_fields` and the newer critique-pass call already did. `response_mime_type`
+forces Gemini's constrained decoding to guarantee syntactically valid JSON even without a
+`response_schema`; its absence here was the actual gap, not something to patch with more retries
+alone (a retry-from-scratch is still needed as a backstop for genuine output truncation, which JSON
+mode alone doesn't prevent).
+
+**Impact:** Added the missing flag plus a bounded retry-from-scratch. When a file has multiple
+Gemini calls each parsing JSON from a response, check that ALL of them set `response_mime_type` —
+it's easy for one to be added when the pattern is established and an earlier call to be missed or
+predate the convention.
+
+**Global Candidate:** Yes — a concrete, checkable item for any project making multiple JSON-parsing
+Gemini calls in the same file.
+
+---
+
 ## 2026-09-28 — Aggregate accuracy scores hide real regressions; a manual old-vs-new side-by-side catches what scoring doesn't
 
 **Context:** Rewriting the scraper's Gemini call from markdown prose to `response_schema`-

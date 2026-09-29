@@ -8,6 +8,10 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-09-29 | Re-run the unmodified code multiple times before accepting a "regression" diagnosis — killed 2 false regressions and found the real cause of a 3rd this session | debugging, root-cause, fix-verify-protocol, methodology, global-candidate |
+| 2026-09-29 | A prompt's own worked example can silently teach the wrong behavior even when the surrounding rule text is correct — check examples separately when auditing a prompt | llm-prompting, gemini-merge, conflict-detection, prompt-engineering, global-candidate |
+| 2026-09-29 | Grounding/self-critique guards can't fix a fact that's wrong-but-present in source — only ingestion-level accuracy can; downstream "check against source" passes inherit the source's own ceiling | grounding, hallucination, ingestion, merge, rag, global-candidate |
+| 2026-09-29 | Audit every Gemini JSON-producing call for `response_mime_type` in the same file — one missing it caused an unretried crash while its siblings already had it | gemini, json-mode, reliability, gemini-merge, global-candidate |
 | 2026-09-28 | Aggregate accuracy scores hide real regressions — manual old-vs-new side-by-side + real production-data validation caught 2 real gaps + a live bug an aggregate score missed | validation, llm-pipeline, testing, methodology, global-candidate |
 | 2026-09-28 | QUEUE.md item sat stale 2 weeks after its bug was fixed as a side effect of unrelated work — added a `touches:` convention + wrap_up.sh nudge | queue, staleness, process, wrap-up, recurrence |
 | 2026-09-25 | Sentry Flutter auto-capture verification needs a real triggered error inside `SentryFlutter.init`'s `appRunner` zone, not a direct `captureException()` call | sentry, flutter, zones, playwright, verification |
