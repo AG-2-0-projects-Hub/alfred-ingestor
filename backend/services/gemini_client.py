@@ -318,9 +318,27 @@ def _inline_part(data: bytes, mime_type: str) -> types.Part:
 _INGEST_CALL_TIMEOUT_S = 35
 _INGEST_CALL_ATTEMPTS = 2
 
+# Large real files (e.g. a 60-page PDF chat export) are legitimately slow to
+# process, not hung -- confirmed live 2026-09-29 with Dos Rios's real ~5MB
+# PDF, which was borderline on the ceiling above (non-deterministic
+# pass/fail: timed out once, succeeded on retry, succeeded outright other
+# times). A single longer attempt fits that case better than gambling on a
+# 2nd short one; worst case (70s) still stays comfortably under
+# ingest_worker.py's 90s outer per-file watchdog, with margin left for the
+# surrounding download/DB work. 3 MB as the cutoff sits between two real
+# observed points this session: Sta Prisca's 2.86 MB PDF processed cleanly
+# within 35s every time; Dos Rios's 4.97 MB PDF was the one that wasn't.
+_LARGE_FILE_BYTES = 3 * 1024 * 1024
+_LARGE_FILE_CALL_TIMEOUT_S = 70
+_LARGE_FILE_CALL_ATTEMPTS = 1
 
-async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
+
+async def _generate(system_instruction: str, user_prompt: str, parts: list, data_size_bytes: int = 0) -> str:
     client = _get_client()
+    if data_size_bytes > _LARGE_FILE_BYTES:
+        call_timeout, attempts = _LARGE_FILE_CALL_TIMEOUT_S, _LARGE_FILE_CALL_ATTEMPTS
+    else:
+        call_timeout, attempts = _INGEST_CALL_TIMEOUT_S, _INGEST_CALL_ATTEMPTS
     response = await genai_factory.generate_with_retry(
         client,
         model=MODEL,
@@ -328,8 +346,8 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
-        call_timeout=_INGEST_CALL_TIMEOUT_S,
-        attempts=_INGEST_CALL_ATTEMPTS,
+        call_timeout=call_timeout,
+        attempts=attempts,
     )
     return response.text
 
@@ -337,7 +355,7 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
 async def process_with_prompt_a(data: bytes, mime_type: str) -> str:
     """Prompt A: PDF / document, sent inline."""
     parts = [types.Part(text=USER_PROMPT_A), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
+    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_a_text(extracted_text: str) -> str:
@@ -349,13 +367,13 @@ async def process_with_prompt_a_text(extracted_text: str) -> str:
 async def process_with_prompt_b(data: bytes, mime_type: str) -> str:
     """Prompt B: image, sent inline."""
     parts = [types.Part(text=USER_PROMPT_B), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
+    return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_c(data: bytes, mime_type: str) -> str:
     """Prompt C: audio, sent inline."""
     parts = [types.Part(text=USER_PROMPT_C), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
+    return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_d(table_text: str) -> str:

@@ -353,6 +353,15 @@ Parked; detail when M3 is in sight.
 - **Dynamic pricing with a heat-map view** — recommended nightly pricing across dates/properties as a visual heat map.
 - **Financial overview (per property)** — a simple, non-official rollup for the host: income minus taxes, cleaning fee, Airbnb fee, etc. Not accounting-grade, just a general picture. Start simple (basic subtraction from numbers already available or host-entered); more robust reporting later if it proves valuable. Founder-flagged 2026-09-22.
 - Cleaning-schedule automation, multi-language expansion (candidates).
+- **Cross-model-family ensemble check for hallucination reduction** — during the 2026-09-29
+  ingestion/merge grounding work, considered adding a second model to cross-check high-risk
+  extractions (photos, ambiguous facts). Rejected for now: OpenRouter/a second vendor breaks the
+  single-provider preference; same-family Gemini Flash+Pro ensembling gives a weaker signal (shared
+  blind spots). **Claude 3.5 Sonnet is available natively on Vertex AI Model Garden** — this would
+  give genuine cross-model-family diversity while staying entirely on Google/Vertex infra,
+  satisfying both constraints at once. Not started or scoped — noted here for whenever hallucination
+  rate needs a second line of defense beyond the prompt-grounding + self-critique-pass approach
+  shipped this session.
 
 ---
 
