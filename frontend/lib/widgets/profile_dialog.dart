@@ -44,6 +44,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _nameController = TextEditingController();
   final _nicknameController = TextEditingController();
   final _bioController = TextEditingController();
+  final _notificationEmailController = TextEditingController();
+  bool _escalationEmailEnabled = false;
   String? _avatarUrl;
   bool _loading = true;
   bool _loadError = false;
@@ -77,6 +79,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _nameController.dispose();
     _nicknameController.dispose();
     _bioController.dispose();
+    _notificationEmailController.dispose();
     _telegramPollTimer?.cancel();
     _tgHelpOverlay?.remove();
     super.dispose();
@@ -88,7 +91,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
       final row = await _db
           .from('host_profiles')
           .select('display_name, nickname, bio, avatar_url, telegram_chat_id, '
-              'active_conversation_booking_id')
+              'active_conversation_booking_id, notification_email, '
+              'escalation_email_enabled')
           .eq('id', _uid ?? '')
           .maybeSingle();
       // row == null here is a clean "no profile row yet" — expected for a
@@ -101,6 +105,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _telegramChatId = row['telegram_chat_id'] as String?;
         _activeConversationBookingId =
             row['active_conversation_booking_id'] as String?;
+        _notificationEmailController.text =
+            row['notification_email'] as String? ?? '';
+        _escalationEmailEnabled = row['escalation_email_enabled'] as bool? ?? false;
       }
     } catch (_) {
       // A real failure (network, RLS) is NOT the same as "no row yet" — that
@@ -167,6 +174,13 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Future<void> _save() async {
     final uid = _uid;
     if (uid == null) return;
+    final notificationEmail = _notificationEmailController.text.trim();
+    if (_escalationEmailEnabled && !notificationEmail.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email to enable email alerts.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       await _db.from('host_profiles').upsert({
@@ -177,6 +191,19 @@ class _ProfileDialogState extends State<ProfileDialog> {
         'avatar_url': _avatarUrl,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
+      try {
+        // Separate endpoint (not the direct upsert above): saving this pair
+        // needs server-side logic — minting an unsubscribe token and sending
+        // a receipt email on activation — that an RLS-direct write can't do.
+        // Non-fatal on failure: the rest of the profile already saved.
+        final token = _db.auth.currentSession?.accessToken;
+        await ApiClient.postJson('/api/host/escalation-email', {
+          'email': notificationEmail,
+          'enabled': _escalationEmailEnabled,
+        }, bearer: token);
+      } catch (_) {
+        // Swallowed — see comment above.
+      }
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -666,7 +693,37 @@ class _ProfileDialogState extends State<ProfileDialog> {
                       key: _telegramSectionKey,
                       child: _buildTelegramSection(palette),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 20),
+                    _label('Email alerts', palette),
+                    Semantics(
+                      label: 'Notification email',
+                      child: TextField(
+                        controller: _notificationEmailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          hintText: 'Email for guest-escalation alerts',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    CheckboxListTile(
+                      value: _escalationEmailEnabled,
+                      onChanged: (v) =>
+                          setState(() => _escalationEmailEnabled = v ?? false),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        'Send escalation notifications via Email',
+                        style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                      ),
+                    ),
+                    Text(
+                      'Every alert includes an unsubscribe link.',
+                      style: TextStyle(fontSize: 11, color: palette.textMuted),
+                    ),
+                    const SizedBox(height: 8),
                     const Divider(),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(

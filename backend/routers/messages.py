@@ -3,15 +3,17 @@ import logging
 import os
 import random
 import re
+import secrets
 import string
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from services import (
-    burst_buffer, guardrails, learning_triage, supabase_client, gemini_messenger,
-    task_queue, telegram_client, welcome, whatsapp_client,
+    burst_buffer, email_client, guardrails, learning_triage, supabase_client,
+    gemini_messenger, task_queue, telegram_client, welcome, whatsapp_client,
 )
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
 
@@ -103,6 +105,81 @@ def _build_host_alert_text(
     lines.append("")
     lines.append(f"Full conversation: {host_chat_url}")
     return "\n".join(lines)
+
+
+def _build_host_alert_email_html(
+    property_name: str | None, escalation_reason: str | None,
+    guest_message: str, draft_reply: str, host_chat_url: str, unsub_url: str,
+) -> str:
+    """Compose the HTML body of a host escalation email. Guest/AI content is
+    freeform and untrusted — everything interpolated here is escaped."""
+    parts = [f"<p><b>{_escape_html(property_name or 'Your property')}</b></p>"]
+    if escalation_reason:
+        parts.append(f"<p>Reason: {_escape_html(escalation_reason.replace('_', ' '))}</p>")
+    parts.append(f"<p>Guest: “{_escape_html(guest_message)}”</p>")
+    if draft_reply:
+        parts.append(f"<p>Alfred's draft: “{_escape_html(draft_reply)}”</p>")
+    parts.append(f'<p><a href="{host_chat_url}">Open full conversation</a></p>')
+    parts.append(
+        '<p style="color:#888;font-size:12px;margin-top:24px">'
+        f'<a href="{unsub_url}" style="color:#888">Stop these email alerts</a>'
+        "</p>"
+    )
+    return "\n".join(parts)
+
+
+async def _notify_host_escalation(
+    conversation_id: str, owner_id: str | None, property_name: str | None,
+    guest_message: str, draft_reply: str, host_chat_url: str,
+    escalation_reason: str | None, icon: str, buttons: list[tuple[str, str]],
+) -> None:
+    """Best-effort host alert across every channel the host has configured.
+    Telegram and email are independent — both fire if both are set up, and
+    one channel's failure never suppresses the other or breaks the guest
+    reply (see FIX_VERIFY_PROTOCOL FMEA, host-escalation-email plan)."""
+    if not owner_id:
+        return
+
+    try:
+        host_chat_id = await asyncio.to_thread(
+            supabase_client.get_host_telegram_chat_id, owner_id
+        )
+        if host_chat_id:
+            alert_text = _build_host_alert_text(
+                property_name, escalation_reason, guest_message, draft_reply,
+                host_chat_url, icon=icon,
+            )
+            sent_message_id = await telegram_client.send_alert(
+                host_chat_id, alert_text, buttons,
+            )
+            if sent_message_id:
+                await asyncio.to_thread(
+                    supabase_client.update_conversation,
+                    conversation_id, host_alert_message_id=sent_message_id,
+                )
+    except Exception as exc:
+        log.warning("telegram host alert failed for conversation=%s: %s",
+                    conversation_id, exc)
+
+    try:
+        settings = await asyncio.to_thread(
+            supabase_client.get_host_notification_settings, owner_id
+        )
+        email = settings.get("notification_email")
+        token = settings.get("escalation_email_unsub_token")
+        if email and settings.get("escalation_email_enabled") and token:
+            backend_url = os.environ.get("BACKEND_URL", "").strip().rstrip("/")
+            unsub_url = f"{backend_url}/api/host/escalation-email/unsubscribe?token={token}"
+            html = _build_host_alert_email_html(
+                property_name, escalation_reason, guest_message, draft_reply,
+                host_chat_url, unsub_url,
+            )
+            await email_client.send_email(
+                email, f"{icon} Alfred needs you — {property_name or 'your property'}", html,
+            )
+    except Exception as exc:
+        log.warning("email host alert failed for conversation=%s: %s",
+                    conversation_id, exc)
 
 
 class WebMediaItem(BaseModel):
@@ -291,44 +368,25 @@ async def process_guest_message(
         # alert. Forward each one the same way, with its own Mark Resolved
         # button, and re-point host_alert_message_id at it so a reply-to
         # always targets the guest's latest message.
-        try:
-            owner_id = (property_data or {}).get("owner_id")
-            host_chat_id = (
-                await asyncio.to_thread(
-                    supabase_client.get_host_telegram_chat_id, owner_id
-                )
-                if owner_id else None
-            )
-            if host_chat_id:
-                followup_text = message or (
-                    (f"[{image_count} images]" if image_count > 1 else "[image]")
-                    if media_kind == "image"
-                    else "[voice message]" if media_kind == "audio" else ""
-                )
-                property_name, _ = _resolve_identity(property_data)
-                frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
-                    .strip().rstrip("/")
-                host_chat_url = (
-                    f"{frontend_url}/chat-live?booking={booking_id}"
-                    f"&property={property_data['id']}"
-                )
-                alert_text = _build_host_alert_text(
-                    property_name or (property_data or {}).get("name"),
-                    None, followup_text, "", host_chat_url, icon="💬",
-                )
-                sent_message_id = await telegram_client.send_alert(
-                    host_chat_id, alert_text,
-                    [("✅ Mark Resolved", f"resolved_{booking_id}")],
-                )
-                if sent_message_id:
-                    await asyncio.to_thread(
-                        supabase_client.update_conversation,
-                        conversation["id"],
-                        host_alert_message_id=sent_message_id,
-                    )
-        except Exception as exc:
-            log.warning("telegram host follow-up alert failed for booking=%s: %s",
-                        booking_id, exc)
+        owner_id = (property_data or {}).get("owner_id")
+        followup_text = message or (
+            (f"[{image_count} images]" if image_count > 1 else "[image]")
+            if media_kind == "image"
+            else "[voice message]" if media_kind == "audio" else ""
+        )
+        property_name, _ = _resolve_identity(property_data)
+        frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+            .strip().rstrip("/")
+        host_chat_url = (
+            f"{frontend_url}/chat-live?booking={booking_id}"
+            f"&property={property_data['id']}"
+        )
+        await _notify_host_escalation(
+            conversation["id"], owner_id,
+            property_name or (property_data or {}).get("name"),
+            followup_text, "", host_chat_url, None, "💬",
+            [("✅ Mark Resolved", f"resolved_{booking_id}")],
+        )
 
         return {
             "reply": None,
@@ -543,42 +601,24 @@ async def process_guest_message(
         # the host name so the caller can send it in the right order.
         property_name, host_name = _resolve_identity(property_data)
 
-        # Best-effort alert to the host's Telegram, if they've connected one —
-        # a bridge for beta hosts without the tab open (real push notifications
-        # are a separate project). Never blocks or breaks the guest-facing
-        # reply on any failure (see FIX_VERIFY_PROTOCOL FMEA for this change).
-        try:
-            owner_id = (property_data or {}).get("owner_id")
-            host_chat_id = (
-                await asyncio.to_thread(
-                    supabase_client.get_host_telegram_chat_id, owner_id
-                )
-                if owner_id else None
-            )
-            if host_chat_id:
-                frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
-                    .strip().rstrip("/")
-                host_chat_url = (
-                    f"{frontend_url}/chat-live?booking={booking_id}"
-                    f"&property={property_data['id']}"
-                )
-                alert_text = _build_host_alert_text(
-                    property_name or (property_data or {}).get("name"),
-                    escalation_reason, message, reply, host_chat_url,
-                )
-                sent_message_id = await telegram_client.send_alert(
-                    host_chat_id, alert_text,
-                    [("✅ Mark Resolved", f"resolved_{booking_id}")],
-                )
-                if sent_message_id:
-                    await asyncio.to_thread(
-                        supabase_client.update_conversation,
-                        conversation["id"],
-                        host_alert_message_id=sent_message_id,
-                    )
-        except Exception as exc:
-            log.warning("telegram host alert failed for booking=%s: %s",
-                        booking_id, exc)
+        # Best-effort alert to the host — Telegram and/or email, whichever
+        # they've configured. A bridge for beta hosts without the tab open
+        # (real push notifications are a separate project). Never blocks or
+        # breaks the guest-facing reply on any failure (see FIX_VERIFY_PROTOCOL
+        # FMEA for this change).
+        owner_id = (property_data or {}).get("owner_id")
+        frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+            .strip().rstrip("/")
+        host_chat_url = (
+            f"{frontend_url}/chat-live?booking={booking_id}"
+            f"&property={property_data['id']}"
+        )
+        await _notify_host_escalation(
+            conversation["id"], owner_id,
+            property_name or (property_data or {}).get("name"),
+            message, reply, host_chat_url, escalation_reason, "🔔",
+            [("✅ Mark Resolved", f"resolved_{booking_id}")],
+        )
 
     return {
         "reply": reply,
@@ -953,6 +993,74 @@ async def _resolve_conversation_core(booking_id: str) -> dict:
         log.warning("telegram lock clear failed for booking=%s: %s", booking_id, exc)
 
     return {"status": "resolved", "learned": learned_entry}
+
+
+class EscalationEmailRequest(BaseModel):
+    email: str
+    enabled: bool
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.post("/host/escalation-email")
+async def set_escalation_email(
+    req: EscalationEmailRequest, authorization: str | None = Header(default=None),
+):
+    """Save a host's email-escalation opt-in. The only write path for these
+    two fields (the Profile dialog writes its other fields directly via RLS) —
+    this needs server-side logic the direct-write path can't do: a fresh
+    unsubscribe token on activation, and a receipt email that only fires on a
+    genuine activation or address change, never on an unrelated profile save."""
+    host_id = await _require_host(authorization)
+    email = req.email.strip()
+    if req.enabled and not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="A valid email is required to enable this.")
+
+    current = await asyncio.to_thread(
+        supabase_client.get_host_notification_settings, host_id
+    )
+    activating = req.enabled and (
+        not current["escalation_email_enabled"]
+        or current["notification_email"] != (email or None)
+    )
+    # Regenerated on every (re)activation so a stale link from a prior
+    # activation can't unexpectedly toggle a new one back off.
+    token = secrets.token_urlsafe(24) if activating else current["escalation_email_unsub_token"]
+
+    await asyncio.to_thread(
+        supabase_client.update_host_escalation_email,
+        host_id, email or None, req.enabled, token,
+    )
+
+    if activating:
+        backend_url = os.environ.get("BACKEND_URL", "").strip().rstrip("/")
+        unsub_url = f"{backend_url}/api/host/escalation-email/unsubscribe?token={token}"
+        await email_client.send_email(
+            email, "Alfred email alerts are on",
+            "<p>You'll now get an email here whenever a guest needs a host's "
+            "attention and Alfred is waiting on you.</p>"
+            f'<p style="color:#888;font-size:12px;margin-top:24px">'
+            f'<a href="{unsub_url}" style="color:#888">Stop these email alerts</a></p>',
+        )
+
+    return {"status": "saved"}
+
+
+@router.get("/host/escalation-email/unsubscribe", response_class=HTMLResponse)
+async def unsubscribe_escalation_email(token: str):
+    """Public, no login required — the token itself is the authorization, so
+    a third party who received alerts for an address they don't own (a host's
+    typo) can stop them without needing account access."""
+    host_id = await asyncio.to_thread(supabase_client.get_host_id_by_unsub_token, token)
+    if host_id:
+        await asyncio.to_thread(
+            supabase_client.update_host_escalation_email, host_id, None, False, None,
+        )
+        body = "You've been unsubscribed from Alfred escalation emails."
+    else:
+        body = "This unsubscribe link is no longer valid — you're already unsubscribed."
+    return f"<html><body><p>{body}</p></body></html>"
 
 
 @router.post("/conversations/resolve")
