@@ -1186,6 +1186,96 @@ async def _FREEFORM_MERGE_TEST() -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+# ── Self-grounding critique pass (freeform merge output only) ─────────────────
+# Brainstormed with the founder 2026-09-29 after real-property testing found
+# the freeform merge fabricating a bathroom shower on Sta Prisca's real data
+# even with fe4dba0's prompt-only grounding fix in place -- unlike
+# UNIVERSAL_FIELDS_SCHEMA's _guard_coordinates / _verify_grounded_strings,
+# freeform output has no fixed schema, so no deterministic code-level check
+# was possible until now. One extra Gemini call: given the freeform output +
+# the same source it was built from, remove only specific claims that have
+# zero support anywhere in source. Deliberately schema-free (no predefined
+# amenity fields, per the founder's explicit rejection of static per-room
+# fields) -- verifies whatever the model itself already claimed, so it
+# scales to any property's unique amenities without a static checklist.
+# Validated 2 independent rounds (2026-09-29) against real Sta Prisca/
+# Bungalow/Dos Rios full-pipeline output -- see
+# _Context/full_fidelity_harness/grounding_critique_test.py. Runs on the
+# freeform half only, before the universal-fields deep-merge -- that half
+# already has its own deterministic guard, so re-critiquing it would be
+# redundant cost.
+GROUNDING_CRITIQUE_SYSTEM_PROMPT = """\
+You are a fact-checker. You will be given SOURCE (the original documents a property's \
+knowledge base was built from) and OUTPUT (a JSON extraction from SOURCE). Your job: find any \
+SPECIFIC, CONCRETE claim in OUTPUT that is not actually supported anywhere in SOURCE, and remove \
+ONLY that specific claim -- keep everything else in OUTPUT exactly as it is: same structure, \
+same keys, same wording elsewhere.
+
+A "specific concrete claim" is something checkable against SOURCE: a named object/amenity/\
+feature, a material, a color, a brand, a number, a name, a specific policy detail. It is NOT an \
+interpretive summary, a paraphrase, a translation, or a reasonable structural/section label (e.g. \
+calling a section "bathroom" is fine even if that exact word isn't in SOURCE, as long as the \
+section is about a real bathroom SOURCE describes).
+
+If an unsupported detail is embedded INSIDE a longer sentence or list item (e.g. "sink with \
+tempered glass and a shower" when SOURCE never mentions a shower), remove only the unsupported \
+fragment and keep the rest of that value intact -- do not delete the whole field just because one \
+detail inside it is wrong.
+
+Search the ENTIRE source carefully before deciding something is unsupported -- it may be long or \
+spread across multiple documents; a fact stated once, anywhere, counts as grounded.
+
+Be conservative: only remove something you are confident has zero support. When genuinely \
+unsure, leave it -- false removals (deleting a real fact) are also a failure mode, not just \
+missed hallucinations.
+
+Respond with a single JSON object: {"cleaned_output": <OUTPUT with unsupported specific claims \
+removed/trimmed, valid JSON, same structure otherwise>, "removed_claims": [{"claim": "...", \
+"reason": "..."}]} -- removed_claims is an empty array if nothing was removed.
+"""
+
+GROUNDING_CRITIQUE_USER_TEMPLATE = """\
+SOURCE:
+{source}
+
+OUTPUT:
+{output}
+"""
+
+
+async def _ground_freeform_output(output: dict, source_text: str) -> dict:
+    """Fails soft: any error here (bad JSON, timeout, etc.) returns the
+    original, un-critiqued output -- this pass must never be what breaks a
+    property's whole training, same fail-soft principle as the
+    universal-fields call in run_merger()."""
+    try:
+        client = _get_client()
+        user_prompt = _fill(
+            GROUNDING_CRITIQUE_USER_TEMPLATE,
+            source=source_text or "(no data)",
+            output=json.dumps(output, indent=2, ensure_ascii=False),
+        )
+        response = await genai_factory.generate_with_retry(
+            client,
+            label="merger_grounding_critique",
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+            config=types.GenerateContentConfig(
+                system_instruction=GROUNDING_CRITIQUE_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+            ),
+        )
+        result = _parse_json_response(response.text)
+        removed = result.get("removed_claims", [])
+        if removed:
+            log.info("grounding critique removed %d unsupported claim(s): %s", len(removed), removed)
+        return result["cleaned_output"]
+    except Exception as exc:
+        log.warning("grounding critique pass failed (non-fatal, keeping un-critiqued output): %s", exc)
+        sentry_sdk.capture_exception(exc)
+        return output
+
+
 async def _run_freeform_merge(
     scraped_markdown: str, ingested_markdown: str, nickname: str, curated_photos: list[dict] | None
 ) -> dict:
@@ -1205,12 +1295,15 @@ async def _run_freeform_merge(
         config=types.GenerateContentConfig(system_instruction=MERGER_SYSTEM_PROMPT),
     )
     try:
-        return _parse_json_response(response.text)
+        result = _parse_json_response(response.text)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"Gemini Merger returned invalid JSON: {exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
         ) from exc
+
+    source_text = f"{scraped_markdown or ''}\n\n{ingested_markdown or ''}"
+    return await _ground_freeform_output(result, source_text)
 
 
 async def run_merger(
@@ -1324,7 +1417,49 @@ async def run_knowledge_injection(
         ) from exc
 
 
+async def _GROUNDING_CRITIQUE_TEST() -> None:
+    """Standalone regression test for the self-grounding critique pass
+    (_ground_freeform_output), added 2026-09-29 after the Sta Prisca
+    real-property investigation found the freeform merge fabricating a
+    bathroom shower even with fe4dba0's prompt-only grounding fix in place.
+    Self-contained synthetic fixture (mirrors that real bug's shape) rather
+    than depending on the gitignored real property files used during that
+    investigation -- see _Context/full_fidelity_harness/grounding_critique_test.py
+    for the full real-data validation (2 independent rounds, passed)."""
+    source_text = (
+        "Bathroom: glass vessel sink on a frosted glass pedestal, "
+        "white toilet with the lid closed. Towels are provided in the closet."
+    )
+    planted_output = {
+        "property_info": {"nickname": "Test Villa"},
+        "amenities": {
+            "bathroom": (
+                "Glass vessel sink on a frosted glass pedestal, complete with a "
+                "tempered glass walk-in shower, and a white toilet."
+            ),
+            "linens": "Towels are provided in the closet.",
+        },
+    }
+    cleaned = await _ground_freeform_output(planted_output, source_text)
+    flattened = _flatten_to_text(cleaned)
+    failures = []
+    if "shower" in flattened:
+        failures.append(f"expected the fabricated shower to be stripped, got: {cleaned}")
+    if "frosted glass pedestal" not in flattened or "toilet" not in flattened:
+        failures.append(f"expected the real sink/toilet facts to survive, got: {cleaned}")
+    if "towels are provided in the closet" not in flattened:
+        failures.append(f"expected the unrelated linens fact to survive untouched, got: {cleaned}")
+
+    if failures:
+        print("_GROUNDING_CRITIQUE_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_GROUNDING_CRITIQUE_TEST: PASS")
+
+
 if __name__ == "__main__":
     asyncio.run(_UNIVERSAL_FIELDS_TEST())
     asyncio.run(_FREEFORM_MERGE_TEST())
+    asyncio.run(_GROUNDING_CRITIQUE_TEST())
 
