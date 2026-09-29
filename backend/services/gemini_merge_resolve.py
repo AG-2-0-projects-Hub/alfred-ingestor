@@ -1293,20 +1293,45 @@ async def _run_freeform_merge(
         nickname=nickname or "(none provided)",
         curated_photos=json.dumps(curated_photos, indent=2, ensure_ascii=False) if curated_photos else "(none)",
     )
-    response = await genai_factory.generate_with_retry(
-        client,
-        label="merger_freeform",
-        model=MODEL,
-        contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
-        config=types.GenerateContentConfig(system_instruction=MERGER_SYSTEM_PROMPT),
-    )
-    try:
-        result = _parse_json_response(response.text)
-    except json.JSONDecodeError as exc:
+    # response_mime_type forces Gemini's constrained decoding to guarantee
+    # syntactically valid JSON -- matches _extract_universal_fields and
+    # _ground_freeform_output, which already use it (with or without a fixed
+    # response_schema; this call deliberately has no schema, same as the
+    # critique call, since the freeform structure is dynamic by design).
+    # Confirmed live (2026-09-29) this was the only one of the three
+    # JSON-producing calls in this file missing it, and a real merge crashed
+    # outright on a malformed (truncated mid-token) response with zero retry
+    # -- generate_with_retry only retries network stalls/429s, not a 200 OK
+    # with bad JSON content. The loop below is a backstop for whatever JSON
+    # mode alone doesn't prevent (e.g. genuine output truncation) -- a fresh
+    # generation, not a re-parse of the same broken text, since re-parsing
+    # can't fix truncation.
+    last_exc: json.JSONDecodeError | None = None
+    for attempt in range(2):
+        response = await genai_factory.generate_with_retry(
+            client,
+            label="merger_freeform",
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+            config=types.GenerateContentConfig(
+                system_instruction=MERGER_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+            ),
+        )
+        try:
+            result = _parse_json_response(response.text)
+            break
+        except json.JSONDecodeError as exc:
+            last_exc = exc
+            log.warning(
+                "merger_freeform: invalid JSON on attempt %d/2 (%s) -- %s",
+                attempt + 1, exc, "retrying" if attempt == 0 else "giving up",
+            )
+    else:
         raise ValueError(
-            f"Gemini Merger returned invalid JSON: {exc}\n"
+            f"Gemini Merger returned invalid JSON after 2 attempts: {last_exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
-        ) from exc
+        ) from last_exc
 
     source_text = f"{scraped_markdown or ''}\n\n{ingested_markdown or ''}"
     return await _ground_freeform_output(result, source_text)
