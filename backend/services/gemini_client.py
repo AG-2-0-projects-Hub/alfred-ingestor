@@ -101,6 +101,7 @@ GROUNDING RULES (apply throughout):
 - State only what the document actually says. When recording a specific fact (a code, price, name, time, or place), stick to the exact wording or number given — do not fill a gap using outside/general knowledge about the subject, even something you're confident is true (e.g. if the document mentions a landmark or partial address without naming the city, do not add the city yourself).
 - If something is genuinely unclear, ambiguous, or not stated, say so in the Document Gaps & Questions section — never write "N/A", "Not specified", or a guessed value in its place anywhere else in the output.
 - Preserve conditional or relative language exactly as written. If a rule is stated relative to a variable (e.g. "sent 1 hour before YOUR arrival", "due within 24 hours of checkout"), keep it tied to that variable in your output — do not re-resolve it against a different, fixed value stated elsewhere in the document (e.g. a separately-mentioned check-in time), even if that value appears nearby or seems related. Doing so turns a correct conditional rule into a wrong absolute one.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement. If an unlabeled party (e.g. the host in a conversation export) never announces their own name, but multiple other independent messages consistently address or refer to that same party by one name and no other, state that name as fact — the evidence is entirely within the document, this is not outside/world knowledge. Do not omit or hedge an identity that is this clearly and repeatedly evidenced just because it was never phrased as a formal "Name:" declaration.
 
 REMEMBER: Let the document tell you what categories it needs. A conversation about pool maintenance shouldn't be forced into "House Rules" - create a "Pool Maintenance and Heating" section instead. Be thorough and capture EVERYTHING that is actually stated.\
 """
@@ -152,6 +153,7 @@ GROUNDING RULES (apply throughout):
 - Only report what is actually visible and clearly legible in the image. If text is blurry, cropped, or otherwise not confidently readable, say it's illegible rather than guessing a specific value.
 - Do not add facts from outside knowledge (a brand you recognize from a partial logo, a location you infer from a landmark) unless it is clearly and legibly shown in the image itself.
 - Preserve conditional or relative language exactly as written. If a visible instruction is relative to a variable (e.g. "1 hour before YOUR arrival"), keep it tied to that variable — do not re-resolve it against a different fixed value shown elsewhere in the image, even if it appears nearby or seems related.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement (e.g. a name/signature visible on multiple notes or labels that all clearly refer to the same person, with no other name used for them). This is grounded in what's visible, not outside knowledge — do not omit it out of over-caution.
 
 REMEMBER: Your goal is to capture EVERYTHING that is actually visible and legible. Create as many sections as needed. Be specific and thorough, but never guess at something you can't clearly make out.\
 """
@@ -219,6 +221,7 @@ GROUNDING RULES (apply throughout, in addition to the silence check above):
 - If a specific detail within the audio — a phone number, code, password, or similar — is spoken but not clearly/confidently audible, write "[unclear]" in its place in the transcript rather than your best guess. This is different from the whole-clip silence check above: it applies even when most of the audio is clearly understandable.
 - Do not fill in a detail using outside knowledge or a plausible-sounding guess — only transcribe what you can confidently make out.
 - Preserve conditional or relative language exactly as spoken. If a rule is stated relative to a variable (e.g. "1 hour before YOUR arrival"), keep it tied to that variable — do not re-resolve it against a different fixed value mentioned elsewhere in the recording, even if it's mentioned nearby or seems related.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement. If the speaker never states their own name, but is addressed by the same name multiple times by someone else in the recording, and no other name is ever used, state that name as fact — this is grounded in what's audible, not outside knowledge.
 
 REMEMBER: Capture EVERYTHING mentioned that you can actually make out. Even casual asides about the property can be valuable for guest experience — but never guess at a specific detail you didn't clearly hear.\
 """
