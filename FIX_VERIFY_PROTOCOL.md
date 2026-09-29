@@ -16,6 +16,16 @@ session if it's missing. Not a promise — a structural check.
 
 ## The sequence
 
+0. **Root-cause it, don't patch it.** Before FMEA: reproduce the actual failure against real data
+   (not a description of it), and trace it to the literal mechanism — which line, which prompt
+   section, which source text — by reading the real thing directly, never by assuming. Then
+   isolate the variable: is this really caused by what you think, or is it pre-existing/
+   non-deterministic noise? Re-run the *unmodified* code/prompt multiple times before accepting a
+   diagnosis — this step alone has killed false "regressions" that turned out to be run-to-run
+   variance rather than real bugs. Only once the mechanism is confirmed, not guessed, move to
+   FMEA — and design the eventual fix as a general principle, not a patch scoped to the one case
+   that surfaced it (if the fix can't be described without naming that specific case, it's still
+   a patch, not a root-cause fix).
 1. **FMEA, before any code.** A real failure-mode table — state × surface × data-delivery-path x  desired final state,
    not four shallow bullets — covering what this fix touches and how it can fail. Explicitly
    state whether automated test coverage already exists for this area. Silence on that question
