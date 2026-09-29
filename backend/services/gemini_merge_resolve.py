@@ -105,6 +105,16 @@ DO NOT flag as conflict:
 - Minor coordinate precision differences (<0.001 degrees are rounding—use most precise)
 - Complementary information that adds detail rather than contradicts
 
+**Scope every conflict to the narrowest value that is actually disputed.** If a broader topic
+has several sub-values and only ONE of them has genuinely different numbers across sources, flag
+ONLY that sub-value as `_conflict` — the other sub-values are settled facts and must stay as
+plain data outside the conflict object, not bundled into it. Example: pool heating has a tiered
+multi-hour package ($1,300/$1,900/$2,500 for 24/36/48h — stated the same way everywhere, settled)
+and a separate single-night rate ($600 vs $650 vs $680 — genuinely different across sources).
+Flag `pricing.pool_heating.single_night_rate` as the conflict; keep `pricing.pool_heating.
+tiered_packages` as plain, non-conflicting data. Bundling both into one `pricing.pool_heating`
+conflict makes a settled fact look unresolved to the host for no reason.
+
 **Conflict Format:**
 {
   "field_name": {
@@ -130,7 +140,9 @@ For EACH conflict flagged, create an entry with:
 
 Field Specifications:
 
-id: The JSON path to the conflicting field (e.g., "capacity.max_guests", "pricing.pool_heating")
+id: The JSON path to the SPECIFIC conflicting sub-value (e.g., "capacity.max_guests",
+"pricing.pool_heating.single_night_rate" — not the whole "pricing.pool_heating" topic when only
+one sub-value within it is actually disputed)
 question: A clear, actionable question the host can answer (match the language of the questions to the language of the property listing)
 options: Array of ALL conflicting values discovered + ALWAYS include "other" as the final option (allows host to input free text if none of the values are correct)
 context: 1-2 sentences explaining why this conflict exists or why it matters to guests (neutral tone, don't favor any option)
@@ -145,16 +157,10 @@ Example:
       "context": "El anuncio de Airbnb muestra 5 huéspedes máximo, pero los mensajes automáticos mencionan 3. Esto afecta las reservas y el acceso a la comunidad."
     },
     {
-      "id": "pricing.pool_heating",
-      "question": "Encontramos 4 modelos de precios diferentes para calentar la alberca. ¿Cuál es el modelo actual?",
-      "options": [
-        "Modelo escalonado: $1300-$2500 según horas",
-        "Mantenimiento nocturno: $650/noche",
-        "Ciclo alternativo: $600/12 horas",
-        "Pago único: $680/día",
-        "other"
-      ],
-      "context": "Se encontraron diferentes modelos de precios en las conversaciones con huéspedes. La claridad en este punto ayuda a evitar confusiones durante la reserva."
+      "id": "pricing.pool_heating.single_night_rate",
+      "question": "Encontramos 3 tarifas diferentes para el ciclo de calentamiento de 12 horas/noche. ¿Cuál es la tarifa actual?",
+      "options": ["$600 MXN", "$650 MXN", "$680 MXN", "other"],
+      "context": "Las conversaciones con huéspedes mencionan tarifas distintas para el mismo ciclo de 12 horas. Nota: los paquetes escalonados de 24/36/48 horas ($1,300/$1,900/$2,500) se mencionan de forma consistente en todas las fuentes y NO forman parte de este conflicto — se guardan como dato ya resuelto."
     }
   ]
 }
@@ -1417,6 +1423,66 @@ async def run_knowledge_injection(
         ) from exc
 
 
+def _find_conflict_blobs(obj, found=None) -> list:
+    """Recursively collect every dict with `_conflict: true`, for asserting
+    what did/didn't get swept into a conflict."""
+    if found is None:
+        found = []
+    if isinstance(obj, dict):
+        if obj.get("_conflict") is True:
+            found.append(obj)
+        for v in obj.values():
+            _find_conflict_blobs(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            _find_conflict_blobs(v, found)
+    return found
+
+
+async def _CONFLICT_SCOPING_TEST() -> None:
+    """Regression test added 2026-09-29 after real Bungalow data showed the
+    merge sometimes bundling a settled multi-tier fact together with a
+    genuinely disputed single value into ONE _conflict blob -- traced to the
+    prompt's own worked example modeling that exact over-broad scoping.
+    Self-contained synthetic fixture (mirrors the real bug's shape: a
+    consistently-stated tiered structure + one value disputed across
+    sources) rather than depending on gitignored real property files."""
+    scraped_markdown = "Pool heating available for an extra fee (amount not specified in listing)."
+    ingested_markdown = """\
+Host automated message: "Pool heating packages: 24 hours = $500 MXN, 36 hours = $700 MXN, \
+48 hours = $900 MXN. These are our standard heating packages, available year-round."
+
+Guest conversation, Monday: "For just one night of pool heating it's $200 MXN."
+
+Guest conversation, Friday (different guest): "One night of pool heating costs $250 MXN."
+"""
+    result = await _run_freeform_merge(scraped_markdown, ingested_markdown, "Test Villa", None)
+    flattened = _flatten_to_text(result)
+    conflicts = _find_conflict_blobs(result)
+    conflict_text = " ".join(json.dumps(c, ensure_ascii=False) for c in conflicts)
+
+    failures = []
+    for settled_value in ("500", "700", "900"):
+        if settled_value in conflict_text:
+            failures.append(
+                f"settled tiered value {settled_value!r} was swept into a _conflict blob: {conflict_text[:300]}"
+            )
+        if settled_value not in flattened:
+            failures.append(f"settled tiered value {settled_value!r} missing from output entirely")
+    if not ("200" in conflict_text and "250" in conflict_text):
+        failures.append(
+            f"expected the genuinely disputed $200/$250 rate to be flagged as a _conflict, "
+            f"got conflicts: {conflict_text[:300] or '(none)'}"
+        )
+
+    if failures:
+        print("_CONFLICT_SCOPING_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_CONFLICT_SCOPING_TEST: PASS")
+
+
 async def _GROUNDING_CRITIQUE_TEST() -> None:
     """Standalone regression test for the self-grounding critique pass
     (_ground_freeform_output), added 2026-09-29 after the Sta Prisca
@@ -1461,5 +1527,6 @@ async def _GROUNDING_CRITIQUE_TEST() -> None:
 if __name__ == "__main__":
     asyncio.run(_UNIVERSAL_FIELDS_TEST())
     asyncio.run(_FREEFORM_MERGE_TEST())
+    asyncio.run(_CONFLICT_SCOPING_TEST())
     asyncio.run(_GROUNDING_CRITIQUE_TEST())
 
