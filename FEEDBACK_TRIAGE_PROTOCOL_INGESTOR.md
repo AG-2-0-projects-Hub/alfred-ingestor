@@ -19,8 +19,8 @@ block lives.** Step 1 should read here, not expect the YAML inline in CLAUDE.md.
 sources:
   - id: webapp-feedback
     abbrev: WF
-    kind: Freeform host-submitted feedback via the in-app dialog (feedback_dialog.dart) — no
-      frequency signal, 3-state native status field.
+    kind: Freeform host-submitted feedback via the in-app dialog (feedback_dialog.dart), STAGING
+      environment (supabase-the-ingestor) — no frequency signal, 3-state native status field.
     mcp: supabase-the-ingestor
     tools: [execute_sql]
     retrieve: |
@@ -33,6 +33,32 @@ sources:
     state_write: |
       UPDATE feedback SET status = $1 WHERE id = $2
       -- via supabase-the-ingestor MCP execute_sql (service-role), never the app's own RLS path
+      -- new -> seen at Step 5 (triaged); seen -> done at Step 8 (shipped OR dismissed — the
+      -- shipped/dismissed distinction lives in the backlog file's outcome tag, not this column)
+    severity_signals: only freeform text + the reporter's own `type` tag (bug/idea/confusing/
+      other) as a hint, per the base protocol's freeform calibration profile
+    reach_metric: count distinct host_email values reporting the same symptom, in this batch +
+      the open backlog (per the base protocol's freeform frequency substitute)
+
+  - id: webapp-feedback-prod
+    abbrev: WFP
+    kind: Same in-app feedback dialog as `webapp-feedback`, but PROD environment
+      (supabase-the-ingestor-prod) — real hosts, not test/staging accounts. Declared as a
+      separate source (not merged into `webapp-feedback`) because it's a distinct MCP/credential
+      path per the Source Declaration Contract; same schema, same 3-state status field, confirmed
+      identical against live prod on 2026-09-29.
+    mcp: supabase-the-ingestor-prod
+    tools: [execute_sql]
+    retrieve: |
+      SELECT id, created_at, host_id, host_email, type, message, route, status
+      FROM feedback
+      WHERE status = 'new'
+      ORDER BY created_at DESC
+    state_field: status
+    state_values: [new, seen, done]   # native column, check-constrained — do not add a 4th value
+    state_write: |
+      UPDATE feedback SET status = $1 WHERE id = $2
+      -- via supabase-the-ingestor-prod MCP execute_sql (service-role), never the app's own RLS path
       -- new -> seen at Step 5 (triaged); seen -> done at Step 8 (shipped OR dismissed — the
       -- shipped/dismissed distinction lives in the backlog file's outcome tag, not this column)
     severity_signals: only freeform text + the reporter's own `type` tag (bug/idea/confusing/
@@ -108,10 +134,21 @@ own "Explicitly Out of Scope" section.
 
 ## Document Version & Maintenance
 
-**Version:** 1.0
+**Version:** 1.1
 **Created:** 2026-09-25
 
 ### Version History
+* **v1.1 (2026-09-29):** From Run 1's own execution (first-ever run of this protocol) — the
+  founder asked mid-run whether both prod and staging were being checked, and they weren't: the
+  `webapp-feedback` source only ever declared staging (`supabase-the-ingestor`). Real hosts use
+  prod, not staging, so this was a real gap, not just a theoretical one — Run 1 found the only two
+  WF items in staging's `feedback` table, both from a test-pattern email (`a1test@test.com`),
+  while prod's `feedback` table has always been empty. Added `webapp-feedback-prod` (abbrev `WFP`)
+  as a second, separate declared source (own MCP: `supabase-the-ingestor-prod`) rather than
+  merging into the existing source, since the base protocol's Source Declaration Contract scopes
+  one MCP per source — kept the existing `webapp-feedback`/`WF` id and abbrev unchanged so Run 1's
+  already-filed report and already-mutated staging rows stay consistent. Minor bump — adds a
+  source, doesn't change any existing one's contract.
 * **v1.0 (2026-09-25):** Initial version. Declares the-ingestor's two feedback sources (webapp
   `feedback` table, Sentry once live) against the base `_protocols/FEEDBACK_TRIAGE_PROTOCOL.md`.
   Schema verified live against staging (`supabase-the-ingestor` MCP) before writing —
