@@ -3,6 +3,61 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-01 — A Windows-saved secret `.txt` carries an invisible trailing `\r` that `$(cat file)` does not strip, and an HTTP client rejects it
+
+**Context:** Wiring a SendGrid API key (saved via Notepad to the Desktop) into Cloud Run env vars for the host escalation email.
+**Discovery:** The earlier "has a trailing newline" check (`tail -c 1` → `0a`) hid a `0d 0a` (CRLF) ending. `$(cat file)` strips the `\n` but not the `\r`, so the deployed value was `…\r` and every send died with `Illegal header value b'Bearer SG.…\r'` — logged only as a swallowed warning, so the endpoint kept answering 200 "saved" while nothing was ever sent (SendGrid's stats showed 0 requests). Length is the tell: 70 read vs 69 real. Fix: `tr -d '\r\n' < file`, then verify the *deployed* value's length and last char, not just that the env var name exists (a name-only check passed twice while the value was empty, then CR-poisoned).
+**Impact:** Any secret read from a Windows-saved file needs `tr -d '\r\n'`; verify the deployed value structurally (length/prefix/ends-with-CR) rather than by name. A best-effort sender that swallows errors needs a positive success signal somewhere (a 202 and a message id), not just the absence of a logged failure.
+**Global Candidate:** Yes — any AG project reading secrets from Windows-saved files.
+
+---
+
+## 2026-10-01 — `wsl bash -lc '… $(…) …'` called from the Bash tool can silently produce an empty variable; run anything non-trivial from a script file
+
+**Context:** Setting Cloud Run env vars from a secret file via one inline `wsl bash -lc '…'` command.
+**Discovery:** `KEY=$(cat /mnt/c/…/file)` inside the nested single/double-quote layers (Git Bash → wsl.exe → bash) returned an empty string with no error (the same `cat` worked standalone), so `--update-env-vars="SENDGRID_API_KEY=${KEY}"` set an empty value and gcloud reported success. Quotes around a path inside the substitution even arrived as literal characters. Writing the commands to a script file and running `bash '<path>'` worked every time.
+**Impact:** Multi-statement or quote-heavy WSL work goes in a script file (scratchpad), never an inline `wsl bash -lc '…'`; echo the length of any value read into a variable before using it.
+**Global Candidate:** Yes — environment gotcha for every AG project in this Windows+WSL2 setup.
+
+---
+
+## 2026-10-01 — The host-escalation-email endpoint only sends on a genuine enable/address change; re-saving the same state is a silent no-op (test gotcha)
+
+**Context:** Re-testing real email delivery after fixing the key.
+**Discovery:** `POST /api/host/escalation-email` sends its "alerts are on" receipt only when `activating` (newly enabled, or a changed address). A previous failed attempt had already written enabled=true, so the retry hit the guard, returned 200 "saved", and sent nothing — indistinguishable from success in logs.
+**Impact:** Reset the test host (disable + clear) before each delivery test; assert on the provider's response, not the endpoint's 200.
+**Global Candidate:** No — specific to this endpoint's design.
+
+---
+
+## 2026-10-01 — Moving a scraper from a fixed template to a JSON schema silently turned a guaranteed field (hero image) into an optional LLM field — ~40% of runs lost it
+
+**Context:** Pre-merge live E2E (new `b1.ts`) of the 2026-09-28 structured-JSON scraper rewrite, which the Pending Intake queue had flagged as "not exercised against a real live scrape end-to-end".
+**Discovery:** The old markdown template had a mandatory `**Thumbnail:** [URL]` line, so the model always filled it. In the JSON schema `media.thumbnail_url` is optional and the prompt says "OMIT any field with no source support", so across 5 live scrapes of one listing it was missing 2× (40%) — no hero image on those properties. Also `data_completeness` was an unconstrained string: one run returned "Partial" (on a thin 1.9k-char scrape), outside High/Medium/Low, so the Low-only retry/failsafe paths never fired. Found only by a real end-to-end run; unit/fixture tests of the extraction had passed. Fix: hero image falls back to the first triaged photo then the gallery (deterministic); completeness is now an enum.
+**Impact:** When replacing a template with a schema, audit every field downstream code *depends on* and make it required, deterministic, or enum-constrained; "omit if unsupported" is the wrong default for fields with a guaranteed consumer. Verify with repeated real runs (non-determinism), not one.
+**Global Candidate:** Yes — any template→structured-output migration.
+
+---
+
+## 2026-10-01 — Pixel-coordinate Playwright scenarios rot when an unrelated section changes a dialog's height, and a one-screenshot judge can't judge "changed"
+
+**Context:** First full `npm run full` in weeks: 8 of 17 failed, none a product bug.
+**Discovery:** P1/P8 clicked fixed y-fractions inside the Profile dialog; adding the Email alerts section (2026-09-29) grew and re-centred it, so the clicks landed on other controls. B6/B7 clicked an empty-state button the QA account no longer has (it owns an isolated QA property). D9 lacked the scroll D8 already carried. D6 asked the judge whether a switch "changed" compared to before, which one image cannot show. B15's judge read an expected "Back to Dashboard" button as a violation. Every failure was test drift; the same-session targeted replay (grep `touches:`) was skipped when the Email alerts section shipped.
+**Discovery (second pass, same day):** the first repair pass left 4 still failing in the full run, each for a different reason. B7: a stale drop-zone y (0.39 → 0.875 after the tip cards) plus `__name is not defined` — tsx/esbuild wraps a *named* arrow function declared inside `page.evaluate` in a `__name(...)` helper that doesn't exist in the browser (use plain object literals/inline code there). B6: the product had gained a client-side guard (Train Now disabled until the URL contains "airbnb."), so the test's "expect a server error after the click" was obsolete — rewrote it to assert the button is disabled, zero `/api/ingest` POSTs and no row. P1: the Profile dialog auto-scrolls ~25px a moment after Connect Telegram, so a click 1.5 s later hit the wrong row; wait 3 s. Also the vision judge returned a *false PASS* on "QR code and deep link displayed" while the link was actually off-screen — it only started telling the truth after the layout settled. D9 failed once in the suite, passed alone and right after D8, and needed a one-retry on the Train Now click.
+**Impact:** After changing a shared dialog/screen, replay every scenario whose `touches:` overlaps it; assert states absolutely (and via ground truth like localStorage/DB), never relatively; keep shared navigation (e.g. `openAddPropertyFromDashboard`) in one helper. Prefer deterministic ground truth (DB row, captured network request, localStorage) over the judge wherever one exists, and look at the screenshot yourself before trusting a PASS on a scenario you just rewrote.
+**Global Candidate:** No — project QA-runner specific.
+
+---
+
+## 2026-10-01 — A `staging → main` git merge does not carry prod migrations or Cloud Run env vars, and the protocol doc wrongly said prod had no auto-deploy
+
+**Context:** Preparing the merge.
+**Discovery:** Prod Supabase was missing 2 migrations (`welcome_modal_seen`, `host_escalation_email`) and prod Cloud Run lacked `SENDGRID_API_KEY`/`EMAIL_FROM`/`BACKEND_URL` — neither travels through git, and `deploy-prod-on-main` ships code only. Per-table column hashes, RLS flags, policies, publication and buckets matched exactly once applied. `MERGE_TO_MAIN_PROTOCOL.md` claimed no prod Cloud Build trigger existed (stale since 2026-07-17). Separately, in auto mode the harness blocks production DB writes until the user explicitly says to proceed in chat.
+**Impact:** Pre-merge: diff `list_migrations` + column hashes and Cloud Run env names between staging and prod; protocol updated with that checklist.
+**Global Candidate:** No — folded into this project's `MERGE_TO_MAIN_PROTOCOL.md`.
+
+---
+
 ## 2026-09-30 — Consumer webmail SMTP (Gmail) from a cloud backend is unreliable in a way that looks like a credential problem
 
 **Context:** Building the host escalation-email fallback, no domain owned yet — tried sending via

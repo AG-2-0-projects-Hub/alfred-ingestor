@@ -85,44 +85,8 @@ def _generate_with_retry(client, **kwargs):
             time.sleep(backoff)
 
 
-def get_supabase_client():
-    """Return a Supabase client scoped to the Ingestor project. (REQ-27)"""
-    from supabase import create_client
-    url = os.environ.get("INGESTOR_SUPABASE_URL")
-    key = os.environ.get("INGESTOR_SUPABASE_SERVICE_KEY")
-    if not url or not key:
-        raise RuntimeError("INGESTOR_SUPABASE_URL or INGESTOR_SUPABASE_SERVICE_KEY not configured")
-    return create_client(url, key)
-
-
 class ScrapeRequest(BaseModel):
     url: str
-
-
-def upsert_to_ingestor_supabase(url: str, structured_output: str):
-    """Write scraped_markdown to Ingestor Supabase via UPSERT on airbnb_url.
-    (REQ-27). Best-effort only — properties.airbnb_url has no unique
-    constraint, so this upsert 404s at the DB level (42P10) whenever a row
-    doesn't already exist for this exact URL; ingest.py's own property_id-keyed
-    write (save_scraped_markdown) is the actually-reliable path. Curated/
-    rejected photos are deliberately NOT written here for the same reason —
-    see ingest.py's save_photo_triage call, which uses property_id instead of
-    this URL-keyed upsert (2026-09-09: found via live E2E testing that this
-    call silently failed 100% of the time, so those columns were never
-    actually persisted through the real ingest flow)."""
-    try:
-        client = get_supabase_client()
-        from datetime import datetime, timezone
-        payload = {
-            "airbnb_url": url,
-            "scraped_markdown": structured_output,
-            "status": "Scraped",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        client.table("properties").upsert(payload, on_conflict="airbnb_url").execute()
-    except Exception as e:
-        print(f"Ingestor Supabase upsert failed (non-critical): {e}")
-        sentry_sdk.capture_exception(e)
 
 
 # ── Structured scraper extraction (2026-09-28) ──────────────────────────────
@@ -149,7 +113,9 @@ SCRAPER_STRUCTURED_SCHEMA = {
                 "listing_id": {"type": "STRING"},
                 "listing_url": {"type": "STRING"},
                 "language_detected": {"type": "STRING"},
-                "data_completeness": {"type": "STRING"},  # "High" | "Medium" | "Low"
+                # Enum, not a comment: unconstrained, the model returned "Partial" on a
+                # thin 1.9k-char scrape (2026-10-01), which skips the Low-only retries.
+                "data_completeness": {"type": "STRING", "enum": ["High", "Medium", "Low"]},
             },
         },
         "property_identity": {
@@ -751,8 +717,7 @@ async def scrape_airbnb(req: ScrapeRequest):
        fetch+structure pass once more before giving up on this request — a
        genuine one-off render timing flake (distinct from the caching bug
        above, which max_age=0 already rules out) can clear on a second try.
-    4. Upserts scraped_markdown to Ingestor Supabase directly (REQ-27).
-    5. Returns structured output to caller, including data_completeness so
+    4. Returns structured output to caller, including data_completeness so
        the caller (ingest_worker) can decide whether to schedule its own
        longer-horizon background retry.
     """
@@ -795,12 +760,7 @@ async def scrape_airbnb(req: ScrapeRequest):
     # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
     curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
 
-    # 3. Write to Ingestor Supabase (REQ-27) — failures are non-fatal and logged.
-    # curated_photos/rejected_photos are NOT written here — see the function's
-    # own docstring; the backend persists those via property_id instead.
-    upsert_to_ingestor_supabase(url, structured_output)
-
-    # 4. Return to caller
+    # 3. Return to caller (the backend persists everything by property_id)
     return {
         "status": "success",
         "data": structured_output,
@@ -893,6 +853,10 @@ async def _SCRAPER_STRUCTURED_TEST() -> None:
     meta = with_facts.get("meta", {})
     if not meta.get("language_detected") or not meta.get("data_completeness"):
         failures.append(f"expected meta.language_detected/data_completeness both filled, got {meta!r}")
+    for label, parsed in (("with_facts", with_facts), ("no_world_knowledge", no_world_knowledge)):
+        value = parsed.get("meta", {}).get("data_completeness")
+        if value not in ("High", "Medium", "Low"):
+            failures.append(f"{label}: data_completeness {value!r} outside High/Medium/Low")
 
     nwk_loc = no_world_knowledge.get("location", {})
     state_region = (nwk_loc.get("state_region") or "").lower()

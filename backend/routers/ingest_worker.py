@@ -154,14 +154,24 @@ def _is_stale(heartbeat_iso: str | None) -> bool:
     return (datetime.now(timezone.utc) - ts).total_seconds() > STALE_HEARTBEAT_S
 
 
-def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
-    """scraped_markdown is now a JSON string (scraper's SCRAPER_STRUCTURED_SCHEMA
-    output, 2026-09-28) -- see scraper/main.py's schema comment."""
+def _pick_hero_url(scraped_markdown: str, curated_photos: list[dict]) -> str | None:
+    """scraped_markdown is a JSON string (scraper's SCRAPER_STRUCTURED_SCHEMA
+    output). media.thumbnail_url is an optional field the model omits on a large
+    share of runs (2/5 live scrapes of one listing, 2026-10-01), so the hero image
+    falls back to the first triaged property photo, then the first gallery photo."""
     try:
-        url = json.loads(scraped_markdown).get("media", {}).get("thumbnail_url")
+        media = json.loads(scraped_markdown).get("media") or {}
     except (json.JSONDecodeError, AttributeError):
-        return None
-    return url.strip() if url else None
+        media = {}
+    candidates = (
+        media.get("thumbnail_url"),
+        (curated_photos or [{}])[0].get("url"),
+        (media.get("gallery") or [{}])[0].get("url"),
+    )
+    for url in candidates:
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return None
 
 
 async def _call_scraper(airbnb_url: str) -> dict:
@@ -201,7 +211,7 @@ async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
         except Exception as exc:
             print(f"save_photo_triage failed (non-fatal): {exc}")
             sentry_sdk.capture_exception(exc)
-    thumbnail_url = _parse_thumbnail_url(scraped_markdown)
+    thumbnail_url = _pick_hero_url(scraped_markdown, curated_photos)
     if thumbnail_url:
         try:
             await asyncio.to_thread(supabase_client.upload_hero_image, property_id, thumbnail_url)

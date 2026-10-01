@@ -54,7 +54,7 @@ export const APPBAR = {
 export const ADD_PROPERTY = {
   x:          0.5,
   urlY:       0.23,   // Airbnb URL TextField
-  dropZoneY:  0.39,   // DropZone widget centre
+  dropZoneY:  0.875,  // DropZone widget centre, unscrolled (was 0.39 before the Gold/Also-helps tips cards pushed it down; re-measured 2026-10-01)
   ingestY:    0.59,   // INGEST NOW button
 } as const;
 
@@ -86,6 +86,27 @@ export async function loginAs(
 
   await page.mouse.click(x, vp.height * AUTH.submitY);
   await page.waitForTimeout(6_000); // wait for dashboard to hydrate
+}
+
+// Clicks the dashboard's "+ Add Property" tile. It sits right after the last
+// real (non-deleted) property card, so its x is computed from the live count --
+// the empty-state button DASHBOARD.addPropertyX/Y only exists on an account
+// with zero properties, which the QA account no longer is (it owns the isolated
+// QA property several scenarios depend on).
+export async function openAddPropertyFromDashboard(page: Page): Promise<void> {
+  const authRes = await fetch(`${env.supabaseUrl}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: env.supabaseAnonKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: env.testHostEmail, password: env.testHostPassword }),
+  });
+  const { access_token } = (await authRes.json()) as { access_token: string };
+  const countRes = await fetch(`${env.supabaseUrl}/rest/v1/properties?select=id&deleted_at=is.null`, {
+    headers: { apikey: env.supabaseAnonKey, Authorization: `Bearer ${access_token}` },
+  });
+  const activeCount = ((await countRes.json()) as unknown[]).length;
+  const vp = page.viewportSize() ?? VP;
+  await page.mouse.click(vp.width * (0.11 + activeCount * 0.194), vp.height * 0.367);
+  await page.waitForTimeout(2_000);
 }
 
 // Saves a full-page screenshot to the reports dir and returns its path.

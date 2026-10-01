@@ -14,6 +14,55 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] 🔴 Walkthrough tip bubbles read as see-through (queued 2026-10-01, founder: **do NOT attempt
+      unprompted** — a previous 2-day attempt broke other things and never landed). Known root
+      cause: `BoxDecoration` paints `gradient` over `color`, so `GlassPanel`
+      (`frontend/lib/widgets/glass_panel.dart`) never renders its tint (only the faint highlight
+      gradient shows). It is a shared widget used in 13 places (cards, dialogs, chat), so fixing it
+      app-wide changes every glass surface; a walkthrough-only opaque layer is the lower-risk shape.
+      The 2026-09-14 attempt that added `ClipPath`+`BackdropFilter`+`CustomPaint` re-triggered the
+      yellow-underline text bug — screenshot-check against it before shipping anything here.
+      touches: `frontend/lib/widgets/glass_panel.dart`, `frontend/lib/widgets/walkthrough_tip_panel.dart`
+- [ ] 🟡 guide.html screenshot rework (carried over from the 2026-09-21 handoff, parked 2026-10-01
+      as not merge-connected): highlight boxes off-target/cutting into fields, no glow, one
+      lightbox opens the wrong image, Step 2 shot inside the wrong callout, Knowledge tab should be
+      ONE screenshot with 3 highlights, blurry step-1 shot, step 7 crop cuts off the Send box. Full
+      detail + the process lessons: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
+      Must use FIX_VERIFY. touches: `frontend/web/guide.html`
+- [ ] 🟡 Feedback dialog (beta-tester report, 2026-07-12, triaged as FT-WF-001/002, S3): message text
+      overlaps the Cancel/Send buttons; category chips unreadable in dark mode; reporter also
+      suggests dropping Cancel. Detail: `_Context/feedback_triage/2026-09-28_webapp-feedback.md`.
+      touches: `frontend/lib/widgets/feedback_dialog.dart`
+- [ ] 🟡 Scraper residue after the dead-upsert removal (2026-10-01): `scraper/requirements.txt`
+      still lists `supabase` and the scraper Cloud Run services still carry
+      `INGESTOR_SUPABASE_URL`/`INGESTOR_SUPABASE_SERVICE_KEY`, both unused now. Drop them in a
+      dedicated change (removing the dep can shift transitive pins, so test the scraper build).
+      touches: `scraper/requirements.txt`
+- [ ] 🟡 Vertex 429 during the merge step (Sentry ALFRED-BACKEND-2, 2026-10-01, staging, from the B1
+      E2E run): the task retried and the run completed, so it is the known dynamic-shared-quota
+      transient, not a new bug — watch whether it recurs under real beta load (ROADMAP Track 1's
+      "Vertex-transport watch"). touches: `backend/routers/ingest_worker.py`
+- [ ] 🟡 Server-side file-type filter for ingest (founder-flagged 2026-10-01). The UI already rejects
+      unsupported types (drop zone + file picker use one allow-list, plus a 15 MB cap — B7 covers
+      it), but it checks the **extension only**, and the backend has no filter at all:
+      `file_processor.process_file` sends any unrecognised extension to Gemini as "plain text"
+      (`data.decode("utf-8", errors="replace")`). So a file that skips the UI, or a renamed one
+      (`x.exe` → `x.pdf`/`x.txt`), reaches the model as garbage and burns a call. Proposal: an
+      allow-list in `process_file` that marks the file `failed` with a clear message instead of
+      the plain-text fallback, plus a cheap content check (magic bytes for pdf/images/docx; valid
+      UTF-8 for txt/json/csv) and the same 15 MB cap enforced server-side. Keep the allow-list in
+      one place so the frontend list can't drift from it. Needs FMEA + a scenario (B7's backend twin).
+      touches: `backend/services/file_processor.py`, `backend/routers/ingest.py`, `backend/routers/ingest_worker.py`, `frontend/lib/widgets/drop_zone.dart`
+- [ ] 🟡 Auth gaps on property endpoints (found 2026-10-01 while verifying G5; **pre-existing, also on
+      `main`**, not introduced by the merge): `POST /api/merge/{id}`, `/api/resolve/{id}`,
+      `/api/ingest/add-knowledge`, `/api/ingest/query-knowledge` and the `/api/ingest` dispatcher have
+      no auth at all (live-confirmed: an unauthenticated call reaches the handler and gets a 404/422,
+      not a 401), and `/ingest/{id}/resume` + `/retry-scrape` check the token but not that the caller
+      owns the property. The only protection is that property UUIDs are unguessable. Practical risk:
+      someone holding a property UUID could burn Gemini calls (merge/resolve) or read its knowledge
+      (query-knowledge). Proposal: one shared `_require_host` + `host_owns_property` guard like
+      `messages.py` already uses; keep anonymous `/ingest` only if the add-property flow truly needs it.
+      Needs FMEA (the anonymous-ingest path was deliberate) + extend G5. touches: `backend/routers/ingest.py`, `backend/routers/merge_resolve.py`
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
       PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
@@ -119,7 +168,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       → API, then update `backend/.env` and the `alfred-backend-staging` Cloud Run service env var with
       the new value.
 - [ ] New file dropped in Edit Property's "Manage" → "Add New Files" for an already-trained property sits stuck at "Queued" forever — no retrain/update ever triggers (found 2026-09-10, live on staging, Bungalu property). Related to but distinct from the Train Now reliability plan (`_Context/Train_Now_Reliability_and_QA_Process_Plan_2026-09-15.md`) — different mechanism (nothing ever triggers, not a timeout/recovery gap during a run) — worth a look in the same pass regardless.
-- [ ] Apply `migrations/2026-09-08_photo_triage.sql` to prod (staging-only so far) — same for `migrations/2026-09-09_host_is_dev_flag.sql`, both deferred to the eventual `staging→main` merge
+- [x] ~~Apply `migrations/2026-09-08_photo_triage.sql` and `migrations/2026-09-09_host_is_dev_flag.sql` to prod~~ — already on prod (verified 2026-10-01: `curated_photos`, `rejected_photos`, `scrape_retry`, `ingest_run_id`, `host_profiles.is_dev`, `welcome_modal_seen` all present; per-table column hashes match staging).
 - [ ] Property training-completeness gauge — rubric already decided (deterministic, not LLM-scored)
 - [ ] Host-recorded property walkthrough video
 - [ ] Native in-app guide screen (replace the static `guide.html`) — deliberately lowest priority
@@ -128,7 +177,7 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 - [ ] Add real sourced stats/fun facts to the Train Now wait popup's rotating card (currently Alfred-capability tips only, no stats — deliberately avoided fabricating numbers) (queued 2026-09-09)
 - [ ] guide.html: add a section on exporting Airbnb's listing JSON directly (the "goldmine" method), plus a simple copy-paste-into-a-doc (.txt/.docx/PDF) fallback for non-technical hosts — deferred pending the exact export steps from the founder (queued 2026-09-21)
 - [ ] Update the feedback-widget workflow (currently: `feedback_dialog.dart` inserts straight into Supabase's `feedback` table via RLS, nothing reads or surfaces it anywhere) — founder already designed a protocol for this in the reflip project that's working well there and wants to use it as inspiration here (queued 2026-09-21)
-- [ ] New-account signup never sent a confirmation email — founder tried creating a second test account (to test the first-time welcome/walkthrough flow) and never received it. Not investigated yet; likely Supabase Auth email delivery/config, not app code, but confirm before assuming (queued 2026-09-21)
+- [x] ~~New-account signup never sent a confirmation email~~ — resolved 2026-10-01, not a bug: signing up with an already-registered email makes Supabase return a user with `identities: []` and no session and send nothing (anti-enumeration). Reproduced live on staging; `auth_screen.dart` already detects exactly that and shows the "Email already registered" notice (2026-09-21). Prod has 5 confirmed real users, so genuine confirmation emails work.
 - [ ] Property/document match-check (queued 2026-09-19, deliberately parked as its own design
       problem — not part of the 2026-09-19 UI/UX batch): verify that uploaded supporting documents
       (house manual, WiFi photo, etc.) actually belong to the property they're attached to, rather
@@ -197,9 +246,9 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       MCP, including a real Playwright-triggered uncaught error proving `SentryFlutter.init`'s
       automatic zone-based capture actually fires (not just present in the bundle). `SENTRY_DSN`/
       `ENVIRONMENT` set on all 4 Cloud Run services + both Vercel projects; `alfred-backend-staging`/
-      `alfred-scraper-staging` redeployed and health-checked live. Prod Cloud Run still needs its
-      own manual `gcloud run deploy --source` after the next `staging→main` merge (no auto-deploy
-      on this project, confirmed via `CONTEXT.md`'s existing note) — frontend prod deploys via
+      `alfred-scraper-staging` redeployed and health-checked live. Prod Cloud Run deploys on the
+      `staging→main` merge via the `deploy-prod-on-main` Cloud Build trigger (corrected
+      2026-10-01 — this line used to say there was no auto-deploy) — frontend prod deploys via
       Vercel's normal auto-deploy-on-push.
 - [x] ~~Overview tab manual walkthrough replay toggle~~ — shipped 2026-09-10, staging `6835304`, Playwright-verified live
 - [x] ~~Dev/User (beta) view split for Add Property~~ — shipped 2026-09-09, staging

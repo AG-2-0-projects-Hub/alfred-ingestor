@@ -109,7 +109,8 @@ export async function runP8(): Promise<ScenarioResult> {
     if (!connectedVerdict.pass) throw new Error('Connected state with Disconnect link did not render as expected');
 
     // "Disconnect" text link, directly below the connected-state row.
-    await page.mouse.click(vp.width * 0.386, vp.height * 0.724);
+    // (y re-measured 2026-10-01 after the Email alerts section made the dialog taller)
+    await page.mouse.click(vp.width * 0.386, vp.height * 0.682);
     await page.waitForTimeout(700);
 
     const confirmShot = await page.screenshot({ fullPage: true });

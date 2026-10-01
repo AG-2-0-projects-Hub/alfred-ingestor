@@ -31,17 +31,29 @@ Open a PR from `staging`→`main` (GitHub UI or `gh pr create`) — a plain push
 by branch protection. **The founder merges these PRs manually on purpose, as their own final QA
 gate — never script or bypass this step.** Verify remote SHA matches local after merging.
 
-## After merging — prod does not deploy itself
+## Before merging — things a git merge does NOT carry (do these first)
 
-- **Cloud Run (backend + scraper) does NOT auto-deploy on a `main` merge** — no Cloud Build
-  trigger exists (standing fact, not tied to any one change; original finding in `CONTEXT.md`'s
-  2026-07-12 entry). The merge only updates the `main` branch — prod backend/scraper keep running
-  whatever image was last manually deployed. Ask the founder whether to redeploy prod now:
-  ```
-  gcloud run deploy alfred-backend --source=backend --region=europe-west3 --project=alfred-prod-502215
-  gcloud run deploy alfred-scraper --source=scraper --region=europe-west3 --project=alfred-prod-502215
-  ```
-- **Frontend is different** — Vercel's GitHub integration auto-deploys `main` on merge, no manual
-  step needed.
+Git only moves code. Each item below lives outside it and must already be in place on **prod**
+before the merge's auto-deploy goes live (verified 2026-10-01: prod had none of the email vars):
 
-Don't assume a merge alone shipped anything to real users — it only did for the frontend.
+1. **Migrations.** Every file under `migrations/` must be applied to the prod Supabase project
+   (`ylaooctefesedrecshic`) — compare `list_migrations` on both projects and the per-table column
+   hashes (`information_schema.columns`) rather than trusting the status header inside each `.sql`.
+2. **Cloud Run env vars/secrets.** The Cloud Build trigger ships code only and preserves whatever
+   env prod already has, so any *new* env var a merged commit reads (e.g. `SENDGRID_API_KEY`,
+   `EMAIL_FROM`, `BACKEND_URL`) must be set on `alfred-backend` by hand beforehand. Diff
+   `gcloud run services describe alfred-backend-staging` vs `alfred-backend` env names.
+3. **Secret hygiene.** Never read a secret from a Windows-saved `.txt` without `tr -d '\r\n'` —
+   a trailing `\r` makes HTTP header values illegal (see `lessons.md` 2026-10-01).
+
+## After merging — prod deploys itself (code only)
+
+- **Cloud Run (backend + scraper) auto-deploys on a `main` merge** via the `deploy-prod-on-main`
+  Cloud Build trigger (europe-west3, `cloudbuild.yaml`; verified live 2026-10-01). It ships **code
+  only** and preserves prod's existing env/secrets — hence the pre-merge checklist above. This
+  line used to say the opposite ("no trigger exists", from before 2026-07-17); that was stale.
+  Verify after the merge: `gcloud builds list --region=europe-west3` shows a SUCCESS build for the
+  merge SHA, and `gcloud run services describe alfred-backend` serves 100% from the new revision.
+- **Staging does not auto-deploy** — there is no trigger on `staging`; a backend fix needs a
+  manual `gcloud run deploy alfred-backend-staging --source=backend ...`.
+- **Frontend** — Vercel's GitHub integration auto-deploys `main` on merge, no manual step needed.
