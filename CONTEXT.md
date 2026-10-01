@@ -10,12 +10,12 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🟢 2026-09-28 shipped Sentry (all 3 services, live-verified) + scraper JSON-native rewrite
-  (staging, deployed+verified against real prod data). Both fully pushed.
-- 🟢 2026-09-29 shipped Phase 3/4 of the ingestion/merge grounding work (6 commits, staging) — 4
-  real bugs found+fixed via real-property testing, a JSON-mode reliability fix, a size-aware
-  timeout fix, and FIX_VERIFY's new Step 0 (root-cause-first) + a universal protocol extraction.
-  Full writeup: `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md`.
+- 🟡 Feedback-triage Run 1 has 4 deferred items awaiting Step 6 approve/dismiss — see
+  `_Context/feedback_triage/BACKLOG.md`. Founder believed these were already fixed elsewhere;
+  verified directly 2026-09-30 that none actually were.
+- 🟡 Host escalation-email fallback (2026-09-30) is staging-only — migration + deploy still
+  pending on prod. Real hosts won't receive these until a domain is verified in Resend
+  (`ROADMAP.md` Track 1, flagged 2026-09-30).
 - 🔴 guide.html screenshots still broken — untouched. Handoff:
   `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`. Must use FIX_VERIFY.
 - 🟡 Stray property "Bungalowww" didn't actually delete — worth a look at the delete path.
@@ -30,7 +30,54 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
 
-**Last Session:** 2026-09-29 (**Real-property ingestion + full old-vs-new pipeline testing on 3
+**Last Session:** 2026-09-28→30 (**Ran the feedback-triage protocol's first-ever execution,
+found+fixed a real gap in its own source coverage, then chased a beta-tester bug report to a real
+root cause and shipped a host escalation-email fallback end-to-end — staging only, real delivery
+proven live.**
+  - **Feedback triage Run 1:** batched staging `feedback` table (2 items, S3) + Sentry (4 items —
+    3 N/A setup-verification pings + 1 real S1: the scraper's `properties` upsert always fails,
+    `on_conflict="airbnb_url"` with no matching DB constraint, confirmed live against the schema).
+    Mid-run gap found: the source declaration only ever covered **staging** `feedback`, never
+    prod — real host feedback would have been silently missed forever. Fixed: added
+    `webapp-feedback-prod` as a second declared source in
+    `FEEDBACK_TRIAGE_PROTOCOL_INGESTOR.md` (v1.1). Prod's table is empty (0 real submissions so
+    far). **Step 6 approval never completed** — got pulled into the investigation below before the
+    founder worked through the 4 items; archived as deferred in the new
+    `_Context/feedback_triage/BACKLOG.md` (Step 9, first time this file exists).
+  - **Root-caused a real beta-tester report** (host Luis Martini, "Dpto 1 taxco"): a guest asked
+    for the entry code and Alfred never answered. Traced live against prod: Alfred escalates
+    correctly on an unanswerable question, but the *only* host-alert channel (Telegram) requires
+    linking, Luis never had, and there was no fallback — `host_alert_message_id` stayed null the
+    whole time, guest got silence for ~3 days and let themselves in by other means.
+  - **Shipped the fix** (Plan Mode approved, `FIX_VERIFY_PROTOCOL.md` followed throughout): host
+    email as a second, independent, opt-in escalation channel. 3 new `host_profiles` columns,
+    `backend/services/email_client.py` (new), two new endpoints (`POST /host/escalation-email`,
+    public no-login `GET .../unsubscribe` — every email carries an unsubscribe link specifically
+    so a host-mistyped address can self-remove), a shared `_notify_host_escalation` helper
+    refactored out of the existing Telegram alert code (both call sites), and a Profile dialog
+    email field + checkbox. Migration applied to staging. Real Playwright scenario **P9** added
+    (`_tests/runner/scenarios/p9.ts`) and run live against staging — PASS (UI + a DB check proving
+    the new backend endpoint fired, not just a plain RLS-direct write).
+  - **Email provider saga:** tried Gmail SMTP first (founder's own account, no owned domain yet) —
+    failed consistently from Cloud Run, 5/5 real attempts across two distinct app passwords, mixed
+    failure modes (`BadCredentials`, `Connection unexpectedly closed`) despite 2-Step Verification
+    confirmed on and Advanced Protection confirmed off. That inconsistency across distinct
+    credentials points to Cloud Run's network path to Gmail's SMTP being the actual blocker, not
+    the password — worth remembering before trying raw consumer-webmail SMTP from Cloud Run again.
+    Switched to **Resend's sandbox sender** (`onboarding@resend.dev`, zero domain needed) —
+    **live-verified for real**, a receipt email actually arrived. Tradeoff, now flagged in
+    `ROADMAP.md`: sandbox only delivers to the Resend account's own email, so real beta hosts get
+    nothing until a domain is verified — founder's call, deferred until the webapp gets its own
+    domain.
+  - **Process/environment notes:** `git push` for this repo must go through `wsl bash -lc` — the
+    Bash tool's own Git Bash lacks GitHub's SSH host key trust, WSL's git already has it. Two
+    other active sessions were pinged before starting (file-overlap check) — no conflicts, one
+    peer commit (`612fbdf`, ingestion timeout fix) landed cleanly interleaved mid-session.
+  - Secrets (Gmail app password, then Resend API key) handled via the established file-relay
+    method (save to a local `.txt`, read via shell file-redirection — never `$(...)` substitution,
+    confirmed broken again in this session's Bash-tool→WSL path — never pasted into chat).
+
+**Prior Session:** 2026-09-29 (**Real-property ingestion + full old-vs-new pipeline testing on 3
 actual trained properties' real documents — found, root-caused, and fixed 4 real bugs, shipped a
 new self-grounding critique pass, fixed a JSON-mode reliability gap and a large-file timeout risk,
 then codified the root-cause methodology into `FIX_VERIFY_PROTOCOL.md` as a new Step 0 and

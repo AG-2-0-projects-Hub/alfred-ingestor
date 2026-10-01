@@ -8,6 +8,8 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-09-30 | Consumer webmail SMTP (Gmail) from a cloud backend fails inconsistently in a way that looks like bad credentials but is actually anti-abuse/connection flagging — go straight to a transactional provider instead | email, smtp, gmail, cloud-run, infra, global-candidate |
+| 2026-09-30 | `read -r VAR < file` returns nonzero under `set -e` when the file has no trailing newline (e.g. Notepad-saved) even though it reads the value correctly — needs `\|\| true` in the file-relay secret pattern | bash, shell-scripting, secrets, file-relay, global-candidate |
 | 2026-09-29 | Re-run the unmodified code multiple times before accepting a "regression" diagnosis — killed 2 false regressions and found the real cause of a 3rd this session | debugging, root-cause, fix-verify-protocol, methodology, global-candidate |
 | 2026-09-29 | A prompt's own worked example can silently teach the wrong behavior even when the surrounding rule text is correct — check examples separately when auditing a prompt | llm-prompting, gemini-merge, conflict-detection, prompt-engineering, global-candidate |
 | 2026-09-29 | Grounding/self-critique guards can't fix a fact that's wrong-but-present in source — only ingestion-level accuracy can; downstream "check against source" passes inherit the source's own ceiling | grounding, hallucination, ingestion, merge, rag, global-candidate |

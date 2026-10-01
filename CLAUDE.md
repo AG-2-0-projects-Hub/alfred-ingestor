@@ -57,6 +57,10 @@ this repo) live inside WSL2 and are invisible to both shell tools unless routed 
 - Windows paths (`C:\`, `D:\`) are never valid inside a `wsl bash -c` command.
 - If a command fails with "not found" after prefixing with `wsl bash -c` — try `-lc` or an
   absolute path before assuming the tool isn't installed.
+- **`git push` for this repo must go through `wsl bash -lc`, even though `git status`/`log`/
+  `diff`/`commit` work fine via the Bash tool directly** (confirmed 2026-09-30): the Bash tool's
+  own Git Bash doesn't have GitHub's SSH host key trusted (`Host key verification failed`), while
+  WSL's git already does. Local/read operations aren't blocked — only the actual push.
 
 ---
 

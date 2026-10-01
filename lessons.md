@@ -3,6 +3,64 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-09-30 — Consumer webmail SMTP (Gmail) from a cloud backend is unreliable in a way that looks like a credential problem
+
+**Context:** Building the host escalation-email fallback, no domain owned yet — tried sending via
+the founder's own Gmail account (SMTP, app password) from Cloud Run before reaching for a
+transactional email provider.
+
+**Discovery:** 5/5 real send attempts failed, across **two distinct, freshly-generated app
+passwords**, with **inconsistent failure modes** — sometimes `535 BadCredentials`, sometimes
+`Connection unexpectedly closed` — despite 2-Step Verification confirmed on and Advanced
+Protection confirmed off. A genuinely wrong password fails identically every time; getting
+different failure types on different attempts with different (both freshly verified) credentials
+is the signature of the *connection* being unreliable/flagged, not the password. Burned real
+troubleshooting time (and risked further account flags) chasing the credential angle — checking
+2SV, regenerating passwords, confirming a Google "was this you?" security alert — before the
+pattern itself (not any single failure) pointed at Cloud Run's network path to Gmail's SMTP as the
+actual problem. Switched to Resend's sandbox sender (`onboarding@resend.dev`, no domain needed) —
+worked on the first real attempt, but has its own real constraint: **it only delivers to the
+Resend account's own registered email** until a domain is verified, so it's provably real only as
+a pipeline test, not for sending to arbitrary real recipients yet.
+
+**Impact:** For any future transactional-email need from a Cloud Run (or likely any cloud-hosted)
+backend: don't reach for a personal/consumer email account's SMTP as a shortcut, even when it
+would "obviously" work for a human sending normally — cloud-origin automated sends get
+anti-abuse-flagged in ways that present as credential errors. Go straight to a dedicated
+transactional provider. If no domain is owned yet, a provider's sandbox/test mode can prove the
+code path works end-to-end, but confirm its recipient restriction *before* assuming it covers real
+users — it very likely only sends to the account owner.
+
+**Global Candidate:** Yes — applies to any AG project adding outbound email from a cloud backend,
+not specific to this project's stack.
+
+---
+
+## 2026-09-30 — `read -r VAR < file` returns nonzero (breaks `set -e`) when the file has no trailing newline, even though it reads the value correctly
+
+**Context:** The established secret file-relay pattern (save a credential to a local `.txt`, read
+it into a shell script via file redirection, never paste into chat) — used twice this session for
+a Gmail app password and a Resend API key.
+
+**Discovery:** `IFS= read -r VAR < "$file"` under `set -e` aborted the script immediately after
+successfully populating `$VAR`, with no visible error, because `read` returns exit status 1 when
+it hits EOF without a newline terminator — which is exactly what a file saved via Notepad without
+a trailing Enter produces. The value was correct; the script just silently died on the next line
+before ever using it. Confirmed via a byte-count/`wc -l` check (0 newlines) on the actual file,
+not assumed.
+
+**Impact:** Any script using `read -r VAR < file` in this environment's file-relay secret pattern
+needs `read -r VAR < "$file" || true` (or equivalent) to tolerate a no-trailing-newline file —
+otherwise a perfectly valid secret file silently produces a script that dies before reaching the
+command that uses it, which looks exactly like "the deploy didn't happen" rather than "the read
+command had a nonzero exit status."
+
+**Global Candidate:** Yes — the file-relay secret pattern itself is already a cross-project
+convention (noted in `AG_SYSTEM_MAP.md`-adjacent docs); this is the concrete gotcha in its most
+common failure shape (a Windows-saved text file).
+
+---
+
 ## 2026-09-29 — Re-run the unmodified code before accepting a "regression" diagnosis
 
 **Context:** Real-property testing (Phase 3/4) surfaced several suspected new bugs in the freeform
