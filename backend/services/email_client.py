@@ -1,17 +1,18 @@
-"""Thin async wrapper over the Resend HTTP API.
+"""Thin async wrapper over the SendGrid v3 Mail Send API.
 
 Same shape as telegram_client.py: best-effort, never raises — a send failure
 is logged and swallowed so it can never break a guest-facing flow. httpx is
 already a backend dependency (see telegram_client.py, supabase_client.py).
 
-Beta note: no domain is owned/verified yet, so EMAIL_FROM is Resend's shared
-sandbox sender (onboarding@resend.dev), which Resend restricts to delivering
-only to the Resend account's own email — real hosts won't receive these until
-a real domain is verified. Telegram remains the only channel that reaches
-real hosts until then; this just proves the pipeline end-to-end. Swapping
-EMAIL_FROM to a verified address once a domain exists needs no code change.
-(Gmail SMTP was tried first and dropped — Cloud Run's network path to Gmail's
-SMTP was unreliable, unrelated to credentials; see git history 2026-09-29.)
+Beta note: no domain is owned/verified yet, so EMAIL_FROM is a Single Sender
+Verification address (alfred.bnb.host@gmail.com) rather than a verified
+domain — SendGrid lets a verified single address send to any recipient,
+unlike Resend's sandbox sender which only delivers to its own account email.
+Swapping EMAIL_FROM to a domain address once one exists needs no code change.
+(Resend's sandbox sender and, before that, Gmail SMTP were both tried and
+dropped — Resend couldn't reach real testers without a domain; Cloud Run's
+network path to Gmail's SMTP was unreliable, unrelated to credentials; see
+git history 2026-09-29/30.)
 """
 import logging
 import os
@@ -20,13 +21,13 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-_API = "https://api.resend.com/emails"
+_API = "https://api.sendgrid.com/v3/mail/send"
 
 
 def _token() -> str:
-    token = os.environ.get("RESEND_API_KEY")
+    token = os.environ.get("SENDGRID_API_KEY")
     if not token:
-        raise RuntimeError("RESEND_API_KEY is not set")
+        raise RuntimeError("SENDGRID_API_KEY is not set")
     return token
 
 
@@ -46,16 +47,16 @@ async def send_email(to: str, subject: str, html: str) -> bool:
                 _API,
                 headers={"Authorization": f"Bearer {_token()}"},
                 json={
-                    "from": _from_address(),
-                    "to": [to],
+                    "personalizations": [{"to": [{"email": to}]}],
+                    "from": {"email": _from_address()},
                     "subject": subject,
-                    "html": html,
+                    "content": [{"type": "text/html", "value": html}],
                 },
             )
         if resp.status_code >= 300:
-            log.warning("resend send_email failed: %s %s", resp.status_code, resp.text)
+            log.warning("sendgrid send_email failed: %s %s", resp.status_code, resp.text)
             return False
         return True
     except Exception as exc:  # missing config, network/transport — never bubble up
-        log.warning("resend send_email error: %s", exc)
+        log.warning("sendgrid send_email error: %s", exc)
         return False
