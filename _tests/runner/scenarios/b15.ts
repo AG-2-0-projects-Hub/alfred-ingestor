@@ -116,7 +116,8 @@ export async function runB15(): Promise<ScenarioResult> {
     const editVerdict = await judgeScreenshot(
       editSS,
       'An "Edit Property" screen with a back arrow top-left, a property name field, ' +
-      'and a list of ingested files. Must NOT show the dashboard or a right-aligned side panel.',
+      'and a list of ingested files. Must NOT show the dashboard\'s grid of property cards or a ' +
+      'right-aligned side panel. (A "Back to Dashboard" button on this screen is expected and fine.)',
     );
     artifacts.editVerdict = editVerdict.raw;
     notes.push(`edit-property judge: ${editVerdict.pass ? 'PASS' : 'FAIL'} — ${editVerdict.notes}`);

@@ -3,6 +3,307 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-01 — A Windows-saved secret `.txt` carries an invisible trailing `\r` that `$(cat file)` does not strip, and an HTTP client rejects it
+
+**Context:** Wiring a SendGrid API key (saved via Notepad to the Desktop) into Cloud Run env vars for the host escalation email.
+**Discovery:** The earlier "has a trailing newline" check (`tail -c 1` → `0a`) hid a `0d 0a` (CRLF) ending. `$(cat file)` strips the `\n` but not the `\r`, so the deployed value was `…\r` and every send died with `Illegal header value b'Bearer SG.…\r'` — logged only as a swallowed warning, so the endpoint kept answering 200 "saved" while nothing was ever sent (SendGrid's stats showed 0 requests). Length is the tell: 70 read vs 69 real. Fix: `tr -d '\r\n' < file`, then verify the *deployed* value's length and last char, not just that the env var name exists (a name-only check passed twice while the value was empty, then CR-poisoned).
+**Impact:** Any secret read from a Windows-saved file needs `tr -d '\r\n'`; verify the deployed value structurally (length/prefix/ends-with-CR) rather than by name. A best-effort sender that swallows errors needs a positive success signal somewhere (a 202 and a message id), not just the absence of a logged failure.
+**Global Candidate:** Yes — any AG project reading secrets from Windows-saved files.
+
+---
+
+## 2026-10-01 — `wsl bash -lc '… $(…) …'` called from the Bash tool can silently produce an empty variable; run anything non-trivial from a script file
+
+**Context:** Setting Cloud Run env vars from a secret file via one inline `wsl bash -lc '…'` command.
+**Discovery:** `KEY=$(cat /mnt/c/…/file)` inside the nested single/double-quote layers (Git Bash → wsl.exe → bash) returned an empty string with no error (the same `cat` worked standalone), so `--update-env-vars="SENDGRID_API_KEY=${KEY}"` set an empty value and gcloud reported success. Quotes around a path inside the substitution even arrived as literal characters. Writing the commands to a script file and running `bash '<path>'` worked every time.
+**Impact:** Multi-statement or quote-heavy WSL work goes in a script file (scratchpad), never an inline `wsl bash -lc '…'`; echo the length of any value read into a variable before using it.
+**Global Candidate:** Yes — environment gotcha for every AG project in this Windows+WSL2 setup.
+
+---
+
+## 2026-10-01 — The host-escalation-email endpoint only sends on a genuine enable/address change; re-saving the same state is a silent no-op (test gotcha)
+
+**Context:** Re-testing real email delivery after fixing the key.
+**Discovery:** `POST /api/host/escalation-email` sends its "alerts are on" receipt only when `activating` (newly enabled, or a changed address). A previous failed attempt had already written enabled=true, so the retry hit the guard, returned 200 "saved", and sent nothing — indistinguishable from success in logs.
+**Impact:** Reset the test host (disable + clear) before each delivery test; assert on the provider's response, not the endpoint's 200.
+**Global Candidate:** No — specific to this endpoint's design.
+
+---
+
+## 2026-10-01 — Moving a scraper from a fixed template to a JSON schema silently turned a guaranteed field (hero image) into an optional LLM field — ~40% of runs lost it
+
+**Context:** Pre-merge live E2E (new `b1.ts`) of the 2026-09-28 structured-JSON scraper rewrite, which the Pending Intake queue had flagged as "not exercised against a real live scrape end-to-end".
+**Discovery:** The old markdown template had a mandatory `**Thumbnail:** [URL]` line, so the model always filled it. In the JSON schema `media.thumbnail_url` is optional and the prompt says "OMIT any field with no source support", so across 5 live scrapes of one listing it was missing 2× (40%) — no hero image on those properties. Also `data_completeness` was an unconstrained string: one run returned "Partial" (on a thin 1.9k-char scrape), outside High/Medium/Low, so the Low-only retry/failsafe paths never fired. Found only by a real end-to-end run; unit/fixture tests of the extraction had passed. Fix: hero image falls back to the first triaged photo then the gallery (deterministic); completeness is now an enum.
+**Impact:** When replacing a template with a schema, audit every field downstream code *depends on* and make it required, deterministic, or enum-constrained; "omit if unsupported" is the wrong default for fields with a guaranteed consumer. Verify with repeated real runs (non-determinism), not one.
+**Global Candidate:** Yes — any template→structured-output migration.
+
+---
+
+## 2026-10-01 — Pixel-coordinate Playwright scenarios rot when an unrelated section changes a dialog's height, and a one-screenshot judge can't judge "changed"
+
+**Context:** First full `npm run full` in weeks: 8 of 17 failed, none a product bug.
+**Discovery:** P1/P8 clicked fixed y-fractions inside the Profile dialog; adding the Email alerts section (2026-09-29) grew and re-centred it, so the clicks landed on other controls. B6/B7 clicked an empty-state button the QA account no longer has (it owns an isolated QA property). D9 lacked the scroll D8 already carried. D6 asked the judge whether a switch "changed" compared to before, which one image cannot show. B15's judge read an expected "Back to Dashboard" button as a violation. Every failure was test drift; the same-session targeted replay (grep `touches:`) was skipped when the Email alerts section shipped.
+**Discovery (second pass, same day):** the first repair pass left 4 still failing in the full run, each for a different reason. B7: a stale drop-zone y (0.39 → 0.875 after the tip cards) plus `__name is not defined` — tsx/esbuild wraps a *named* arrow function declared inside `page.evaluate` in a `__name(...)` helper that doesn't exist in the browser (use plain object literals/inline code there). B6: the product had gained a client-side guard (Train Now disabled until the URL contains "airbnb."), so the test's "expect a server error after the click" was obsolete — rewrote it to assert the button is disabled, zero `/api/ingest` POSTs and no row. P1: the Profile dialog auto-scrolls ~25px a moment after Connect Telegram, so a click 1.5 s later hit the wrong row; wait 3 s. Also the vision judge returned a *false PASS* on "QR code and deep link displayed" while the link was actually off-screen — it only started telling the truth after the layout settled. D9 failed once in the suite, passed alone and right after D8, and needed a one-retry on the Train Now click.
+**Impact:** After changing a shared dialog/screen, replay every scenario whose `touches:` overlaps it; assert states absolutely (and via ground truth like localStorage/DB), never relatively; keep shared navigation (e.g. `openAddPropertyFromDashboard`) in one helper. Prefer deterministic ground truth (DB row, captured network request, localStorage) over the judge wherever one exists, and look at the screenshot yourself before trusting a PASS on a scenario you just rewrote.
+**Global Candidate:** No — project QA-runner specific.
+
+---
+
+## 2026-10-01 — A `staging → main` git merge does not carry prod migrations or Cloud Run env vars, and the protocol doc wrongly said prod had no auto-deploy
+
+**Context:** Preparing the merge.
+**Discovery:** Prod Supabase was missing 2 migrations (`welcome_modal_seen`, `host_escalation_email`) and prod Cloud Run lacked `SENDGRID_API_KEY`/`EMAIL_FROM`/`BACKEND_URL` — neither travels through git, and `deploy-prod-on-main` ships code only. Per-table column hashes, RLS flags, policies, publication and buckets matched exactly once applied. `MERGE_TO_MAIN_PROTOCOL.md` claimed no prod Cloud Build trigger existed (stale since 2026-07-17). Separately, in auto mode the harness blocks production DB writes until the user explicitly says to proceed in chat.
+**Impact:** Pre-merge: diff `list_migrations` + column hashes and Cloud Run env names between staging and prod; protocol updated with that checklist.
+**Global Candidate:** No — folded into this project's `MERGE_TO_MAIN_PROTOCOL.md`.
+
+---
+
+## 2026-09-30 — Consumer webmail SMTP (Gmail) from a cloud backend is unreliable in a way that looks like a credential problem
+
+**Context:** Building the host escalation-email fallback, no domain owned yet — tried sending via
+the founder's own Gmail account (SMTP, app password) from Cloud Run before reaching for a
+transactional email provider.
+
+**Discovery:** 5/5 real send attempts failed, across **two distinct, freshly-generated app
+passwords**, with **inconsistent failure modes** — sometimes `535 BadCredentials`, sometimes
+`Connection unexpectedly closed` — despite 2-Step Verification confirmed on and Advanced
+Protection confirmed off. A genuinely wrong password fails identically every time; getting
+different failure types on different attempts with different (both freshly verified) credentials
+is the signature of the *connection* being unreliable/flagged, not the password. Burned real
+troubleshooting time (and risked further account flags) chasing the credential angle — checking
+2SV, regenerating passwords, confirming a Google "was this you?" security alert — before the
+pattern itself (not any single failure) pointed at Cloud Run's network path to Gmail's SMTP as the
+actual problem. Switched to Resend's sandbox sender (`onboarding@resend.dev`, no domain needed) —
+worked on the first real attempt, but has its own real constraint: **it only delivers to the
+Resend account's own registered email** until a domain is verified, so it's provably real only as
+a pipeline test, not for sending to arbitrary real recipients yet.
+
+**Impact:** For any future transactional-email need from a Cloud Run (or likely any cloud-hosted)
+backend: don't reach for a personal/consumer email account's SMTP as a shortcut, even when it
+would "obviously" work for a human sending normally — cloud-origin automated sends get
+anti-abuse-flagged in ways that present as credential errors. Go straight to a dedicated
+transactional provider. If no domain is owned yet, a provider's sandbox/test mode can prove the
+code path works end-to-end, but confirm its recipient restriction *before* assuming it covers real
+users — it very likely only sends to the account owner.
+
+**Global Candidate:** Yes — applies to any AG project adding outbound email from a cloud backend,
+not specific to this project's stack.
+
+---
+
+## 2026-09-30 — `read -r VAR < file` returns nonzero (breaks `set -e`) when the file has no trailing newline, even though it reads the value correctly
+
+**Context:** The established secret file-relay pattern (save a credential to a local `.txt`, read
+it into a shell script via file redirection, never paste into chat) — used twice this session for
+a Gmail app password and a Resend API key.
+
+**Discovery:** `IFS= read -r VAR < "$file"` under `set -e` aborted the script immediately after
+successfully populating `$VAR`, with no visible error, because `read` returns exit status 1 when
+it hits EOF without a newline terminator — which is exactly what a file saved via Notepad without
+a trailing Enter produces. The value was correct; the script just silently died on the next line
+before ever using it. Confirmed via a byte-count/`wc -l` check (0 newlines) on the actual file,
+not assumed.
+
+**Impact:** Any script using `read -r VAR < file` in this environment's file-relay secret pattern
+needs `read -r VAR < "$file" || true` (or equivalent) to tolerate a no-trailing-newline file —
+otherwise a perfectly valid secret file silently produces a script that dies before reaching the
+command that uses it, which looks exactly like "the deploy didn't happen" rather than "the read
+command had a nonzero exit status."
+
+**Global Candidate:** Yes — the file-relay secret pattern itself is already a cross-project
+convention (noted in `AG_SYSTEM_MAP.md`-adjacent docs); this is the concrete gotcha in its most
+common failure shape (a Windows-saved text file).
+
+---
+
+## 2026-09-29 — Re-run the unmodified code before accepting a "regression" diagnosis
+
+**Context:** Real-property testing (Phase 3/4) surfaced several suspected new bugs in the freeform
+merge and ingestion prompts — a coarse conflict-scoping bug, two ingestion facts that seemed
+dropped by the new prompts.
+
+**Discovery:** Before touching the pool-heating conflict-scoping bug, ran the *unmodified* prompt
+3 times against the same real source data: 1/3 runs collapsed everything into one conflict blob,
+1/3 scoped it correctly. This proved the bug was model non-determinism interacting with a
+misleading worked example already baked into the prompt — not a regression introduced by any of
+this session's earlier grounding fixes. The same re-run-unmodified check on two other suspected
+ingestion "regressions" (a WiFi-delivery fact, a booking-policy fact) showed both were actually
+present when re-tested — one-off misses on the original baseline run, not real bugs. Treating
+either as confirmed without this check would have meant "fixing" things that weren't broken, and
+in the pool-heating case, chasing the wrong theory entirely (a regression) instead of the real one
+(a misleading example, present all along).
+
+**Impact:** Made this an explicit, named step (Step 0) in `FIX_VERIFY_PROTOCOL.md`, ahead of FMEA:
+reproduce against real data, trace to the literal mechanism, then isolate the variable by
+re-running the unmodified code multiple times before accepting any diagnosis. Also extracted a
+project-agnostic version to `_protocols/FIX_VERIFY_PROTOCOL_UNIVERSAL.md` so other AG projects get
+the same discipline without depending on the-ingestor's own test infrastructure.
+
+**Global Candidate:** Yes — this is a general debugging discipline, not specific to LLM prompts or
+this project. Already promoted structurally via `FIX_VERIFY_PROTOCOL_UNIVERSAL.md`.
+
+---
+
+## 2026-09-29 — A prompt's own worked example can silently teach the wrong behavior, even when the surrounding rules are correct
+
+**Context:** Root-causing why the merge sometimes bundled a settled fact (tiered pool-heating
+packages) together with a genuinely disputed one (a single-night rate) into one `_conflict` blob.
+
+**Discovery:** `MERGER_SYSTEM_PROMPT`'s own worked example for conflict-report generation — using
+data almost identical to this exact real property's real numbers — modeled exactly the wrong
+(coarse) scoping: 4 different pricing figures bundled into one question. The surrounding rule text
+("flag as conflict ONLY when...") was fine; the concrete example contradicted it. Confirmed this
+text was byte-identical between the OLD and NEW prompt (not introduced by any recent edit) —
+purely a pre-existing latent defect that non-deterministically won or lost against the correct
+general instruction depending on the run.
+
+**Impact:** Fixed by rewriting the example to demonstrate the correct behavior, not just adding
+more abstract rule text — a model appears to weight a concrete worked example at least as heavily
+as the surrounding prose rules describing the same behavior.
+
+**Global Candidate:** Yes — worth checking on any prompt with hand-written worked examples: an
+example that predates a later rule addition can quietly keep demonstrating the old, wrong pattern
+even after the rule itself is fixed.
+
+---
+
+## 2026-09-29 — Grounding/self-critique guards can't fix a fact that's wrong but genuinely present in source — only ingestion-level accuracy can
+
+**Context:** Dos Rios's real check-in-code timing rule was subtly wrong in `ingested_markdown`
+itself (resolved against the wrong nearby absolute time). Investigated why neither the merge's
+conflict-detection nor the new self-grounding critique pass (Phase 4) caught it.
+
+**Discovery:** Conflict-detection requires two disagreeing sources — here, the scraped source
+never mentioned check-in codes at all, so there was nothing to disagree with. The self-grounding
+critique pass checks whether a claim is *supported by source*, not whether the source itself is
+*correct* — since the wrong phrasing was verbatim-present in `ingested_markdown`, the critique pass
+correctly judged it grounded. Both mechanisms are structurally blind to this failure class by
+design, not by a bug in either.
+
+**Impact:** Confirms ingestion-level accuracy and merge-level grounding are complementary, not
+substitutes — a merge-level guard can prevent invention, but cannot resurrect or correct a fact
+that ingestion already got wrong. The actual fix for this class of bug has to happen at ingestion.
+
+**Global Candidate:** Yes — applies to any multi-stage extract→verify pipeline (RAG or otherwise):
+a downstream "check against source" pass has a hard ceiling at whatever accuracy the source itself
+carries.
+
+---
+
+## 2026-09-29 — Audit every Gemini JSON-producing call for `response_mime_type`, don't assume a sibling call already covers it
+
+**Context:** A real merge call crashed outright on a malformed (truncated mid-token) Gemini
+response, with no retry, during Phase 3/4 real-data testing.
+
+**Discovery:** `_run_freeform_merge`'s main call was the only one of `gemini_merge_resolve.py`'s
+3 JSON-producing Gemini calls not using `response_mime_type="application/json"` — both
+`_extract_universal_fields` and the newer critique-pass call already did. `response_mime_type`
+forces Gemini's constrained decoding to guarantee syntactically valid JSON even without a
+`response_schema`; its absence here was the actual gap, not something to patch with more retries
+alone (a retry-from-scratch is still needed as a backstop for genuine output truncation, which JSON
+mode alone doesn't prevent).
+
+**Impact:** Added the missing flag plus a bounded retry-from-scratch. When a file has multiple
+Gemini calls each parsing JSON from a response, check that ALL of them set `response_mime_type` —
+it's easy for one to be added when the pattern is established and an earlier call to be missed or
+predate the convention.
+
+**Global Candidate:** Yes — a concrete, checkable item for any project making multiple JSON-parsing
+Gemini calls in the same file.
+
+---
+
+## 2026-09-28 — Aggregate accuracy scores hide real regressions; a manual old-vs-new side-by-side catches what scoring doesn't
+
+**Context:** Rewriting the scraper's Gemini call from markdown prose to `response_schema`-
+constrained JSON (root cause of the country/location extraction-reliability investigation). Built
+a comparison harness scoring old-vs-new pipeline output against ground-truth fixtures (location
+recall, hallucination count).
+
+**Discovery:** The aggregate scores looked great immediately (100% location recall, populated-
+field count roughly doubled) — but the populated-field count was comparing two *different-sized*
+schemas (old pipeline's small ~10-domain merge output vs. new pipeline's much larger raw scraper
+schema), which made it look like a bigger win than it honestly was for that specific metric. Only
+a direct manual side-by-side (same fixture, full old markdown output next to full new JSON output,
+read line by line) surfaced two real, concrete gaps the aggregate score was blind to: `meta.
+language_detected`/`data_completeness` coming back empty, and a missing `emergency_contact` field
+that the old pipeline had captured. Both were real schema gaps, not scoring noise — fixed and
+re-verified before shipping.
+
+**Impact:** Added a mandatory manual side-by-side inspection step to this kind of validation, not
+just trusting the aggregate metric. Same technique reused immediately after for the merge-step
+baseline measurement and for live-verifying against real production data (a real trained property,
+"Bungalow") — which caught an actual coordinate-fabrication bug already sitting in production,
+that no fixture-based test had specifically been designed to catch.
+
+**Global Candidate:** Yes — general principle for validating any LLM-pipeline rewrite: aggregate
+scores can hide real regressions in fields the scoring doesn't cover; always spot-check full raw
+output side-by-side on at least one representative case, and validate against real production data
+when available, not just synthetic fixtures, before calling a change validated.
+
+---
+
+## 2026-09-28 — A backlog item can go stale silently when its bug gets fixed as a side effect of unrelated work
+
+**Context:** `QUEUE.md`'s Train Now stranded-host item (host gets no recovery action when a run
+hangs) had sat Open since 2026-09-15/16. Revisiting it this session, the founder said it was
+already resolved — a Delete button on the dashboard card now wipes the stuck property — but nobody
+had ever gone back to cross it off, because the fix landed as a side effect of other Train Now UX
+work, not from someone directly working this specific item.
+
+**Discovery:** This project already lived this exact failure mode once before with the QA-scenario
+logging discipline (`lessons_index.md` drifting out of sync with `lessons.md`, now mechanically
+checked by `wrap_up.sh`) — the same root cause (a backlog/index file only updated by whoever
+happens to be looking at it, not by whoever actually changes the underlying thing) recurred here in
+a different file. `_tests/scenarios.md` already solves an adjacent problem with its `touches:`
+convention (grep scenarios whose files overlap a session's changes, replay them) — that pattern
+was never extended to `QUEUE.md` itself.
+
+**Impact:** Added a `touches: file/path, ...` convention to `QUEUE.md` Open items (`CLAUDE.md`
+Session End step 2) plus a `wrap_up.sh` nudge that prints (never fails — it can't judge relevance,
+only surface it) when a session changes a file an Open item's `touches:` also lists.
+
+**Global Candidate:** No — the underlying principle (a manual backlog file drifts stale unless
+something mechanically prompts a recheck) is already covered by the existing lessons-index-sync
+global pattern; this is just the same lesson recurring in a new file within this project, not a
+new principle.
+
+---
+
+## 2026-09-25 — Verifying Sentry Flutter's automatic zone-based capture needs a real triggered error, and `Future.delayed` must be scheduled *inside* `SentryFlutter.init`'s `appRunner`
+
+**Context:** Wiring up Sentry error tracking across backend/scraper/frontend. Backend/scraper
+verification was straightforward — a direct `sentry_sdk.capture_message()` call against the real
+DSN, confirmed landed server-side via the Sentry MCP. The frontend (`sentry_flutter`) needed a
+different approach: its value is the *automatic* capture hooks (`FlutterError.onError`,
+`PlatformDispatcher.instance.onError`, and Dart's zone-based uncaught-error handler) that
+`SentryFlutter.init` installs — calling `Sentry.captureException()` directly would only prove the
+SDK *can* send events, not that the automatic wiring actually works.
+
+**Discovery:** Built a throwaway, URL-gated trigger (`?sentry_verify=1` → `throw StateError(...)`
+inside a `Future.delayed`) to produce a real uncaught error automatable via Playwright, without
+needing to click through the app's auth flow. The one non-obvious part: the `Future.delayed` call
+has to be placed *inside* `SentryFlutter.init`'s `appRunner` callback, not scheduled before
+`SentryFlutter.init` runs — `SentryFlutter.init` wraps `appRunner` in its own Dart zone
+internally, and a `Future`/`Timer` callback runs in whatever zone was current *when it was
+scheduled*, not when it fires. Scheduling it outside `appRunner` would have silently escaped
+Sentry's zone entirely — no error, just nothing captured, and it would have looked identical to
+a broken DSN or a broken init call. Verified via a real headless-Chromium Playwright run:
+navigated to the locally-served fresh build with the query param, intercepted the actual outbound
+`POST .../envelope/` request, and confirmed via the Sentry MCP that the event landed server-side
+with the right message and timestamp. Removed the trigger before committing.
+
+**Impact:** This is now the template for verifying any future Flutter-side automatic-capture
+change in this project (or a similar Sentry Flutter rollout elsewhere) — a query-param-gated
+throw inside `appRunner`, Playwright network interception on the request, Sentry MCP confirmation
+server-side. Direct `captureException()` calls remain fine for testing the SDK/DSN plumbing
+itself, just not sufficient for proving the automatic hooks are live.
+
+**Global Candidate:** No — specific to `sentry_flutter`'s zone-wrapping behavior, not a general
+principle beyond this project's own Sentry rollout.
+
+---
+
 ## 2026-09-19 — Full `Read` on a known secrets file is still a leak, not just raw `grep`/`cat`
 
 **Context:** Mid-session, writing a new Playwright scenario for the Stop/Delete UI fixes, needed
@@ -742,5 +1043,36 @@ tightening is project-local process: this is the SECOND time the mandated pre-wo
 grep was skipped and cost real time re-discovering something already written down. Consider
 actually running the grep as a literal first tool call on any infra/secrets/deploy task, not a
 mental note that's easy to skip under task momentum.
+
+---
+
+## 2026-09-24 — `git push` needs WSL specifically; local git ops (commit/diff/status) work fine from either shell
+
+**Context:** Committing and pushing several fix commits to `staging` during the Telegram
+merge-readiness work. Local git operations (`git status`, `git diff`, `git add`, `git commit`) had
+all been running successfully via the plain Bash tool all session, against the project's UNC path
+(`\\wsl.localhost\Ubuntu\...`) working directory.
+
+**Discovery:** `git push origin staging` via the same plain Bash tool failed with `Host key
+verification failed. fatal: Could not read from remote repository.` — this repo's remote is SSH
+(`git@github.com:...`), and the Bash tool here is Windows Git Bash, whose SSH client/known_hosts
+live under `C:\Users\<user>\.ssh`, not WSL's `~/.ssh` where this project's actual GitHub SSH key
+and trusted host key are configured. Local-only git commands never touch the network, so they work
+identically from either shell against the same UNC-mounted `.git` directory — it's specifically
+`push`/`fetch`/`pull` (anything invoking SSH) that requires routing through `wsl bash -lc
+"git push ..."` instead. Confirmed by re-running the identical push command via `wsl bash -lc` from
+the WSL-side path immediately after the failure — succeeded on the first try.
+
+**Impact:** Every push this session (after the first failure) went through `wsl bash -lc 'cd
+~/AG_master_files/projects/the-ingestor && git push origin staging'` instead of the plain Bash
+tool. No lost work — the commits existed locally in the shared `.git` either way, this only
+affected the network step.
+
+**Global Candidate:** Yes — this is a specific, previously-undocumented corollary of the already-
+established "WSL2 tools need `wsl bash -c`" rule (root `CLAUDE.md` §2): git itself is a partial
+exception, since Windows Git Bash bundles its own git.exe that works fine for anything local. The
+network-dependent subset (`push`/`fetch`/`pull`/`clone` over SSH) is the part that specifically
+needs WSL's own SSH identity — worth stating explicitly rather than leaving "git" as a blanket
+WSL-only tool, since that overstates the restriction and undersells why push specifically fails.
 
 ---

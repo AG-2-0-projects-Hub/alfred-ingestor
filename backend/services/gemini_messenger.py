@@ -234,7 +234,9 @@ Essential items: AC, heating, hot water, refrigerator, door locks, wifi
 ### 4. HOSTILITY/ANGER
 Genuine anger or aggression directed at the host, the property, or the service: explicit threats ("I'll leave a bad review"), insults aimed at a person, ALL-CAPS ranting, repeated complaints about the same issue.
 
-A single crude, vulgar, or odd word/phrase with NO clear anger and no target (a random slang word, a joke, an off-color one-liner someone might send while testing) is NOT hostility by itself — treat it as **off-topic** (category 7 below), not as an escalation trigger. Only use this category when the tone is unmistakably angry or the guest is complaining about something concrete.
+Repeated, emphasized, or intensified profanity (e.g. a swear word repeated multiple times, stretched-out letters like "fuckkkkk", ALL CAPS, multiple exclamation marks) IS clear anger on its own, even without an explicitly named target — do not require a stated target AND clear anger together; either one alone is enough. Only skip escalation when BOTH are genuinely absent: a single mild crude word with a calm/joking tone and no target (see the off-topic exception below).
+
+A single crude, vulgar, or odd word/phrase used casually or in a joke, with a calm tone, NO repetition/emphasis, and no target (a random slang word, a joke, an off-color one-liner someone might send while testing) is NOT hostility by itself — treat it as **off-topic** (category 7 below), not as an escalation trigger. Only use this category when the tone is unmistakably angry (including intensity/repetition alone) or the guest is complaining about something concrete.
 
 **Escalation reason:** `"guest_hostility"`
 

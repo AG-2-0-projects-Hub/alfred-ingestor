@@ -93,12 +93,27 @@ export async function runD9(): Promise<ScenarioResult> {
     await page.mouse.click(vp.width * 0.499, vp.height * 0.228);
     await page.waitForTimeout(300);
     await page.keyboard.type(TEST_URL, { delay: 15 });
-    await page.mouse.click(vp.width * 0.499, vp.height * 0.903);
+    // The Gold/Also-helps tips card made the form taller than one viewport:
+    // scroll Train Now into view first (same fix D8 carries).
+    await page.mouse.wheel(0, 1400);
+    await page.waitForTimeout(800);
+    await page.mouse.click(vp.width * 0.499, vp.height * 0.863);
 
-    await Promise.race([
+    // Passed alone and right after D8, but missed the dispatch once inside the
+    // full suite (2026-10-01) -- a slow headless frame can swallow the first
+    // click. One retry is safe: if the first click did register the button is
+    // already disabled (`_isIngesting`) and the second does nothing.
+    const waitForDispatch = (ms: number) => Promise.race([
       capturedIdPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('never saw /api/ingest dispatch')), 8000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('never saw /api/ingest dispatch')), ms)),
     ]);
+    try {
+      await waitForDispatch(8000);
+    } catch {
+      notes.push('no dispatch after first Train Now click -- retrying once');
+      await page.mouse.click(vp.width * 0.499, vp.height * 0.863);
+      await waitForDispatch(8000);
+    }
     notes.push(`dispatched, property_id=${capturedId}`);
 
     // Back to the dashboard: a plain reload rather than the in-app back

@@ -44,6 +44,27 @@ export async function runD6(): Promise<ScenarioResult> {
     notes.push(`menu judge: ${menuVerdict.pass ? 'PASS' : 'FAIL'} — ${menuVerdict.notes}`);
     if (!menuVerdict.pass) throw new Error('Settings menu did not render as expected');
 
+    // A fresh browser context has neither "seen" flag, so the replay switch
+    // starts ON (replay pending). The judge only ever sees ONE screenshot, so
+    // each state is asserted absolutely -- never "changed compared to before",
+    // which a single image can't show -- and the real ground truth is the
+    // flutter.* localStorage keys that shared_preferences writes on web.
+    const readFlags = () => page.evaluate(() => ({
+      settings: localStorage.getItem('flutter.post_training_walkthrough_seen'),
+      guestLink: localStorage.getItem('flutter.guest_link_walkthrough_seen'),
+    }));
+    const before = await readFlags();
+    artifacts.flagsBefore = JSON.stringify(before);
+    const beforeOk = before.settings !== 'true' && before.guestLink !== 'true';
+    notes.push(`flags before: ${JSON.stringify(before)} — ${beforeOk ? 'PASS' : 'FAIL'}`);
+
+    const onVerdict = await judgeScreenshot(
+      menuShot,
+      'In the Settings dialog, the switch next to "+ Show walkthrough again" is turned ON (thumb on the right, track filled with a colour).',
+    );
+    artifacts.onVerdict = onVerdict.raw;
+    notes.push(`initial-ON judge: ${onVerdict.pass ? 'PASS' : 'FAIL'} — ${onVerdict.notes}`);
+
     // Toggle it. Fixed viewport dialog is centered ~380px wide; the switch
     // sits at the right edge of the toggle row, roughly 60% down the panel.
     await page.mouse.click(vp.width * 0.5 + 130, vp.height * 0.5 - 10);
@@ -53,12 +74,17 @@ export async function runD6(): Promise<ScenarioResult> {
     artifacts.toggledScreenshot = toggledShot.toString('base64');
     const toggledVerdict = await judgeScreenshot(
       toggledShot,
-      'The same Settings dialog, but the "+ Show walkthrough again" switch is now in the OPPOSITE visual state (on vs off) compared to before -- it changed when clicked.',
+      'In the Settings dialog, the switch next to "+ Show walkthrough again" is turned OFF (thumb on the left, track grey/unfilled).',
     );
     artifacts.toggledVerdict = toggledVerdict.raw;
-    notes.push(`toggle judge: ${toggledVerdict.pass ? 'PASS' : 'FAIL'} — ${toggledVerdict.notes}`);
+    notes.push(`toggled-OFF judge: ${toggledVerdict.pass ? 'PASS' : 'FAIL'} — ${toggledVerdict.notes}`);
 
-    status = toggledVerdict.pass ? 'pass' : 'fail';
+    const after = await readFlags();
+    artifacts.flagsAfter = JSON.stringify(after);
+    const afterOk = after.settings === 'true' && after.guestLink === 'true';
+    notes.push(`flags after: ${JSON.stringify(after)} — ${afterOk ? 'PASS' : 'FAIL'}`);
+
+    status = beforeOk && onVerdict.pass && toggledVerdict.pass && afterOk ? 'pass' : 'fail';
     details = notes.join(' | ');
   } catch (err) {
     status = 'fail';

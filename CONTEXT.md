@@ -10,26 +10,242 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🔴 guide.html screenshots still broken (crops, highlight style, wrong Knowledge-tab approach) —
-  untouched this session. Handoff: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
-  Must use `FIX_VERIFY_PROTOCOL.md`.
-- 🟢 **Telegram host-escalation — FIX_VERIFY closed (staging `ad87535`).** Only the staging→main
-  merge sequence remains (prod migrations, PR, founder-merge, prod webhook re-registration — easy
-  to forget, would silently break Mark Resolved/the picker on prod): `C:\Users\San_8\.claude\plans\
-  telegram-host-escalation-merge-readiness.md` §4.
-- 🟡 Stray property "Bungalowww" didn't actually delete — worth a quick look at the delete path.
-- 🟡 Walkthrough opacity Fix 2 not started — likely root cause is `GlassPanel` silently dropping
-  `color` app-wide when `gradient` is also set (still unfixed).
+- 🔴 **Merge prep (2026-10-01) is DONE and COMMITTED locally as `775b1ca` — NOT pushed.** Founder
+  pushes `staging`, opens PR `staging→main`, merges manually (planned 2026-10-02). State + post-merge
+  checks: `_Context/HANDOFF_pre-merge-prep_2026-10-01.md` (after merge: `gcloud builds list
+  --region=europe-west3` SUCCESS, `alfred-backend` 100% on the new revision, `/health` 200).
+  Next, with a proper plan + FIX_VERIFY: the auth gaps on merge/resolve/knowledge endpoints
+  (`QUEUE.md`; frontend must send the token on the 3 merge/resolve calls FIRST, then enforce).
+- 🟡 C1/C3/G4/G5 re-verified on staging 2026-10-01 (live probes, API/DB legs only, not saved into the
+  runner); A1/B12 untouched by this merge. After the merge deploys, mark Sentry ALFRED-SCRAPER-2
+  (FT-SE-004) resolved. Feedback dialog FT-WF-001/002 → `QUEUE.md`.
+- 🟡 Host escalation email: SendGrid live (staging + prod env); real domain later (`ROADMAP.md` M2).
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
-- 🟡 Auth "email already registered" notice (new) deployed, not yet clicked through by the founder.
+- 🟡 guide.html rework + walkthrough/`GlassPanel` opacity live in `QUEUE.md` (opacity: **do not
+  attempt** without the founder — it burned 2 days and broke things before).
 
 ## Unresolved Decisions
 - guide.html's Step 4 screenshot doesn't show real dummy files in the dropzone — Flutter's
   canvas-rendered file picker didn't respond to Playwright's native file-chooser intercept or a
   synthetic drag-and-drop, both tried and confirmed not working. Accept as-is, or revisit via a
   different method (e.g. founder uploads real files and sends a screenshot to work from)?
+  **Update 2026-10-01:** B7 now shows a synthetic `DragEvent` dispatched on `flt-glass-pane` *does*
+  reach the DropZone (an `.exe` drop got the red inline rejection) — the earlier "not working"
+  conclusion may have been stale coordinates, so a supported-file drop is worth one more try.
 
-**Last Session:** 2026-09-22 (**Fixed a real founder-reported bug (English welcome message on a
+**Last Session:** 2026-10-01 (**Got beta-tester escalation email actually delivering, then prepared
+the `staging→main` merge: a new live E2E found and fixed 3 real scraper/ingest bugs, the QA suite is
+back to 18/18, and the Pending Intake queue was promoted into scenarios.** All uncommitted except
+`593ccc3` — staging backend rev `alfred-backend-staging-00046-2dn`, scraper `…-00010-x5x` already
+deployed; prod has migrations + env vars applied (inert until the merge deploys the code).
+  - **Email:** Gmail SMTP from Cloud Run failed 5/5 and Resend's sandbox only reaches its owner →
+    **SendGrid Single Sender** (verified `alfred.bnb.host@gmail.com`; `email_client.py`, `593ccc3`).
+    Real delivery to a non-owner inbox confirmed. "Never arrived" had three stacked causes: an
+    empty env value (nested-quote `$(cat)` via `wsl bash -lc`), a trailing `\r` from the
+    Windows-saved key file ("Illegal header value", swallowed as a warning), and the endpoint only
+    sending on a genuine enable/address change. Env set on staging + prod Cloud Run.
+  - **Prod parity:** applied the `welcome_modal_seen` + escalation-email migrations to prod; per-table
+    column hashes, RLS, policies, realtime and buckets match staging. `MERGE_TO_MAIN_PROTOCOL.md`
+    corrected (prod Cloud Run *does* auto-deploy on `main`; staging has no trigger) + a "things a
+    git merge does not carry" checklist (migrations, env vars, secrets).
+  - **New B1** (`b1.ts`, layer 3, real Firecrawl + Gemini + real Bungalow files, no browser) — its
+    first run FAILED: no hero image in ~40% of scrapes. Root cause: `433bc66` (09-28) replaced the
+    template's mandatory `**Thumbnail:**` line with an optional LLM JSON field. Three FIX_VERIFY
+    fixes (FMEA'd, approved): `_pick_hero_url` fallback (thumbnail → curated_photos[0] →
+    gallery[0]) in `ingest_worker.py`; `data_completeness` made an enum (a run had returned
+    "Partial", which would have disabled the `Low` retry trigger); the scraper's dead Supabase
+    upsert deleted (42P10 on every scrape since 2026-06-02 — Sentry FT-SE-004). Verified: replay of 5
+    real saved scrapes + 7 edge cases, 6 live scrapes all "High", 0 × 42P10 on scraper rev 00010,
+    B1 live PASS (188 s, then 138 s in the final full run).
+  - **QA suite:** first full run 9/17, all 8 failures were test drift, not product bugs. Repaired in
+    two passes (B6, B7, B15, D6, D9, P1, P8) — final `npm run full` **18/18**. Real causes: a stale
+    drop-zone y; tsx/esbuild's `__name` helper breaking named fns inside `page.evaluate`; B6's
+    expectation predated the client-side "airbnb." guard (rewritten: button disabled, zero
+    `/api/ingest` POSTs, no row); Profile dialog auto-scroll moving "How to use"; the vision judge
+    false-PASSing a QR/deep-link check. B7's synthetic drag-drop onto the Flutter canvas does work.
+  - **Docs:** `scenarios.md` — B1/B6/B7 rewritten, new section **R** (R1–R10, honest
+    partial/pending), 42 Pending Intake rows promoted; `lessons.md` +6 entries; QUEUE/ROADMAP/
+    feedback BACKLOG refreshed (FT-SE-004 closed, stale prod-migration item closed).
+  - **Non-bugs:** "Bungalowww didn't delete" (row belongs to stale `prodtest@test.com`); "signup sent
+    no confirmation email" (already-registered email → Supabase `identities: []`, anti-enumeration;
+    the app already shows the notice); the Sentry "resources exhausted" email was ALFRED-BACKEND-2, a
+    transient Vertex 429 during the merge step of this session's own B1 run.
+  - **Founder directives this session:** scope = only what is connected to the prod merge (walkthrough
+    opacity → QUEUE, never attempt); Qwen judges only Playwright UI screenshots, Claude judges
+    scrape/ingest/merge pipeline output; never commit/push unasked.
+  - **Merge-gate probes (founder asked, 2026-10-01 evening):** live read-only probes on deployed staging,
+    all passed — **G4** (staging + prod bundles serve `sb_publishable_`, anon reads 0 rows on all 8
+    tables), **G5** (13 host endpoints → 401 without/with garbage token; valid token vs another
+    host's data → 403 on 5 endpoints), **C1** (guest question answered in 15.6 s, no escalation),
+    **C3** (smoke emergency → intervene + `emergency_fire` + `__SYS_INTERVENE__` in 13.3 s; UI/push
+    legs not driven). Found, queued, not fixed (pre-existing, also on `main`): `merge`/`resolve`/
+    `add-knowledge`/`query-knowledge`/`ingest` have no auth gate; `resume`/`retry-scrape` don't check
+    ownership. Also queued: server-side file-type filter (UI-only today). Sentry
+    FT-SE-001/002/003 resolved at the founder's yes.
+  - **Not done:** A1, B12 unautomated (untouched by the merge); `supabase` still in
+    `scraper/requirements.txt` + the scraper's `INGESTOR_SUPABASE_*` env (queued).)
+
+**Prior Session:** 2026-09-28→30 (**Ran the feedback-triage protocol's first-ever execution,
+found+fixed a real gap in its own source coverage, then chased a beta-tester bug report to a real
+root cause and shipped a host escalation-email fallback end-to-end — staging only, real delivery
+proven live.**
+  - **Feedback triage Run 1:** batched staging `feedback` table (2 items, S3) + Sentry (4 items —
+    3 N/A setup-verification pings + 1 real S1: the scraper's `properties` upsert always fails,
+    `on_conflict="airbnb_url"` with no matching DB constraint, confirmed live against the schema).
+    Mid-run gap found: the source declaration only ever covered **staging** `feedback`, never
+    prod — real host feedback would have been silently missed forever. Fixed: added
+    `webapp-feedback-prod` as a second declared source in
+    `FEEDBACK_TRIAGE_PROTOCOL_INGESTOR.md` (v1.1). Prod's table is empty (0 real submissions so
+    far). **Step 6 approval never completed** — got pulled into the investigation below before the
+    founder worked through the 4 items; archived as deferred in the new
+    `_Context/feedback_triage/BACKLOG.md` (Step 9, first time this file exists).
+  - **Root-caused a real beta-tester report** (host Luis Martini, "Dpto 1 taxco"): a guest asked
+    for the entry code and Alfred never answered. Traced live against prod: Alfred escalates
+    correctly on an unanswerable question, but the *only* host-alert channel (Telegram) requires
+    linking, Luis never had, and there was no fallback — `host_alert_message_id` stayed null the
+    whole time, guest got silence for ~3 days and let themselves in by other means.
+  - **Shipped the fix** (Plan Mode approved, `FIX_VERIFY_PROTOCOL.md` followed throughout): host
+    email as a second, independent, opt-in escalation channel. 3 new `host_profiles` columns,
+    `backend/services/email_client.py` (new), two new endpoints (`POST /host/escalation-email`,
+    public no-login `GET .../unsubscribe` — every email carries an unsubscribe link specifically
+    so a host-mistyped address can self-remove), a shared `_notify_host_escalation` helper
+    refactored out of the existing Telegram alert code (both call sites), and a Profile dialog
+    email field + checkbox. Migration applied to staging. Real Playwright scenario **P9** added
+    (`_tests/runner/scenarios/p9.ts`) and run live against staging — PASS (UI + a DB check proving
+    the new backend endpoint fired, not just a plain RLS-direct write).
+  - **Email provider saga:** tried Gmail SMTP first (founder's own account, no owned domain yet) —
+    failed consistently from Cloud Run, 5/5 real attempts across two distinct app passwords, mixed
+    failure modes (`BadCredentials`, `Connection unexpectedly closed`) despite 2-Step Verification
+    confirmed on and Advanced Protection confirmed off. That inconsistency across distinct
+    credentials points to Cloud Run's network path to Gmail's SMTP being the actual blocker, not
+    the password — worth remembering before trying raw consumer-webmail SMTP from Cloud Run again.
+    Switched to **Resend's sandbox sender** (`onboarding@resend.dev`, zero domain needed) —
+    **live-verified for real**, a receipt email actually arrived. Tradeoff, now flagged in
+    `ROADMAP.md`: sandbox only delivers to the Resend account's own email, so real beta hosts get
+    nothing until a domain is verified — founder's call, deferred until the webapp gets its own
+    domain.
+  - **Process/environment notes:** `git push` for this repo must go through `wsl bash -lc` — the
+    Bash tool's own Git Bash lacks GitHub's SSH host key trust, WSL's git already has it. Two
+    other active sessions were pinged before starting (file-overlap check) — no conflicts, one
+    peer commit (`612fbdf`, ingestion timeout fix) landed cleanly interleaved mid-session.
+  - Secrets (Gmail app password, then Resend API key) handled via the established file-relay
+    method (save to a local `.txt`, read via shell file-redirection — never `$(...)` substitution,
+    confirmed broken again in this session's Bash-tool→WSL path — never pasted into chat).
+
+**Prior Session:** 2026-09-29 (**Real-property ingestion + full old-vs-new pipeline testing on 3
+actual trained properties' real documents — found, root-caused, and fixed 4 real bugs, shipped a
+new self-grounding critique pass, fixed a JSON-mode reliability gap and a large-file timeout risk,
+then codified the root-cause methodology into `FIX_VERIFY_PROTOCOL.md` as a new Step 0 and
+extracted a project-agnostic version for other AG projects.** 6 commits to staging, all pushed, all
+validated 2+ independent rounds against real data. Full detail (every bug, root cause, and
+validation evidence) in `C:\Users\San_8\.claude\plans\fluffy-riding-feigenbaum.md` — this entry is
+the terse summary.
+  - Continued from 2026-09-28's Phase 1/2 (ingestion + merge grounding, already shipped). Founder
+    asked whether ingestion had real-document testing rigor to match merge — it didn't. Built
+    `_Context/full_fidelity_harness/` against 3 real properties' actual uploaded files, judged by
+    Claude subagents (the cheap OpenRouter judge from Phase 2 proved unreliable on long real docs).
+  - **2 ingestion bugs fixed** (`gemini_client.py`): a conditional rule ("code sent 1hr before
+    arrival") getting resolved against an unrelated nearby absolute; and the anti-fabrication
+    caution from 2026-09-28 over-rejecting a legitimate in-document identity inference (a host's
+    name only ever appearing via repeated guest address, never self-declared).
+  - **2 merge bugs fixed** (`gemini_merge_resolve.py`): the already-shipped grounding fix still let
+    the freeform merge fabricate a bathroom shower on real Sta Prisca data — fixed with a new
+    mechanism (a self-grounding critique pass, one extra schema-free Gemini call stripping
+    unsupported claims, deliberately no static fields) rather than another prompt patch; and a
+    conflict-scoping bug where the prompt's own worked example modeled the wrong (too-coarse)
+    behavior — confirmed via re-running the *unmodified* prompt 3x that this was latent, not a new
+    regression, then fixed by rewriting the example.
+  - **1 new reliability bug found+fixed, off the original list:** the main merge call was the only
+    one of 3 JSON-producing calls missing `response_mime_type="application/json"`, causing a real
+    unretried crash on a malformed response. Also fixed a large-real-PDF timeout risk (now
+    size-aware: >3MB gets one 70s attempt instead of 35s×2).
+  - **2 suspected regressions did NOT reproduce on re-test** — logged as non-issues, not silently
+    dropped.
+  - **Process:** added Step 0 ("root-cause it, don't patch it") to `FIX_VERIFY_PROTOCOL.md`, ahead
+    of FMEA — reproduce against real data, trace to the literal mechanism, isolate the variable by
+    re-running unmodified code before accepting a diagnosis. Extracted a project-agnostic version
+    (full Playwright pattern + from-scratch setup guide included) to root's own
+    `_protocols/FIX_VERIFY_PROTOCOL_UNIVERSAL.md` — uncommitted, founder committing separately.
+  - Hit a sustained Vertex 429 quota exhaustion from the day's call volume during final validation
+    — cleared after ~15 min across 2 retries; budget recovery time for similarly dense future runs.
+
+**Prior Session:** 2026-09-28 (**Sentry rollout across all 3 services + scraper JSON-native
+rewrite, both shipped/deployed/live-verified; merge-step baseline measured for next session.**
+Continued from 2026-09-25's session (Telegram Disconnect, `_UNIVERSAL_FIELDS_TEST`, escalation
+fix, extraction-reliability investigation paused on cross-LLM feedback).
+  - **Sentry** (item 5 of the original 4+1 list): 3 new projects under org `alonso-vazquez-ng`
+    (`alfred-backend`/`alfred-scraper`/`alfred-frontend`), SDK bootstrap gated on empty
+    `SENTRY_DSN`, plus explicit `capture_exception()` at every existing except block across 4
+    backend routers + the scraper that previously only logged and swallowed a real failure (the
+    2026-09-21 resolver `call_timeout` incident's own pattern). Live-verified end-to-end: real
+    events confirmed server-side via the Sentry MCP for all 3 projects, including a real
+    Playwright-triggered uncaught error proving `SentryFlutter.init`'s zone-based auto-capture
+    actually fires (temporary URL-gated trigger, removed before commit — see lessons.md). Deployed
+    to all 4 Cloud Run services + both Vercel projects. Staging `4bcdbb9`.
+  - **Country/location extraction reliability, resolved via architecture change, not more prompt
+    tweaking.** Cross-LLM consultation (Gemini/Perplexity/Gemini Pro) converged: the scraper's
+    `GEMINI_PROMPT_AIRBNB.md` markdown intermediate — a Make.com formatting workaround, not a
+    real requirement per the founder — was itself the bug source (placeholder-string type
+    coercion into fabricated `0`/`False`/`{lat:0,lng:0}`; a combined `[City, State, Country]`
+    field causing entity-hierarchy collisions). Founder's call, invoking "no-patching, fix at
+    origin": dropped markdown entirely, scraper's own Gemini call is now `response_schema`-
+    constrained JSON (`SCRAPER_STRUCTURED_SCHEMA`, `scraper/main.py`). Built a real old-vs-new
+    comparison harness (5 fixtures including the exact previously-failing ones), two independent
+    N=5 rounds: location recall 58-60%→**100%**, the documented Otago world-knowledge-leakage
+    hallucination 1/25→**0/50**. Found+fixed 2 real gaps via direct side-by-side inspection before
+    calling it validated (`meta` self-assessment fields, missing `emergency_contact` field). Added
+    a permanent smoke test (`_SCRAPER_STRUCTURED_TEST`). Live-verified against a real trained
+    production property ("Bungalow") — caught and fixed a live coordinate-fabrication bug already
+    sitting in that property's `master_json` (old scraper literally said "Not specified in
+    listing" for coordinates; the final merged JSON had a confident fabricated lat/lng anyway).
+    Fixed a real downstream break this surfaced: `ingest_worker.py`'s `_parse_thumbnail_url`
+    regexed markdown that no longer exists in JSON output — would have silently broken hero-image
+    upload. Staging `433bc66`, deployed to `alfred-scraper-staging`.
+  - **Merge-step baseline measured** (N=3, real Gemini calls) for the next session's handoff:
+    clean scraper JSON input alone lifted merge-step location recall 58-60%→77% with zero prompt
+    changes, but the Otago hallucination reproduced independently inside the merge step's own
+    prompt — needs the same grounding-rule fix, not just cleaner input. Reconciliation logic
+    itself already works correctly (verified with a deliberately conflicting host document). Full
+    plan + reusable harness: `_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md`.
+  - **Process fix**: added a `touches:` convention to `QUEUE.md` Open items (mirrors
+    `_tests/scenarios.md`'s own) + a `wrap_up.sh` nudge, after the Train Now stranded-host item sat
+    stale for two weeks post-fix (a Delete button resolved it as a side effect of unrelated work,
+    never crossed off).
+
+**Prior Session:** 2026-09-24 (**Closed out Telegram host-escalation's FIX_VERIFY, merged
+staging→main to PROD, and built the real first-login "Welcome to Alfred" modal after
+discovering it had never actually existed.**) — staging + main pushed/merged; PROD updated.
+> **✅ Telegram host-escalation FIX_VERIFY closed and merged to prod.** Added `_tests/scenarios.md`
+> §P (P1-P7) and a real Playwright scenario (`p1.ts`) for the Connect-Telegram UI. Building it
+> surfaced a real bug (not a coordinate issue): the deep-link text (and everything below it,
+> including Delete account) was silently below the profile dialog's scrollable fold once the QR
+> section grew past the visible height — two earlier fixes (missing color, then wrong font family)
+> were real but insufficient; root cause was isolated via a RenderBox position diagnostic and
+> confirmed by manually scrolling staging. Fixed with `Scrollable.ensureVisible`. Both migrations
+> applied + verified on prod; PR #9 merged (`1ec095a`); prod backend/frontend redeployed; **prod
+> Telegram webhook re-registered** — confirmed `allowed_updates` now includes `callback_query`
+> (was silently missing; would have made Mark Resolved/the picker do nothing on prod with zero
+> errors anywhere). Founder smoke-tested prod live — confirmed working.
+> **✅ Built the real first-login "Welcome to Alfred" modal.** Founder reported it wasn't showing
+> after deleting+recreating their account. Investigation found it had **never actually been
+> built** — a full git-history search across every distinctive line of its copy found zero matches
+> on any branch, ever. `guide.html`'s Add Property tab documents it as if it were a live capture,
+> very likely a leftover from the troubled guide.html rework
+> (`_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`). Built for real per Plan
+> Mode (`C:\Users\San_8\.claude\plans\snoopy-spinning-spindle.md`): new
+> `host_profiles.welcome_modal_seen` column (server-side, not `SharedPreferences`, deliberately —
+> must reset correctly on account delete+recreate, which a browser-local flag would not), new
+> `welcome_walkthrough_dialog.dart`, wired into `dashboard_screen.dart`. Verified via a new
+> Playwright scenario (`q1.ts`) — PASS on all 4 assertions, after fixing the vision judge's own
+> prompt ambiguity (it confused the real modal with the app's always-present inline empty-state,
+> which also says "Welcome to Alfred"). Founder then had the dev jargon copy-edited out ("Ingest,
+> then Merge"/"scrapes" → plain language) and the existing post-training "Tell me something
+> directly" walkthrough tip reworded to explicitly invite ongoing use, based on real beta-tester
+> feedback (a host is already using voice notes heavily to keep adding small details).
+> **🟡 Queued, not built:** a Telegram "Disconnect" feature (profile dialog only offers Connect, no
+> way to break the link) — founder-flagged, added to `QUEUE.md`.
+
+**Prior Session:** 2026-09-22 (**Fixed a real founder-reported bug (English welcome message on a
 Mexican property), audited the schema against Airbnb's own mandatory host fields, shipped a
 structured location/safety/parking extension (staging `2ccef20`), then planned a full
 Telegram host-escalation pipeline for tomorrow — corrected mid-session after the founder caught

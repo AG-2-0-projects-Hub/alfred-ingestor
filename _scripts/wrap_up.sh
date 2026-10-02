@@ -114,4 +114,23 @@ else
   check 0 "FIX-VERIFY protocol gate (no commits opted in this session)"
 fi
 
+# QUEUE.md staleness nudge (added 2026-09-28, see CLAUDE.md '## Session End / Wrap-up' and
+# lessons.md 2026-09-28 entry): informational only, never fails the script -- unlike the QA gate
+# above, "this session touched a file an Open item also touches" does NOT mean that item is
+# resolved (could be unrelated work in the same file), so this can't be a real PASS/FAIL judgment
+# call, only a nudge to go look. Mirrors _tests/scenarios.md's existing `touches:` convention.
+queue_touches=$(grep -oE 'touches: .*' QUEUE.md 2>/dev/null | sed -E 's/^touches: //; s/`//g' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort -u)
+overlap=""
+if [ -n "$queue_touches" ] && [ -n "$changed_files" ]; then
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if printf '%s\n' "$changed_files" | grep -Fxq "$f"; then
+      overlap="$overlap $f"
+    fi
+  done <<< "$queue_touches"
+fi
+if [ -n "$overlap" ]; then
+  echo "NOTE: this session changed file(s) an Open QUEUE.md item's 'touches:' also lists ($(echo "$overlap" | xargs)) -- double check whether that item is now stale before the next session picks it up."
+fi
+
 exit $fail

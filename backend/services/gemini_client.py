@@ -1,11 +1,31 @@
 """
 Gemini client using the google-genai SDK.
 
-Prompts A and B are copied VERBATIM from the Make.com blueprint
-(Supabase Alfred Airbnb - B2 - The Ingestor.blueprint.json).
+Prompts A and B are copied VERBATIM (grounding rules aside, see below) from the
+Make.com blueprint (Supabase Alfred Airbnb - B2 - The Ingestor.blueprint.json).
 Prompts C and D are derived from the same blueprint's document pattern
 and adapted for audio and tabular data — originals not present in any
 spec document (flagged as MISSING_DEPENDENCY: no verbatim source found).
+
+All four now carry an explicit GROUNDING RULES block (added 2026-09-28, see
+_Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md and
+C:\\Users\\San_8\\.claude\\plans\\fluffy-riding-feigenbaum.md) — a full audit
+found none of them forbade filling gaps from world knowledge or required
+grounding a stated fact in the actual source, the same failure mode already
+fixed in the scraper (scraper/main.py) and the merge step
+(gemini_merge_resolve.py). Measured baseline (real Gemini calls, 2 rounds,
+N=5 each, see _Context/ingestion_pipeline_harness/): Prompt D's "capture the
+intent behind the data" line reliably caused a false "weekday vs weekend"
+pricing-policy claim from just 2 unrelated dates -- 7/10 runs. That's the
+grounding rules' primary target; the other three prompts' fixtures didn't
+reproduce a comparable failure at baseline, but the rules are added to all
+four to match the shared pattern defensively.
+
+NOTE: file bytes are sent INLINE (types.Part.from_bytes), not via the Gemini
+File API -- Vertex rejects that API outright ("This method is only supported
+in the Gemini Developer client"). An earlier version of this docstring's
+routing table said "Gemini File API"; that was never true for this codebase
+and is corrected here.
 """
 
 from google import genai
@@ -77,7 +97,13 @@ For each topic you identify, extract:
 ### Document Gaps & Questions
 [List any topics that seem incomplete or might generate follow-up questions. E.g., "Mentions pool heating but no cost mentioned" or "References 'the usual procedure' without explaining it"]
 
-REMEMBER: Let the document tell you what categories it needs. A conversation about pool maintenance shouldn't be forced into "House Rules" - create a "Pool Maintenance and Heating" section instead. Be thorough and capture EVERYTHING.\
+GROUNDING RULES (apply throughout):
+- State only what the document actually says. When recording a specific fact (a code, price, name, time, or place), stick to the exact wording or number given — do not fill a gap using outside/general knowledge about the subject, even something you're confident is true (e.g. if the document mentions a landmark or partial address without naming the city, do not add the city yourself).
+- If something is genuinely unclear, ambiguous, or not stated, say so in the Document Gaps & Questions section — never write "N/A", "Not specified", or a guessed value in its place anywhere else in the output.
+- Preserve conditional or relative language exactly as written. If a rule is stated relative to a variable (e.g. "sent 1 hour before YOUR arrival", "due within 24 hours of checkout"), keep it tied to that variable in your output — do not re-resolve it against a different, fixed value stated elsewhere in the document (e.g. a separately-mentioned check-in time), even if that value appears nearby or seems related. Doing so turns a correct conditional rule into a wrong absolute one.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement. If an unlabeled party (e.g. the host in a conversation export) never announces their own name, but multiple other independent messages consistently address or refer to that same party by one name and no other, state that name as fact — the evidence is entirely within the document, this is not outside/world knowledge. Do not omit or hedge an identity that is this clearly and repeatedly evidenced just because it was never phrased as a formal "Name:" declaration.
+
+REMEMBER: Let the document tell you what categories it needs. A conversation about pool maintenance shouldn't be forced into "House Rules" - create a "Pool Maintenance and Heating" section instead. Be thorough and capture EVERYTHING that is actually stated.\
 """
 
 # ─── Prompt B — Images (verbatim from blueprint Route 1) ─────────────────────
@@ -123,7 +149,13 @@ For each section you create, provide:
 ### Additional Observations
 [Anything noteworthy that doesn't fit elsewhere: damage, unique features, maintenance issues, exceptional qualities]
 
-REMEMBER: Your goal is to capture EVERYTHING a guest or host might need to reference. Create as many sections as needed. Be specific and thorough.\
+GROUNDING RULES (apply throughout):
+- Only report what is actually visible and clearly legible in the image. If text is blurry, cropped, or otherwise not confidently readable, say it's illegible rather than guessing a specific value.
+- Do not add facts from outside knowledge (a brand you recognize from a partial logo, a location you infer from a landmark) unless it is clearly and legibly shown in the image itself.
+- Preserve conditional or relative language exactly as written. If a visible instruction is relative to a variable (e.g. "1 hour before YOUR arrival"), keep it tied to that variable — do not re-resolve it against a different fixed value shown elsewhere in the image, even if it appears nearby or seems related.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement (e.g. a name/signature visible on multiple notes or labels that all clearly refer to the same person, with no other name used for them). This is grounded in what's visible, not outside knowledge — do not omit it out of over-caution.
+
+REMEMBER: Your goal is to capture EVERYTHING that is actually visible and legible. Create as many sections as needed. Be specific and thorough, but never guess at something you can't clearly make out.\
 """
 
 # ─── Prompt C — Audio / Voice (MISSING_DEPENDENCY: no verbatim source) ───────
@@ -185,7 +217,13 @@ For each topic extract:
 ### Document Gaps & Questions
 [List any topics that seem incomplete or need follow-up]
 
-REMEMBER: Capture EVERYTHING mentioned. Even casual asides about the property can be valuable for guest experience.\
+GROUNDING RULES (apply throughout, in addition to the silence check above):
+- If a specific detail within the audio — a phone number, code, password, or similar — is spoken but not clearly/confidently audible, write "[unclear]" in its place in the transcript rather than your best guess. This is different from the whole-clip silence check above: it applies even when most of the audio is clearly understandable.
+- Do not fill in a detail using outside knowledge or a plausible-sounding guess — only transcribe what you can confidently make out.
+- Preserve conditional or relative language exactly as spoken. If a rule is stated relative to a variable (e.g. "1 hour before YOUR arrival"), keep it tied to that variable — do not re-resolve it against a different fixed value mentioned elsewhere in the recording, even if it's mentioned nearby or seems related.
+- Attribute an identity from consistent internal repetition, not only from an explicit self-statement. If the speaker never states their own name, but is addressed by the same name multiple times by someone else in the recording, and no other name is ever used, state that name as fact — this is grounded in what's audible, not outside knowledge.
+
+REMEMBER: Capture EVERYTHING mentioned that you can actually make out. Even casual asides about the property can be valuable for guest experience — but never guess at a specific detail you didn't clearly hear.\
 """
 
 # ─── Prompt D — Sheets / CSV (MISSING_DEPENDENCY: no verbatim source) ────────
@@ -230,7 +268,12 @@ For each category extract:
 ### Data Gaps & Questions
 [Note any incomplete columns, missing values, or ambiguous entries that might need clarification]
 
-REMEMBER: Structured data often contains implicit rules. A pricing table with weekend vs weekday rates is a policy, not just numbers. Capture the intent behind the data.\
+GROUNDING RULES (apply throughout):
+- Only state a "rule" or "policy" (e.g. a weekday vs weekend pricing pattern) if enough rows actually support it — a handful of unrelated dates or values is not evidence of a general rule. When in doubt, report the specific values as-is instead of naming a policy, and note the limited sample size in Data Gaps & Questions.
+- Do not fill in or "correct" a value using outside knowledge (e.g. do not pad a short number back to what you assume is a standard format). Report exactly what the data shows, and flag it in Data Gaps & Questions if it looks incomplete or malformed.
+- Preserve conditional or relative values exactly as given. If a column or cell expresses something relative to another variable (e.g. "due 1 hour before check-in time", where check-in time itself varies by row), keep it tied to that variable — do not re-resolve it against a single fixed value found elsewhere in the sheet.
+
+REMEMBER: Structured data can contain implicit rules, but only when the data actually supports one — a pricing table with enough weekend vs weekday rows to show the pattern is a policy; two unrelated dates are just two numbers. Capture the intent behind the data only when the evidence is really there.\
 """
 
 
@@ -275,9 +318,27 @@ def _inline_part(data: bytes, mime_type: str) -> types.Part:
 _INGEST_CALL_TIMEOUT_S = 35
 _INGEST_CALL_ATTEMPTS = 2
 
+# Large real files (e.g. a 60-page PDF chat export) are legitimately slow to
+# process, not hung -- confirmed live 2026-09-29 with Dos Rios's real ~5MB
+# PDF, which was borderline on the ceiling above (non-deterministic
+# pass/fail: timed out once, succeeded on retry, succeeded outright other
+# times). A single longer attempt fits that case better than gambling on a
+# 2nd short one; worst case (70s) still stays comfortably under
+# ingest_worker.py's 90s outer per-file watchdog, with margin left for the
+# surrounding download/DB work. 3 MB as the cutoff sits between two real
+# observed points this session: Sta Prisca's 2.86 MB PDF processed cleanly
+# within 35s every time; Dos Rios's 4.97 MB PDF was the one that wasn't.
+_LARGE_FILE_BYTES = 3 * 1024 * 1024
+_LARGE_FILE_CALL_TIMEOUT_S = 70
+_LARGE_FILE_CALL_ATTEMPTS = 1
 
-async def _generate(system_instruction: str, user_prompt: str, parts: list) -> str:
+
+async def _generate(system_instruction: str, user_prompt: str, parts: list, data_size_bytes: int = 0) -> str:
     client = _get_client()
+    if data_size_bytes > _LARGE_FILE_BYTES:
+        call_timeout, attempts = _LARGE_FILE_CALL_TIMEOUT_S, _LARGE_FILE_CALL_ATTEMPTS
+    else:
+        call_timeout, attempts = _INGEST_CALL_TIMEOUT_S, _INGEST_CALL_ATTEMPTS
     response = await genai_factory.generate_with_retry(
         client,
         model=MODEL,
@@ -285,8 +346,8 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
-        call_timeout=_INGEST_CALL_TIMEOUT_S,
-        attempts=_INGEST_CALL_ATTEMPTS,
+        call_timeout=call_timeout,
+        attempts=attempts,
     )
     return response.text
 
@@ -294,7 +355,7 @@ async def _generate(system_instruction: str, user_prompt: str, parts: list) -> s
 async def process_with_prompt_a(data: bytes, mime_type: str) -> str:
     """Prompt A: PDF / document, sent inline."""
     parts = [types.Part(text=USER_PROMPT_A), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts)
+    return await _generate(SYSTEM_INSTRUCTION_A, USER_PROMPT_A, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_a_text(extracted_text: str) -> str:
@@ -306,19 +367,158 @@ async def process_with_prompt_a_text(extracted_text: str) -> str:
 async def process_with_prompt_b(data: bytes, mime_type: str) -> str:
     """Prompt B: image, sent inline."""
     parts = [types.Part(text=USER_PROMPT_B), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts)
+    return await _generate(SYSTEM_INSTRUCTION_B, USER_PROMPT_B, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_c(data: bytes, mime_type: str) -> str:
     """Prompt C: audio, sent inline."""
     parts = [types.Part(text=USER_PROMPT_C), _inline_part(data, mime_type)]
-    return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts)
+    return await _generate(SYSTEM_INSTRUCTION_C, USER_PROMPT_C, parts, data_size_bytes=len(data))
 
 
 async def process_with_prompt_d(table_text: str) -> str:
     """Prompt D: Sheets/CSV data read natively, sent as plain text."""
     parts = [types.Part(text=USER_PROMPT_D + "\n\n" + table_text)]
     return await _generate(SYSTEM_INSTRUCTION_D, USER_PROMPT_D, parts)
+
+
+# ── Smoke test: verifies all 4 ingestion prompts' GROUNDING RULES, real
+# Gemini calls ─────────────────────────────────────────────────────────────
+# Mirrors scraper/main.py's _SCRAPER_STRUCTURED_TEST and
+# gemini_merge_resolve.py's _UNIVERSAL_FIELDS_TEST -- this project has no
+# pytest suite, and a mocked response would prove nothing here (the point is
+# verifying Gemini itself respects the rules, not this module's plumbing).
+# Full measured baseline (2 rounds, N=5, before/after) lives in
+# _Context/ingestion_pipeline_harness/ -- this is the permanent, minimal
+# regression guard, not a replacement for that harness. Requires local
+# Vertex ADC. Run:
+#   backend/venv/bin/python -m services.gemini_client
+
+_INGEST_TEXT_FIXTURE = """\
+Welcome to Casa Alegre!
+Wifi network: CasaAlegre_5G
+Wifi password: sunshine88
+Check-in time is 3:00 PM.
+Our house sits two blocks from the Zocalo, so you can walk to restaurants.
+"""
+
+_INGEST_SHEET_FIXTURE = """\
+| date       | nightly_rate | contact_zip |
+|:-----------|-------------:|:------------|
+| 2026-11-03 |          180 | 00501       |
+| 2026-12-24 |          450 | 00501       |
+"""
+
+
+def _make_noise_wav_bytes() -> bytes:
+    """Pure random noise, no speech -- stdlib only."""
+    import io as _io
+    import random as _random
+    import struct as _struct
+    import wave as _wave
+    framerate, duration_s = 16000, 2
+    n_frames = framerate * duration_s
+    rng = _random.Random(7)
+    buf = _io.BytesIO()
+    with _wave.open(buf, "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(framerate)
+        samples = [rng.randint(-32768, 32767) for _ in range(n_frames)]
+        w.writeframes(_struct.pack("<%dh" % n_frames, *samples))
+    return buf.getvalue()
+
+
+def _make_wifi_card_png_bytes() -> bytes:
+    """Clear wifi network/password text + one heavily blurred phone number --
+    generated at test-run-time (Pillow already a backend dependency) rather
+    than stored as a binary fixture in source."""
+    import io as _io
+    from PIL import Image, ImageDraw, ImageFilter
+
+    card = Image.new("RGB", (500, 220), (245, 245, 240))
+    draw = ImageDraw.Draw(card)
+    draw.text((20, 20), "WIFI NETWORK: CasaAlegre_5G", fill=(20, 20, 20))
+    draw.text((20, 50), "PASSWORD: sunshine88", fill=(20, 20, 20))
+    draw.text((20, 90), "Host mobile:", fill=(20, 20, 20))
+    phone_layer = Image.new("RGB", (500, 220), (245, 245, 240))
+    ImageDraw.Draw(phone_layer).text((20, 115), "555-201-9988", fill=(20, 20, 20))
+    blurred = phone_layer.filter(ImageFilter.GaussianBlur(radius=8))
+    card.paste(blurred.crop((0, 105, 500, 150)), (0, 105))
+    buf = _io.BytesIO()
+    card.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def _INGESTION_GROUNDING_TEST() -> None:
+    """Real Gemini calls against all 4 prompt paths, checking the same
+    grounding contract added 2026-09-28: facts actually present get
+    extracted, world-knowledge/unsupported facts don't get invented."""
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_INGESTION_GROUNDING_TEST: SKIP (no local ADC -- run "
+              f"'gcloud auth application-default login') -- {exc}")
+        return
+    import os
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    failures = []
+
+    # Prompt A: facts extracted, no city invented for the ambiguous "Zocalo" mention.
+    a_out = await process_with_prompt_a_text(_INGEST_TEXT_FIXTURE)
+    a_lower = a_out.lower()
+    if "casaalegre_5g" not in a_lower or "sunshine88" not in a_lower:
+        failures.append(f"Prompt A: expected wifi network/password in output, got: {a_out[:300]!r}")
+    for forbidden in ("mexico city", "cdmx", "oaxaca", "cuernavaca", "puebla"):
+        if forbidden in a_lower:
+            failures.append(f"Prompt A: world-knowledge leakage -- {forbidden!r} in output "
+                             f"(source never names a city)")
+
+    # Prompt B: clear text extracted, blurred phone number not guessed.
+    b_out = await process_with_prompt_b(_make_wifi_card_png_bytes(), "image/png")
+    b_lower = b_out.lower()
+    if "casaalegre_5g" not in b_lower or "sunshine88" not in b_lower:
+        failures.append(f"Prompt B: expected wifi network/password in output, got: {b_out[:300]!r}")
+    if "555-201-9988" in b_out or "5552019988" in b_out.replace(" ", "").replace("-", ""):
+        failures.append("Prompt B: vision confabulation -- invented the deliberately blurred phone number")
+
+    # Prompt C: silence/noise correctly flagged, never fabricated a transcript.
+    c_out = await process_with_prompt_c(_make_noise_wav_bytes(), "audio/wav")
+    if "NO_SPEECH_DETECTED" not in c_out:
+        failures.append(f"Prompt C: expected NO_SPEECH_DETECTED for pure noise, got: {c_out[:300]!r}")
+
+    # Prompt D: values extracted, no weekday/weekend policy asserted from 2 sparse rows.
+    d_out = await process_with_prompt_d(_INGEST_SHEET_FIXTURE)
+    d_lower = d_out.lower()
+    if "180" not in d_out or "450" not in d_out:
+        failures.append(f"Prompt D: expected both rates in output, got: {d_out[:300]!r}")
+    if "00501" not in d_out:
+        failures.append(f"Prompt D: expected zip '00501' preserved in output, got: {d_out[:300]!r}")
+    for phrase in ("weekday", "weekend"):
+        idx = d_lower.find(phrase)
+        if idx == -1:
+            continue
+        window = d_lower[max(0, idx - 90):idx + len(phrase) + 90]
+        if not any(cue in window for cue in ("no ", "not ", "cannot", "can't", "insufficient",
+                                              "limited sample", "too few", "n/a")):
+            failures.append(f"Prompt D: unsupported {phrase!r} policy claim from 2 sparse rows "
+                             f"(no nearby hedge/negation): ...{d_out[max(0,idx-60):idx+60]!r}...")
+
+    if failures:
+        print("_INGESTION_GROUNDING_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_INGESTION_GROUNDING_TEST: PASS")
+
+
+if __name__ == "__main__":
+    import asyncio as _asyncio
+    _asyncio.run(_INGESTION_GROUNDING_TEST())
 
 
 # ─── Knowledge Base Query (host audit tool) ──────────────────────────────────

@@ -44,6 +44,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _nameController = TextEditingController();
   final _nicknameController = TextEditingController();
   final _bioController = TextEditingController();
+  final _notificationEmailController = TextEditingController();
+  bool _escalationEmailEnabled = false;
   String? _avatarUrl;
   bool _loading = true;
   bool _loadError = false;
@@ -53,8 +55,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   // Telegram "Connect" (host-escalation alerts + reply-from-Telegram).
   String? _telegramChatId; // non-null once linked
+  String? _activeConversationBookingId; // non-null while a Telegram reply is locked to a guest
   String? _telegramLink; // set after generating a connect link this session
   bool _connectingTelegram = false;
+  bool _disconnectingTelegram = false;
   Timer? _telegramPollTimer;
   final _tgHelpDockLink = LayerLink();
   OverlayEntry? _tgHelpOverlay;
@@ -75,6 +79,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _nameController.dispose();
     _nicknameController.dispose();
     _bioController.dispose();
+    _notificationEmailController.dispose();
     _telegramPollTimer?.cancel();
     _tgHelpOverlay?.remove();
     super.dispose();
@@ -85,7 +90,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
     try {
       final row = await _db
           .from('host_profiles')
-          .select('display_name, nickname, bio, avatar_url, telegram_chat_id')
+          .select('display_name, nickname, bio, avatar_url, telegram_chat_id, '
+              'active_conversation_booking_id, notification_email, '
+              'escalation_email_enabled')
           .eq('id', _uid ?? '')
           .maybeSingle();
       // row == null here is a clean "no profile row yet" — expected for a
@@ -96,6 +103,11 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _bioController.text = row['bio'] as String? ?? '';
         _avatarUrl = row['avatar_url'] as String?;
         _telegramChatId = row['telegram_chat_id'] as String?;
+        _activeConversationBookingId =
+            row['active_conversation_booking_id'] as String?;
+        _notificationEmailController.text =
+            row['notification_email'] as String? ?? '';
+        _escalationEmailEnabled = row['escalation_email_enabled'] as bool? ?? false;
       }
     } catch (_) {
       // A real failure (network, RLS) is NOT the same as "no row yet" — that
@@ -162,6 +174,13 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Future<void> _save() async {
     final uid = _uid;
     if (uid == null) return;
+    final notificationEmail = _notificationEmailController.text.trim();
+    if (_escalationEmailEnabled && !notificationEmail.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email to enable email alerts.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       await _db.from('host_profiles').upsert({
@@ -172,6 +191,19 @@ class _ProfileDialogState extends State<ProfileDialog> {
         'avatar_url': _avatarUrl,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
+      try {
+        // Separate endpoint (not the direct upsert above): saving this pair
+        // needs server-side logic — minting an unsubscribe token and sending
+        // a receipt email on activation — that an RLS-direct write can't do.
+        // Non-fatal on failure: the rest of the profile already saved.
+        final token = _db.auth.currentSession?.accessToken;
+        await ApiClient.postJson('/api/host/escalation-email', {
+          'email': notificationEmail,
+          'enabled': _escalationEmailEnabled,
+        }, bearer: token);
+      } catch (_) {
+        // Swallowed — see comment above.
+      }
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -263,6 +295,69 @@ class _ProfileDialogState extends State<ProfileDialog> {
       }
     } finally {
       if (mounted) setState(() => _connectingTelegram = false);
+    }
+  }
+
+  Future<void> _confirmDisconnectTelegram() async {
+    final hasActive = _activeConversationBookingId != null;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Disconnect Telegram?'),
+        content: Text(
+          hasActive
+              ? "You'll stop getting guest alerts here. You currently have "
+                'an active Telegram conversation — reply from the dashboard '
+                'instead after disconnecting.'
+              : "You'll stop getting guest alerts here. You can reconnect "
+                'anytime.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _disconnectTelegram();
+  }
+
+  Future<void> _disconnectTelegram() async {
+    final uid = _uid;
+    if (uid == null) return;
+    setState(() => _disconnectingTelegram = true);
+    try {
+      // Same RLS-scoped direct-write pattern as _save() -- host_profiles'
+      // update policy is row-level only (id = auth.uid()), no column
+      // restriction, so this needs no backend endpoint (unlike Connect,
+      // which mints a server-only secret code).
+      await _db.from('host_profiles').update({
+        'telegram_chat_id': null,
+        'active_conversation_booking_id': null,
+      }).eq('id', uid);
+      if (mounted) {
+        setState(() {
+          _telegramChatId = null;
+          _activeConversationBookingId = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not disconnect Telegram. Please try again.'),
+            backgroundColor: context.palette.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _disconnectingTelegram = false);
     }
   }
 
@@ -411,15 +506,36 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Widget _buildTelegramSection(AppPalette palette) {
     if (_telegramChatId != null) {
-      return Row(
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Telegram connected — you'll get an alert there when a guest "
-              'needs you.',
-              style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+          Row(
+            children: [
+              Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Telegram connected — you'll get an alert there when a guest "
+                  'needs you.',
+                  style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 0),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _disconnectingTelegram ? null : _confirmDisconnectTelegram,
+              child: Text(
+                _disconnectingTelegram ? 'Disconnecting…' : 'Disconnect',
+                style: TextStyle(fontSize: 12, color: palette.danger),
+              ),
             ),
           ),
         ],
@@ -577,7 +693,37 @@ class _ProfileDialogState extends State<ProfileDialog> {
                       key: _telegramSectionKey,
                       child: _buildTelegramSection(palette),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 20),
+                    _label('Email alerts', palette),
+                    Semantics(
+                      label: 'Notification email',
+                      child: TextField(
+                        controller: _notificationEmailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          hintText: 'Email for guest-escalation alerts',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    CheckboxListTile(
+                      value: _escalationEmailEnabled,
+                      onChanged: (v) =>
+                          setState(() => _escalationEmailEnabled = v ?? false),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        'Send escalation notifications via Email',
+                        style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                      ),
+                    ),
+                    Text(
+                      'Every alert includes an unsubscribe link.',
+                      style: TextStyle(fontSize: 11, color: palette.textMuted),
+                    ),
+                    const SizedBox(height: 8),
                     const Divider(),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(

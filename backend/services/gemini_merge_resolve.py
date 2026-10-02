@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sentry_sdk
 from google import genai
 from google.genai import types
 
@@ -48,12 +49,30 @@ You are a meticulous data extraction agent. Merge two property information sourc
 
 ## CRITICAL RULES
 
+### 0. GROUNDING (MANDATORY — applies to every rule below)
+- Every fact in your output must be traceable to the literal content of SCRAPED DATA, INGESTED
+  DATA, or SCRAPED_PHOTOS below — never to outside/world knowledge about the property, host,
+  brand, or location.
+- Never invent, guess, or "correct" a value to a plausible-sounding standard — a rounded price, a
+  completed phone number, a typical brand name, a geocoded coordinate, an assumed state/region for
+  a known city. If a detail is unclear, incomplete, or ambiguous in the source, either quote it
+  exactly as given or omit it — do not smooth it into something cleaner or more complete than what
+  was actually stated.
+- Communication style (Section 4) and any other interpretive characterization must be grounded in
+  actual example phrases/patterns present in the source conversation — do not assign a tone or
+  style that isn't evidenced by real examples you can point to.
+- "When in doubt, INCLUDE IT" (Rule 1 below) governs exhaustiveness of what's *already stated* —
+  it is not license to add a detail that isn't stated. When in doubt about what an unclear or
+  missing value actually is, omit it (Section 6) or flag it as a conflict (Section 3) — never fill
+  the gap with a guess.
+
 ### 1. EXHAUSTIVE EXTRACTION (MANDATORY)
 - Extract ALL information from both sources—no summarizing, paraphrasing, or omitting
 - Include ALL URLs, numbers, measurements, prices, times, names, phone numbers, addresses
 - Include ALL amenities, features, items visible in images
 - Include ALL brands, colors, materials mentioned
-- When in doubt, INCLUDE IT
+- When in doubt about whether a real, stated detail is worth including, INCLUDE IT (see Rule 0 —
+  this means real stated details, never invented ones)
 
 ### 2. ENTITY AWARENESS (PREVENTS FALSE CONFLICTS)
 Before comparing values, identify if data describes:
@@ -86,6 +105,16 @@ DO NOT flag as conflict:
 - Minor coordinate precision differences (<0.001 degrees are rounding—use most precise)
 - Complementary information that adds detail rather than contradicts
 
+**Scope every conflict to the narrowest value that is actually disputed.** If a broader topic
+has several sub-values and only ONE of them has genuinely different numbers across sources, flag
+ONLY that sub-value as `_conflict` — the other sub-values are settled facts and must stay as
+plain data outside the conflict object, not bundled into it. Example: pool heating has a tiered
+multi-hour package ($1,300/$1,900/$2,500 for 24/36/48h — stated the same way everywhere, settled)
+and a separate single-night rate ($600 vs $650 vs $680 — genuinely different across sources).
+Flag `pricing.pool_heating.single_night_rate` as the conflict; keep `pricing.pool_heating.
+tiered_packages` as plain, non-conflicting data. Bundling both into one `pricing.pool_heating`
+conflict makes a settled fact look unresolved to the host for no reason.
+
 **Conflict Format:**
 {
   "field_name": {
@@ -111,7 +140,9 @@ For EACH conflict flagged, create an entry with:
 
 Field Specifications:
 
-id: The JSON path to the conflicting field (e.g., "capacity.max_guests", "pricing.pool_heating")
+id: The JSON path to the SPECIFIC conflicting sub-value (e.g., "capacity.max_guests",
+"pricing.pool_heating.single_night_rate" — not the whole "pricing.pool_heating" topic when only
+one sub-value within it is actually disputed)
 question: A clear, actionable question the host can answer (match the language of the questions to the language of the property listing)
 options: Array of ALL conflicting values discovered + ALWAYS include "other" as the final option (allows host to input free text if none of the values are correct)
 context: 1-2 sentences explaining why this conflict exists or why it matters to guests (neutral tone, don't favor any option)
@@ -126,16 +157,10 @@ Example:
       "context": "El anuncio de Airbnb muestra 5 huéspedes máximo, pero los mensajes automáticos mencionan 3. Esto afecta las reservas y el acceso a la comunidad."
     },
     {
-      "id": "pricing.pool_heating",
-      "question": "Encontramos 4 modelos de precios diferentes para calentar la alberca. ¿Cuál es el modelo actual?",
-      "options": [
-        "Modelo escalonado: $1300-$2500 según horas",
-        "Mantenimiento nocturno: $650/noche",
-        "Ciclo alternativo: $600/12 horas",
-        "Pago único: $680/día",
-        "other"
-      ],
-      "context": "Se encontraron diferentes modelos de precios en las conversaciones con huéspedes. La claridad en este punto ayuda a evitar confusiones durante la reserva."
+      "id": "pricing.pool_heating.single_night_rate",
+      "question": "Encontramos 3 tarifas diferentes para el ciclo de calentamiento de 12 horas/noche. ¿Cuál es la tarifa actual?",
+      "options": ["$600 MXN", "$650 MXN", "$680 MXN", "other"],
+      "context": "Las conversaciones con huéspedes mencionan tarifas distintas para el mismo ciclo de 12 horas. Nota: los paquetes escalonados de 24/36/48 horas ($1,300/$1,900/$2,500) se mencionan de forma consistente en todas las fuentes y NO forman parte de este conflicto — se guardan como dato ya resuelto."
     }
   ]
 }
@@ -205,6 +230,9 @@ The host's communication patterns are essential for chatbot personality. Extract
 - Build JSON based on what EXISTS—no empty sections or placeholders
 - If property has X → create X field
 - Let data shape structure, not templates
+- Omitting a field and guessing a plausible value for it are BOTH violations of this rule —
+  guessing is the worse one. If a checklist item below has zero support in either source, leave
+  it out entirely; do not fill it with a placeholder OR a fabricated real-looking value.
 
 ### 7. MEDIA EXTRACTION
 Include complete media section:
@@ -305,11 +333,13 @@ Include `_conflicts_summary` at root if conflicts exist:
 
 ## FINAL REMINDERS
 ✅ If it's in the source → it's in the JSON
+✅ If it's NOT in the source → it's NOT in the JSON, no matter how plausible it sounds
 ✅ Listing data ≠ Host data (separate entities, no false conflicts)
 ✅ If sources contradict for SAME entity → flag conflict
 ✅ If image shows something → extract it
 ✅ If sign has text → include verbatim + translation
-✅ Communication style is CRITICAL → extract deeply
+✅ Communication style is CRITICAL → extract deeply, but only from real example phrases present
+  in the source — never characterize a tone/style you can't point to an actual example of
 
 **Generate the complete JSON now.\
 """
@@ -644,6 +674,7 @@ UNIVERSAL_FIELDS_SCHEMA = {
         "location": {
             "type": "OBJECT",
             "properties": {
+                "location_evidence_quote": {"type": "STRING"},
                 "address": {"type": "STRING"},
                 "country": {"type": "STRING"},
                 "city": {"type": "STRING"},
@@ -755,9 +786,27 @@ the source data below, into the exact JSON shape given by the response schema.
 
 Rules:
 - Only extract what is actually stated in the sources — never guess or infer a \
-plausible-sounding value.
+plausible-sounding value, even if it's a well-known fact (e.g. do not add a \
+state/region/province just because you recognize the city — if a source says \
+"Queenstown" and never says "Otago", state_region must be omitted, not filled \
+from your own world knowledge).
 - If a field genuinely has no source support, OMIT it entirely (do not include \
 it with an empty, "N/A", "Not specified", or made-up value).
+- location.location_evidence_quote: before filling any other location field, \
+copy the exact sentence(s) from the sources that state the property's location. \
+If the sources state no location at all, leave this empty and omit every other \
+location field too.
+- location.country is the sovereign nation (e.g. "Mexico", "Portugal", "United \
+Kingdom"). location.city is the municipality/town (e.g. "Tulum", "Lisbon", \
+"Queenstown") — not a neighborhood. A neighborhood is a district within a city \
+(e.g. "Alfama" is a neighborhood of Lisbon, not the city itself) and has no \
+dedicated field here, so fold it into address if it's stated. location.\
+state_region is the state/province/county between city and country. A region \
+name that spans multiple administrative divisions (e.g. "Cotswolds") is not \
+itself a state_region.
+- location.coordinates: only include if a source states explicit numeric \
+latitude/longitude values. Never estimate or geocode coordinates from a city or \
+address name.
 - Property identity: if no real listing title exists in either source, use the \
 host-provided nickname instead of leaving it out — but do not invent a name if \
 neither exists.
@@ -804,6 +853,123 @@ def _deep_merge_universal(freeform: dict, universal: dict) -> dict:
     return result
 
 
+_COORD_TOLERANCE_DEGREES = 1e-4  # ~11m -- float roundtrip through JSON/Gemini, not a real-world diff
+
+
+def _guard_coordinates(universal: dict, scraped_markdown: str, source_text: str) -> dict:
+    """Strips location.coordinates from the universal-fields result unless
+    they're actually grounded -- the merge step must never be ABLE to invent
+    coordinates the scraper didn't already supply, not just asked nicely not
+    to (confirmed live: a trained property's stored master_json had fabricated
+    coordinates + a derived Google Maps URL, even though the scraper's own
+    output correctly omitted them -- see the 2026-09-28 redesign plan).
+
+    Grounding sources, in order:
+    1. scraped_markdown parsed as the scraper's own JSON (SCRAPER_STRUCTURED_
+       SCHEMA) -- if it has location.coordinates, that's the authoritative
+       value; float-tolerant match, not exact-string.
+    2. If scraped_markdown isn't valid JSON (legacy pre-433bc66 property) or
+       has no coordinates, fall back to checking whether the claimed lat/lng
+       appear literally in the combined source text.
+    Neither source supports the claim -> the field is dropped entirely."""
+    location = universal.get("location")
+    if not isinstance(location, dict) or "coordinates" not in location:
+        return universal
+    coords = location.get("coordinates") or {}
+    lat, lng = coords.get("lat"), coords.get("lng")
+    if lat is None or lng is None:
+        location.pop("coordinates", None)
+        return universal
+
+    try:
+        scraper_json = json.loads(scraped_markdown)
+        scraper_coords = (scraper_json.get("location") or {}).get("coordinates") or {}
+        s_lat, s_lng = scraper_coords.get("lat"), scraper_coords.get("lng")
+        if s_lat is not None and s_lng is not None:
+            if abs(s_lat - lat) <= _COORD_TOLERANCE_DEGREES and abs(s_lng - lng) <= _COORD_TOLERANCE_DEGREES:
+                return universal  # grounded in the scraper's own JSON
+            log.warning("coordinates guard: merge output %r doesn't match scraper JSON %r -- stripping",
+                        coords, scraper_coords)
+            location.pop("coordinates", None)
+            return universal
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass  # scraped_markdown isn't JSON (legacy property) -- fall through to text check
+
+    if str(lat) in source_text and str(lng) in source_text:
+        return universal  # grounded literally in the combined source text
+    log.warning("coordinates guard: merge output %r not grounded in any source -- stripping", coords)
+    location.pop("coordinates", None)
+    return universal
+
+
+def _norm_grounding(s: str) -> str:
+    return " ".join((s or "").split()).lower()
+
+
+def _token_overlap_ratio(value: str, source_text: str) -> float:
+    """Fraction of value's alphanumeric tokens (len>=3) that individually
+    appear in source_text -- the fallback check for composite fields like
+    `address`, which the model legitimately assembles from several separate
+    source facts (city/state/street) rather than quoting verbatim, so a
+    strict whole-string substring match would false-reject real, grounded
+    content."""
+    import re as _re
+    tokens = [t for t in _re.findall(r"[a-z0-9]+", value.lower()) if len(t) >= 3]
+    if not tokens:
+        return 1.0
+    norm_source = _norm_grounding(source_text)
+    hits = sum(1 for t in tokens if t in norm_source)
+    return hits / len(tokens)
+
+
+_COMPOSITE_FIELD_KEYS = {"address"}  # legitimately assembled from several source facts, not quoted verbatim
+_ADDRESS_TOKEN_OVERLAP_THRESHOLD = 0.7
+
+
+def _verify_grounded_strings(data: dict, source_text: str, nickname: str, path: str = "") -> dict:
+    """Recursively drops any string leaf in `data` that isn't grounded in
+    `source_text` -- a 100%-reliable code-level catch for the exact Otago-
+    style world-knowledge leak, independent of whether the prompt-level
+    grounding rule holds on any given run. Scoped to _extract_universal_
+    fields's own result only: every field in UNIVERSAL_FIELDS_SCHEMA is
+    already short/categorical, so no long-free-text exemption is needed here
+    (that concern applies to the separate freeform merge output, untouched)."""
+    norm_source = _norm_grounding(source_text)
+    result = {}
+    for key, val in data.items():
+        field_path = f"{path}.{key}" if path else key
+        if isinstance(val, dict):
+            nested = _verify_grounded_strings(val, source_text, nickname, field_path)
+            if nested:
+                result[key] = nested
+            continue
+        if isinstance(val, str):
+            if not val.strip():
+                # An empty string trivially "grounds" against any source text
+                # (empty is a substring of everything) -- drop it here so the
+                # schema's own "omit entirely, never an empty value" contract
+                # (UNIVERSAL_FIELDS_SYSTEM_PROMPT) holds even when the model
+                # emits "" instead of actually omitting the key (confirmed
+                # live: state_region/postal_code came back as "" rather than
+                # absent on a fixture with no such facts stated).
+                continue
+            if field_path == "property_identity.property_name":
+                if _norm_grounding(val) in norm_source or _norm_grounding(val) in _norm_grounding(nickname):
+                    result[key] = val
+                else:
+                    log.info("grounding guard: dropping ungrounded property_name %r (no source/nickname match)", val)
+                continue
+            if _norm_grounding(val) in norm_source:
+                result[key] = val
+            elif key in _COMPOSITE_FIELD_KEYS and _token_overlap_ratio(val, source_text) >= _ADDRESS_TOKEN_OVERLAP_THRESHOLD:
+                result[key] = val
+            else:
+                log.info("grounding guard: dropping ungrounded %s=%r (not found in source)", field_path, val)
+            continue
+        result[key] = val  # numbers, booleans, lists -- not a substring-grounding target
+    return result
+
+
 async def _extract_universal_fields(
     scraped_markdown: str, ingested_markdown: str, nickname: str
 ) -> dict:
@@ -825,10 +991,296 @@ async def _extract_universal_fields(
             response_schema=UNIVERSAL_FIELDS_SCHEMA,
         ),
     )
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    source_text = f"{scraped_markdown or ''}\n{ingested_markdown or ''}"
+    result = _guard_coordinates(result, scraped_markdown or "", source_text)
+    result = _verify_grounded_strings(result, source_text, nickname or "")
+    return result
+
+
+# ── Smoke test: verifies UNIVERSAL_FIELDS_SCHEMA's "omit, don't guess" contract ──
+# Referenced by the comment at UNIVERSAL_FIELDS_SCHEMA's definition above. This
+# project has no pytest suite (see _tests/health/run_health_check.py for the
+# established pattern of standalone live-Gemini smoke scripts, which this
+# mirrors) — run directly:
+#   backend/venv/bin/python -m services.gemini_merge_resolve
+# Requires local Vertex ADC (gcloud auth application-default login), same as
+# run_health_check.py's Layer 2 checks — a mocked response would prove nothing
+# here, since the whole point is verifying Gemini ITSELF (not a stand-in)
+# respects "omit if not found," not that this module's own plumbing works.
+
+_FIXTURE_WITH_FACTS = (
+    "# Casa Tulum\n"
+    "Located in Tulum, Quintana Roo, Mexico, five minutes from the beach.\n"
+    "Free private parking for 2 cars is available on site, uncovered.\n"
+    "Safety: the property has a working smoke alarm in the kitchen and a "
+    "security camera covering the front gate (not facing any interior space "
+    "or the pool).\n"
+)
+
+_FIXTURE_NO_FACTS = (
+    "# Cozy Studio\n"
+    "A comfortable studio with a queen bed, a small kitchenette, and a "
+    "private balcony. Guests love the neighborhood's cafes and the rooftop "
+    "pool.\n"
+)
+
+# Location-hallucination regression fixture -- added 2026-09-28 after the
+# baseline in _Context/Merge_And_Ingested_Pipeline_Enhancement_Plan_2026-09-28.md
+# reproduced this exact Otago world-knowledge leak independently inside this
+# module's own prompt, even fed clean scraper-JSON input. Mirrors scraper/
+# main.py's _FIXTURE_NO_WORLD_KNOWLEDGE fixture.
+_FIXTURE_QUEENSTOWN = (
+    "Lakeview Lodge -- Queenstown, New Zealand, gateway to Milford Sound\n"
+    "Entire home, 8 guests, 4 bedrooms\n\n"
+    "Perched above Lake Wakatipu in Queenstown, New Zealand -- gateway to "
+    "Milford Sound. Queenstown is New Zealand's adventure capital.\n"
+    "Amenities: Wifi, Fireplace, Hot tub, Smoke alarm.\n"
+)
+
+
+async def _UNIVERSAL_FIELDS_TEST() -> None:
+    """Real Gemini calls, no mocks: one fixture states country/safety/parking
+    facts explicitly, one states none of them at all, and one (Queenstown)
+    tests the specific world-knowledge-leakage + coordinate-fabrication bug
+    this module reproduced live. Asserts facts are extracted when present,
+    fields are structurally absent (never guessed) when not, and the
+    grounding guards (_guard_coordinates, _verify_grounded_strings) actually
+    strip an ungrounded value rather than just asking the prompt nicely --
+    the "omit if not found" contract UNIVERSAL_FIELDS_SYSTEM_PROMPT asks for,
+    and that this schema's `required`-less design depends on actually being
+    true (see the comment at UNIVERSAL_FIELDS_SCHEMA's definition for why
+    `required` was rejected)."""
+    import os
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_UNIVERSAL_FIELDS_TEST: SKIP (no local ADC — run: "
+              f"gcloud auth application-default login) — {exc}")
+        return
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    with_facts = await _extract_universal_fields(_FIXTURE_WITH_FACTS, "", "Casa Tulum")
+    no_facts = await _extract_universal_fields(_FIXTURE_NO_FACTS, "", "Cozy Studio")
+    queenstown = await _extract_universal_fields(_FIXTURE_QUEENSTOWN, "", "Lakeview Lodge")
+
+    location = with_facts.get("location", {})
+    safety = with_facts.get("safety", {})
+    parking = with_facts.get("parking", {})
+    assert location.get("country"), f"expected country to be extracted, got {location!r}"
+    assert "mexico" in location["country"].lower(), f"unexpected country value: {location['country']!r}"
+    assert safety.get("smoke_alarm") is True, f"expected smoke_alarm=True, got {safety!r}"
+    assert safety.get("security_camera", {}).get("present") is True, \
+        f"expected security_camera.present=True, got {safety!r}"
+    assert parking.get("type") or parking.get("capacity"), \
+        f"expected parking details to be extracted, got {parking!r}"
+
+    no_location = no_facts.get("location", {})
+    no_safety = no_facts.get("safety", {})
+    no_parking = no_facts.get("parking", {})
+    assert "country" not in no_location, \
+        f"hallucinated country with no source support: {no_location!r}"
+    assert "smoke_alarm" not in no_safety, \
+        f"hallucinated smoke_alarm with no source support: {no_safety!r}"
+    assert "co_alarm" not in no_safety, \
+        f"hallucinated co_alarm with no source support: {no_safety!r}"
+    assert "type" not in no_parking and "capacity" not in no_parking, \
+        f"hallucinated parking details with no source support: {no_parking!r}"
+
+    qs_location = queenstown.get("location", {})
+    state_region = (qs_location.get("state_region") or "").lower()
+    for forbidden in ("otago", "south island", "milford sound", "wakatipu"):
+        assert forbidden not in state_region, \
+            f"world-knowledge leakage: state_region={qs_location.get('state_region')!r} contains {forbidden!r}"
+    assert "coordinates" not in qs_location, \
+        f"fabricated coordinates: {qs_location.get('coordinates')!r} (source states none)"
+    assert (qs_location.get("city") or "").lower() == "queenstown", \
+        f"expected city='Queenstown' (actually stated), got {qs_location.get('city')!r}"
+
+    print("_UNIVERSAL_FIELDS_TEST: PASS")
+    print(f"  with_facts -> {json.dumps(with_facts, ensure_ascii=False)}")
+    print(f"  no_facts   -> {json.dumps(no_facts, ensure_ascii=False)}")
+    print(f"  queenstown -> {json.dumps(queenstown, ensure_ascii=False)}")
+
+
+def _flatten_to_text(obj) -> str:
+    """Recursively stringify a dict/list into one lowercase blob -- freeform
+    merge output has no fixed schema (unlike UNIVERSAL_FIELDS_SCHEMA), so a
+    single field-path assertion can't reliably target where a hallucination
+    would land; a whole-output substring/keyword check is the only check that
+    survives the model choosing a different key layout run to run."""
+    if isinstance(obj, dict):
+        return " ".join(_flatten_to_text(v) for v in obj.values())
+    if isinstance(obj, list):
+        return " ".join(_flatten_to_text(v) for v in obj)
+    return str(obj).lower()
+
+
+def _find_fabricated_coordinates(obj) -> list:
+    """Recursively hunts for a lat/lng-shaped numeric pair anywhere in the
+    freeform output -- used against a fixture that states no coordinates at
+    all, so ANY hit here is fabricated by definition."""
+    hits = []
+    if isinstance(obj, dict):
+        keys_lower = {k.lower(): v for k, v in obj.items()}
+        lat = next((v for k, v in keys_lower.items() if k in ("lat", "latitude")), None)
+        lng = next((v for k, v in keys_lower.items() if k in ("lng", "lon", "long", "longitude")), None)
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            hits.append({"lat": lat, "lng": lng})
+        for v in obj.values():
+            hits.extend(_find_fabricated_coordinates(v))
+    elif isinstance(obj, list):
+        for v in obj:
+            hits.extend(_find_fabricated_coordinates(v))
+    return hits
+
+
+async def _FREEFORM_MERGE_TEST() -> None:
+    """Real Gemini calls, no mocks: validates MERGER_SYSTEM_PROMPT's freeform
+    output (the bulk of master_json, untouched by _guard_coordinates /
+    _verify_grounded_strings -- those only cover UNIVERSAL_FIELDS_SCHEMA)
+    against the same Otago-style world-knowledge-leak + coordinate-
+    fabrication failure mode _UNIVERSAL_FIELDS_TEST checks for the schema-
+    constrained half. Added 2026-09-28 after the Phase 2 freeform-merge
+    grounding fix (see _Context/full_fidelity_harness/) -- full-document
+    LLM-judge testing caught the REAL issues (a conflated hosting-duration
+    number, an unverified alternate-name guess -- see that harness's Casa
+    Tulum results) that this fast, deterministic smoke test intentionally
+    does NOT attempt to catch; semantic conflation isn't something a
+    substring assertion can reliably detect, and re-running an LLM judge on
+    every commit isn't a smoke test's job. This test's scope is deliberately
+    narrower: the two failure modes that ARE substring-detectable."""
+    import os
+    try:
+        import google.auth
+        google.auth.default()
+    except Exception as exc:
+        print(f"_FREEFORM_MERGE_TEST: SKIP (no local ADC — run: "
+              f"gcloud auth application-default login) — {exc}")
+        return
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "alfred-prod-502215")
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+
+    result = await _run_freeform_merge(_FIXTURE_QUEENSTOWN, "", "Lakeview Lodge", None)
+    flattened = _flatten_to_text(result)
+
+    # "Milford Sound" / "Wakatipu" ARE stated in the fixture (scenic context)
+    # and are legitimately extractable by the exhaustive freeform prompt --
+    # only "Otago"/"South Island" (never stated) are the hallucination signal.
+    failures = []
+    for forbidden in ("otago", "south island"):
+        if forbidden in flattened:
+            failures.append(f"world-knowledge leakage: {forbidden!r} found anywhere in freeform output")
+
+    fabricated_coords = _find_fabricated_coordinates(result)
+    if fabricated_coords:
+        failures.append(f"fabricated coordinates: {fabricated_coords!r} (source states none)")
+
+    if failures:
+        print("_FREEFORM_MERGE_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+        print(f"  full output -> {json.dumps(result, ensure_ascii=False)}")
+    else:
+        print("_FREEFORM_MERGE_TEST: PASS")
+        print(f"  queenstown (freeform) -> {json.dumps(result, ensure_ascii=False)}")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
+# ── Self-grounding critique pass (freeform merge output only) ─────────────────
+# Brainstormed with the founder 2026-09-29 after real-property testing found
+# the freeform merge fabricating a bathroom shower on Sta Prisca's real data
+# even with fe4dba0's prompt-only grounding fix in place -- unlike
+# UNIVERSAL_FIELDS_SCHEMA's _guard_coordinates / _verify_grounded_strings,
+# freeform output has no fixed schema, so no deterministic code-level check
+# was possible until now. One extra Gemini call: given the freeform output +
+# the same source it was built from, remove only specific claims that have
+# zero support anywhere in source. Deliberately schema-free (no predefined
+# amenity fields, per the founder's explicit rejection of static per-room
+# fields) -- verifies whatever the model itself already claimed, so it
+# scales to any property's unique amenities without a static checklist.
+# Validated 2 independent rounds (2026-09-29) against real Sta Prisca/
+# Bungalow/Dos Rios full-pipeline output -- see
+# _Context/full_fidelity_harness/grounding_critique_test.py. Runs on the
+# freeform half only, before the universal-fields deep-merge -- that half
+# already has its own deterministic guard, so re-critiquing it would be
+# redundant cost.
+GROUNDING_CRITIQUE_SYSTEM_PROMPT = """\
+You are a fact-checker. You will be given SOURCE (the original documents a property's \
+knowledge base was built from) and OUTPUT (a JSON extraction from SOURCE). Your job: find any \
+SPECIFIC, CONCRETE claim in OUTPUT that is not actually supported anywhere in SOURCE, and remove \
+ONLY that specific claim -- keep everything else in OUTPUT exactly as it is: same structure, \
+same keys, same wording elsewhere.
+
+A "specific concrete claim" is something checkable against SOURCE: a named object/amenity/\
+feature, a material, a color, a brand, a number, a name, a specific policy detail. It is NOT an \
+interpretive summary, a paraphrase, a translation, or a reasonable structural/section label (e.g. \
+calling a section "bathroom" is fine even if that exact word isn't in SOURCE, as long as the \
+section is about a real bathroom SOURCE describes).
+
+If an unsupported detail is embedded INSIDE a longer sentence or list item (e.g. "sink with \
+tempered glass and a shower" when SOURCE never mentions a shower), remove only the unsupported \
+fragment and keep the rest of that value intact -- do not delete the whole field just because one \
+detail inside it is wrong.
+
+Search the ENTIRE source carefully before deciding something is unsupported -- it may be long or \
+spread across multiple documents; a fact stated once, anywhere, counts as grounded.
+
+Be conservative: only remove something you are confident has zero support. When genuinely \
+unsure, leave it -- false removals (deleting a real fact) are also a failure mode, not just \
+missed hallucinations.
+
+Respond with a single JSON object: {"cleaned_output": <OUTPUT with unsupported specific claims \
+removed/trimmed, valid JSON, same structure otherwise>, "removed_claims": [{"claim": "...", \
+"reason": "..."}]} -- removed_claims is an empty array if nothing was removed.
+"""
+
+GROUNDING_CRITIQUE_USER_TEMPLATE = """\
+SOURCE:
+{source}
+
+OUTPUT:
+{output}
+"""
+
+
+async def _ground_freeform_output(output: dict, source_text: str) -> dict:
+    """Fails soft: any error here (bad JSON, timeout, etc.) returns the
+    original, un-critiqued output -- this pass must never be what breaks a
+    property's whole training, same fail-soft principle as the
+    universal-fields call in run_merger()."""
+    try:
+        client = _get_client()
+        user_prompt = _fill(
+            GROUNDING_CRITIQUE_USER_TEMPLATE,
+            source=source_text or "(no data)",
+            output=json.dumps(output, indent=2, ensure_ascii=False),
+        )
+        response = await genai_factory.generate_with_retry(
+            client,
+            label="merger_grounding_critique",
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+            config=types.GenerateContentConfig(
+                system_instruction=GROUNDING_CRITIQUE_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+            ),
+        )
+        result = _parse_json_response(response.text)
+        removed = result.get("removed_claims", [])
+        if removed:
+            log.info("grounding critique removed %d unsupported claim(s): %s", len(removed), removed)
+        return result["cleaned_output"]
+    except Exception as exc:
+        log.warning("grounding critique pass failed (non-fatal, keeping un-critiqued output): %s", exc)
+        sentry_sdk.capture_exception(exc)
+        return output
+
 
 async def _run_freeform_merge(
     scraped_markdown: str, ingested_markdown: str, nickname: str, curated_photos: list[dict] | None
@@ -841,20 +1293,48 @@ async def _run_freeform_merge(
         nickname=nickname or "(none provided)",
         curated_photos=json.dumps(curated_photos, indent=2, ensure_ascii=False) if curated_photos else "(none)",
     )
-    response = await genai_factory.generate_with_retry(
-        client,
-        label="merger_freeform",
-        model=MODEL,
-        contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
-        config=types.GenerateContentConfig(system_instruction=MERGER_SYSTEM_PROMPT),
-    )
-    try:
-        return _parse_json_response(response.text)
-    except json.JSONDecodeError as exc:
+    # response_mime_type forces Gemini's constrained decoding to guarantee
+    # syntactically valid JSON -- matches _extract_universal_fields and
+    # _ground_freeform_output, which already use it (with or without a fixed
+    # response_schema; this call deliberately has no schema, same as the
+    # critique call, since the freeform structure is dynamic by design).
+    # Confirmed live (2026-09-29) this was the only one of the three
+    # JSON-producing calls in this file missing it, and a real merge crashed
+    # outright on a malformed (truncated mid-token) response with zero retry
+    # -- generate_with_retry only retries network stalls/429s, not a 200 OK
+    # with bad JSON content. The loop below is a backstop for whatever JSON
+    # mode alone doesn't prevent (e.g. genuine output truncation) -- a fresh
+    # generation, not a re-parse of the same broken text, since re-parsing
+    # can't fix truncation.
+    last_exc: json.JSONDecodeError | None = None
+    for attempt in range(2):
+        response = await genai_factory.generate_with_retry(
+            client,
+            label="merger_freeform",
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_prompt)])],
+            config=types.GenerateContentConfig(
+                system_instruction=MERGER_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+            ),
+        )
+        try:
+            result = _parse_json_response(response.text)
+            break
+        except json.JSONDecodeError as exc:
+            last_exc = exc
+            log.warning(
+                "merger_freeform: invalid JSON on attempt %d/2 (%s) -- %s",
+                attempt + 1, exc, "retrying" if attempt == 0 else "giving up",
+            )
+    else:
         raise ValueError(
-            f"Gemini Merger returned invalid JSON: {exc}\n"
+            f"Gemini Merger returned invalid JSON after 2 attempts: {last_exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
-        ) from exc
+        ) from last_exc
+
+    source_text = f"{scraped_markdown or ''}\n\n{ingested_markdown or ''}"
+    return await _ground_freeform_output(result, source_text)
 
 
 async def run_merger(
@@ -885,6 +1365,7 @@ async def run_merger(
         raise freeform_result
     if isinstance(universal_result, BaseException):
         log.warning("universal-fields extraction failed (non-fatal): %s", universal_result)
+        sentry_sdk.capture_exception(universal_result)
         return freeform_result
     return _deep_merge_universal(freeform_result, universal_result)
 
@@ -965,4 +1446,112 @@ async def run_knowledge_injection(
             f"Gemini Knowledge Injector returned invalid JSON: {exc}\n"
             f"Raw (first 500 chars): {response.text[:500]}"
         ) from exc
+
+
+def _find_conflict_blobs(obj, found=None) -> list:
+    """Recursively collect every dict with `_conflict: true`, for asserting
+    what did/didn't get swept into a conflict."""
+    if found is None:
+        found = []
+    if isinstance(obj, dict):
+        if obj.get("_conflict") is True:
+            found.append(obj)
+        for v in obj.values():
+            _find_conflict_blobs(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            _find_conflict_blobs(v, found)
+    return found
+
+
+async def _CONFLICT_SCOPING_TEST() -> None:
+    """Regression test added 2026-09-29 after real Bungalow data showed the
+    merge sometimes bundling a settled multi-tier fact together with a
+    genuinely disputed single value into ONE _conflict blob -- traced to the
+    prompt's own worked example modeling that exact over-broad scoping.
+    Self-contained synthetic fixture (mirrors the real bug's shape: a
+    consistently-stated tiered structure + one value disputed across
+    sources) rather than depending on gitignored real property files."""
+    scraped_markdown = "Pool heating available for an extra fee (amount not specified in listing)."
+    ingested_markdown = """\
+Host automated message: "Pool heating packages: 24 hours = $500 MXN, 36 hours = $700 MXN, \
+48 hours = $900 MXN. These are our standard heating packages, available year-round."
+
+Guest conversation, Monday: "For just one night of pool heating it's $200 MXN."
+
+Guest conversation, Friday (different guest): "One night of pool heating costs $250 MXN."
+"""
+    result = await _run_freeform_merge(scraped_markdown, ingested_markdown, "Test Villa", None)
+    flattened = _flatten_to_text(result)
+    conflicts = _find_conflict_blobs(result)
+    conflict_text = " ".join(json.dumps(c, ensure_ascii=False) for c in conflicts)
+
+    failures = []
+    for settled_value in ("500", "700", "900"):
+        if settled_value in conflict_text:
+            failures.append(
+                f"settled tiered value {settled_value!r} was swept into a _conflict blob: {conflict_text[:300]}"
+            )
+        if settled_value not in flattened:
+            failures.append(f"settled tiered value {settled_value!r} missing from output entirely")
+    if not ("200" in conflict_text and "250" in conflict_text):
+        failures.append(
+            f"expected the genuinely disputed $200/$250 rate to be flagged as a _conflict, "
+            f"got conflicts: {conflict_text[:300] or '(none)'}"
+        )
+
+    if failures:
+        print("_CONFLICT_SCOPING_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_CONFLICT_SCOPING_TEST: PASS")
+
+
+async def _GROUNDING_CRITIQUE_TEST() -> None:
+    """Standalone regression test for the self-grounding critique pass
+    (_ground_freeform_output), added 2026-09-29 after the Sta Prisca
+    real-property investigation found the freeform merge fabricating a
+    bathroom shower even with fe4dba0's prompt-only grounding fix in place.
+    Self-contained synthetic fixture (mirrors that real bug's shape) rather
+    than depending on the gitignored real property files used during that
+    investigation -- see _Context/full_fidelity_harness/grounding_critique_test.py
+    for the full real-data validation (2 independent rounds, passed)."""
+    source_text = (
+        "Bathroom: glass vessel sink on a frosted glass pedestal, "
+        "white toilet with the lid closed. Towels are provided in the closet."
+    )
+    planted_output = {
+        "property_info": {"nickname": "Test Villa"},
+        "amenities": {
+            "bathroom": (
+                "Glass vessel sink on a frosted glass pedestal, complete with a "
+                "tempered glass walk-in shower, and a white toilet."
+            ),
+            "linens": "Towels are provided in the closet.",
+        },
+    }
+    cleaned = await _ground_freeform_output(planted_output, source_text)
+    flattened = _flatten_to_text(cleaned)
+    failures = []
+    if "shower" in flattened:
+        failures.append(f"expected the fabricated shower to be stripped, got: {cleaned}")
+    if "frosted glass pedestal" not in flattened or "toilet" not in flattened:
+        failures.append(f"expected the real sink/toilet facts to survive, got: {cleaned}")
+    if "towels are provided in the closet" not in flattened:
+        failures.append(f"expected the unrelated linens fact to survive untouched, got: {cleaned}")
+
+    if failures:
+        print("_GROUNDING_CRITIQUE_TEST: FAIL")
+        for f in failures:
+            print(f"  - {f}")
+    else:
+        print("_GROUNDING_CRITIQUE_TEST: PASS")
+
+
+if __name__ == "__main__":
+    asyncio.run(_UNIVERSAL_FIELDS_TEST())
+    asyncio.run(_FREEFORM_MERGE_TEST())
+    asyncio.run(_CONFLICT_SCOPING_TEST())
+    asyncio.run(_GROUNDING_CRITIQUE_TEST())
 

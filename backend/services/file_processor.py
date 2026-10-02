@@ -2,12 +2,16 @@
 Core file routing logic. Processes a single file sequentially.
 Returns a Markdown string.
 
-File type → processing path:
-  PDF                  → Gemini File API → Prompt A
-  Images (jpg/png/...) → Gemini File API → Prompt B
-  Audio (webm/mp3/...) → Gemini File API → Prompt C
+File type → processing path (bytes go inline to Gemini, not the File API --
+Vertex rejects that API outright; see gemini_client.py's module docstring):
+  PDF                  → inline bytes → Prompt A
+  Images (jpg/png/...) → inline bytes (downscaled if oversized) → Prompt B
+  Audio (webm/mp3/...) → inline bytes → Prompt C
   DOCX/DOC             → python-docx native extraction → Prompt A (text)
-  XLSX/CSV             → openpyxl/pandas native → Prompt D (text)
+  XLSX/CSV             → pandas native extraction → Prompt D (text)
+  Anything else        → decoded as UTF-8 plain text → Prompt A (text) --
+                         undocumented before 2026-09-28's ingestion audit;
+                         documented here now, not changed in behavior.
 """
 
 import io
@@ -121,7 +125,16 @@ async def _process_audio(filename: str, data: bytes, ext: str) -> str:
 async def _process_docx(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    # Also grab table cells
+    # Each table row becomes its own line, pipe-joined -- NOT flattened
+    # together across rows, so a header row (if present) and each data row
+    # stay on separate lines, close enough to a headerless markdown table for
+    # Gemini to parse column alignment reliably. An earlier version of this
+    # tried to explicitly pair row 0 as a "header" against every other row's
+    # values -- reverted (2026-09-28, untested before it was almost shipped):
+    # that assumption breaks on the very common case of a plain 2-column
+    # key:value table (e.g. "WiFi Network | CasaAlegre_5G" / "Password |
+    # sunshine88") that has no header row at all, which would have silently
+    # mispaired every value.
     for table in doc.tables:
         for row in table.rows:
             cells = [c.text.strip() for c in row.cells if c.text.strip()]
@@ -132,9 +145,14 @@ async def _process_docx(data: bytes) -> str:
 
 
 async def _process_sheet(filename: str, data: bytes, ext: str) -> str:
+    # dtype=str keeps every column as its literal text (e.g. a zip/phone-like
+    # "00501" survives instead of pandas inferring int64 and silently dropping
+    # the leading zero before Gemini -- or anyone else -- ever sees the value;
+    # confirmed live in the 2026-09-28 ingestion audit). This is a pre-model
+    # fidelity fix, independent of anything a prompt change could catch.
     if ext == "csv":
-        df = pd.read_csv(io.BytesIO(data))
+        df = pd.read_csv(io.BytesIO(data), dtype=str)
     else:
-        df = pd.read_excel(io.BytesIO(data))
+        df = pd.read_excel(io.BytesIO(data), dtype=str)
     table_text = df.to_markdown(index=False) if hasattr(df, "to_markdown") else df.to_string(index=False)
     return await gemini_client.process_with_prompt_d(table_text)

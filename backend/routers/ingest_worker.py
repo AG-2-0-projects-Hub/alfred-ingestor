@@ -27,11 +27,13 @@ makes a duplicate/zombie task safe rather than something to deduplicate.
 """
 
 import asyncio
+import json
 import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import sentry_sdk
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -152,9 +154,24 @@ def _is_stale(heartbeat_iso: str | None) -> bool:
     return (datetime.now(timezone.utc) - ts).total_seconds() > STALE_HEARTBEAT_S
 
 
-def _parse_thumbnail_url(scraped_markdown: str) -> str | None:
-    match = re.search(r'\*\*Thumbnail:\*\*\s*(\S+)', scraped_markdown)
-    return match.group(1).strip() if match else None
+def _pick_hero_url(scraped_markdown: str, curated_photos: list[dict]) -> str | None:
+    """scraped_markdown is a JSON string (scraper's SCRAPER_STRUCTURED_SCHEMA
+    output). media.thumbnail_url is an optional field the model omits on a large
+    share of runs (2/5 live scrapes of one listing, 2026-10-01), so the hero image
+    falls back to the first triaged property photo, then the first gallery photo."""
+    try:
+        media = json.loads(scraped_markdown).get("media") or {}
+    except (json.JSONDecodeError, AttributeError):
+        media = {}
+    candidates = (
+        media.get("thumbnail_url"),
+        (curated_photos or [{}])[0].get("url"),
+        (media.get("gallery") or [{}])[0].get("url"),
+    )
+    for url in candidates:
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return None
 
 
 async def _call_scraper(airbnb_url: str) -> dict:
@@ -185,6 +202,7 @@ async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
             await asyncio.to_thread(supabase_client.save_scraped_markdown, property_id, scraped_markdown)
         except Exception as exc:
             print(f"save_scraped_markdown failed (non-fatal): {exc}")
+            sentry_sdk.capture_exception(exc)
     if curated_photos or rejected_photos:
         try:
             await asyncio.to_thread(
@@ -192,12 +210,14 @@ async def _scrape_and_save(property_id: str, airbnb_url: str) -> dict:
             )
         except Exception as exc:
             print(f"save_photo_triage failed (non-fatal): {exc}")
-    thumbnail_url = _parse_thumbnail_url(scraped_markdown)
+            sentry_sdk.capture_exception(exc)
+    thumbnail_url = _pick_hero_url(scraped_markdown, curated_photos)
     if thumbnail_url:
         try:
             await asyncio.to_thread(supabase_client.upload_hero_image, property_id, thumbnail_url)
         except Exception as exc:
             print(f"Hero image upload failed (non-fatal): {exc}")
+            sentry_sdk.capture_exception(exc)
 
     return scrape_data
 
@@ -218,6 +238,7 @@ async def run_start(property_id: str, run_id: str) -> None:
             scrape_data = await _scrape_and_save(property_id, airbnb_url)
         except Exception as exc:
             print(f"ingest_worker.run_start: scrape failed for {property_id}: {exc}")
+            sentry_sdk.capture_exception(exc)
             await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
             # Same give-up shape the Low-completeness path below uses (reason
             # differs) -- reuses the existing warning-icon/fix-link UI on the
@@ -339,14 +360,20 @@ async def run_process_file(property_id: str, run_id: str, filename: str, retry_c
                 elapsed += 10
                 await asyncio.to_thread(supabase_client.touch_ingest_heartbeat, property_id, run_id)
         markdown = await current_task
+        # ingest_record_file_result's SQL appends this straight onto
+        # ingested_markdown with no separator across multiple files (found in
+        # the 2026-09-28 ingestion audit) -- a filename header here is the
+        # cheapest fix, no migration needed.
+        markdown_with_header = f"<!-- source_file: {filename} -->\n\n{markdown}"
 
         await asyncio.to_thread(
             supabase_client.record_ingest_file_result,
-            property_id, run_id, filename, "done", markdown=markdown, fingerprint_size=size,
+            property_id, run_id, filename, "done", markdown=markdown_with_header, fingerprint_size=size,
         )
         succeeded = True
     except Exception as exc:
         if is_final_attempt:
+            sentry_sdk.capture_exception(exc)
             await asyncio.to_thread(
                 supabase_client.record_ingest_file_result,
                 property_id, run_id, filename, "failed", error=str(exc),
@@ -391,6 +418,7 @@ async def run_merge_step(property_id: str, run_id: str) -> None:
         await run_merge_and_save(property_id, prop, expected_run_id=run_id)
     except ValueError as exc:
         print(f"ingest_worker.run_merge_step: merge failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
         await asyncio.to_thread(supabase_client.update_status, property_id, "Ingest_Error")
 
 
@@ -415,6 +443,7 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
         scrape_data = await _scrape_and_save(property_id, airbnb_url)
     except Exception as exc:
         print(f"ingest_worker.run_retry_scrape: scrape failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
         await asyncio.to_thread(
             supabase_client.set_scrape_retry,
             property_id,
@@ -454,6 +483,7 @@ async def run_retry_scrape(property_id: str, run_id: str) -> None:
         await run_merge_and_save(property_id, {**fresh, "name": prop.get("name") or ""})
     except ValueError as exc:
         print(f"ingest_worker.run_retry_scrape: re-merge failed for {property_id}: {exc}")
+        sentry_sdk.capture_exception(exc)
     finally:
         # Whatever happened above (clean merge, a new conflict, or a
         # swallowed re-merge failure that left status unchanged) is already

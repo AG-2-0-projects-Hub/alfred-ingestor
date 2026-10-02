@@ -35,6 +35,18 @@ async function getUserId(token: string): Promise<string> {
   return json.id as string;
 }
 
+async function getProfile(
+  token: string,
+  userId: string,
+): Promise<{ telegram_chat_id: string | number | null; telegram_link_code: string | null } | null> {
+  const res = await fetch(
+    `${env.supabaseUrl}/rest/v1/host_profiles?id=eq.${userId}&select=telegram_chat_id,telegram_link_code`,
+    { headers: { apikey: env.supabaseAnonKey, Authorization: `Bearer ${token}` } },
+  );
+  const rows = await res.json();
+  return rows[0] ?? null;
+}
+
 async function clearLinkCode(token: string, userId: string): Promise<void> {
   await fetch(`${env.supabaseUrl}/rest/v1/host_profiles?id=eq.${userId}`, {
     method: 'PATCH',
@@ -91,34 +103,43 @@ export async function runP1(): Promise<ScenarioResult> {
     if (!profileVerdict.pass) throw new Error('Profile dialog with Telegram section did not render as expected');
 
     // Handle both states: click Connect Telegram only if not already linked.
-    const linkedShot = await page.screenshot({ fullPage: true });
-    const linkedVerdict = await judgeScreenshot(
-      linkedShot,
-      'A "Telegram alerts" section that already shows "Telegram connected" (a green checkmark and confirmation text), with NO "Connect Telegram" button visible.',
-    );
-    const alreadyLinked = linkedVerdict.pass;
-    notes.push(`already-linked check: ${alreadyLinked ? 'YES' : 'NO'} — ${linkedVerdict.notes}`);
+    // Read the link state from the DB (deterministic) rather than asking the
+    // vision judge -- the old judge call returned confusing answers.
+    const profileBefore = await getProfile(token, userId);
+    const alreadyLinked = profileBefore?.telegram_chat_id != null;
+    notes.push(`already linked (DB telegram_chat_id): ${alreadyLinked ? 'YES' : 'NO'}`);
 
-    // "How to use" sits at a different height depending on whether the
-    // QR/link block below it is showing (dialog grows and re-centers) --
-    // measured live for both states this session.
-    let howToUseY = 0.668;
+    // "How to use" sits at a different height depending on whether the QR/link
+    // block is showing: the profile dialog is capped to the viewport height and
+    // scrolls inside, so after Connect Telegram it auto-scrolls ~25px to reveal
+    // the deep link and the "How to use" row moves up. Re-measured 2026-10-01
+    // (the Email alerts section made the dialog taller): 0.612 before connect,
+    // 0.583 once the dialog has settled (needs ~3s -- at 1.5s it is mid-scroll).
+    let howToUseY = 0.612;
 
     if (!alreadyLinked) {
       // Connect Telegram button -- centered button below the Telegram alerts row.
-      await page.mouse.click(vp.width * 0.5, vp.height * 0.700);
-      await page.waitForTimeout(1500);
+      await page.mouse.click(vp.width * 0.5, vp.height * 0.643);
+      await page.waitForTimeout(3000);
+      howToUseY = 0.583;
 
       const qrShot = await page.screenshot({ fullPage: true });
       artifacts.qrScreenshot = qrShot.toString('base64');
+      // The deep link text sits below the QR and is small/truncated, which the
+      // vision judge reads unreliably -- so the judge only checks the QR and
+      // its instruction; the link code itself is asserted via the DB below.
       const qrVerdict = await judgeScreenshot(
         qrShot,
-        'A QR code and a copyable Telegram deep link (starting with https://) displayed in a panel below a "Connect Telegram" button, inside the profile dialog.',
+        'The "Your profile" dialog showing, under the "Telegram alerts" heading, the instruction ' +
+        '"Open this link on your phone, or scan the QR code" and a black-and-white square QR code image.',
       );
-      notes.push(`qr-link judge: ${qrVerdict.pass ? 'PASS' : 'FAIL'} — ${qrVerdict.notes}`);
-      if (!qrVerdict.pass) throw new Error('QR code / deep link did not render after clicking Connect Telegram');
+      notes.push(`qr judge: ${qrVerdict.pass ? 'PASS' : 'FAIL'} — ${qrVerdict.notes}`);
+      if (!qrVerdict.pass) throw new Error('QR code did not render after clicking Connect Telegram');
 
-      howToUseY = 0.583;
+      const profileAfter = await getProfile(token, userId);
+      const code = profileAfter?.telegram_link_code;
+      notes.push(`link code minted in DB: ${code ? 'YES' : 'NO'}`);
+      if (!code) throw new Error('Connect Telegram did not generate a link code');
     }
 
     // How to use -- docks a side panel via CompositedTransformFollower.
@@ -142,7 +163,9 @@ export async function runP1(): Promise<ScenarioResult> {
     artifacts.closedScreenshot = closedShot.toString('base64');
     const closedVerdict = await judgeScreenshot(
       closedShot,
-      'The "Your profile" dialog with NO "How Telegram replies work" help panel visible anywhere -- it has been closed.',
+      'The "Your profile" dialog with NO separate side panel beside it: there is no box titled ' +
+      '"How Telegram replies work" and no bullet-point list outside the dialog. (A small purple ' +
+      '"How to use" text link inside the dialog is normal and expected -- it is not the panel.)',
     );
     notes.push(`help-panel-closed judge: ${closedVerdict.pass ? 'PASS' : 'FAIL'} — ${closedVerdict.notes}`);
 

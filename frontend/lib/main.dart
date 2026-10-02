@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -132,7 +133,16 @@ Future<void> main() async {
     return;
   }
 
-  runApp(const IngestorApp());
+  // Crash/error visibility. Empty SENTRY_DSN means Sentry is off (local dev
+  // default) -- the Dart SDK no-ops safely on an empty dsn, same convention
+  // as the backend/scraper's `if dsn:` gate.
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = dotenv.env['SENTRY_DSN'] ?? '';
+      options.environment = dotenv.env['ENVIRONMENT'] ?? 'local';
+    },
+    appRunner: () => runApp(const IngestorApp()),
+  );
 }
 
 /// Rendered in place of the real app when boot-time config validation fails

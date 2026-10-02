@@ -762,6 +762,50 @@ def get_host_by_telegram_chat_id(chat_id) -> str | None:
     return (result.data or {}).get("id") if result else None
 
 
+def get_host_notification_settings(host_id: str) -> dict:
+    """A host's email-escalation settings, or all-empty defaults if the row
+    doesn't exist yet. Never raises — callers treat a missing row the same as
+    "not configured"."""
+    result = (
+        get_client().table("host_profiles")
+        .select("notification_email, escalation_email_enabled, escalation_email_unsub_token")
+        .eq("id", host_id)
+        .maybe_single()
+        .execute()
+    )
+    data = (result.data or {}) if result else {}
+    return {
+        "notification_email": data.get("notification_email"),
+        "escalation_email_enabled": bool(data.get("escalation_email_enabled")),
+        "escalation_email_unsub_token": data.get("escalation_email_unsub_token"),
+    }
+
+
+def update_host_escalation_email(
+    host_id: str, email: str | None, enabled: bool, unsub_token: str | None,
+) -> None:
+    """Persist a host's email-escalation settings. unsub_token is the caller's
+    responsibility to (re)generate on activation — this just stores it."""
+    get_client().table("host_profiles").update({
+        "notification_email": email,
+        "escalation_email_enabled": enabled,
+        "escalation_email_unsub_token": unsub_token,
+    }).eq("id", host_id).execute()
+
+
+def get_host_id_by_unsub_token(token: str) -> str | None:
+    """Host id owning this unsubscribe token, or None if it doesn't match any
+    row (already used with a since-regenerated token, or never valid)."""
+    result = (
+        get_client().table("host_profiles")
+        .select("id")
+        .eq("escalation_email_unsub_token", token)
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("id") if result else None
+
+
 def _conversation_display_names(
     client, property_id: str, booking_id: str,
 ) -> tuple[str | None, str | None]:

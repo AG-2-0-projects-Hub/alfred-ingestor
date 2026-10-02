@@ -1,20 +1,22 @@
 import { chromium } from 'playwright';
 import { judgeScreenshot } from '../lib/screenshot-judge.ts';
-import { hydratePage, loginAs, VP, DASHBOARD, ADD_PROPERTY } from '../lib/playwright-helpers.ts';
+import { hydratePage, loginAs, openAddPropertyFromDashboard, VP, ADD_PROPERTY } from '../lib/playwright-helpers.ts';
 import { supabaseAnon, createAuthedClient } from '../lib/supabase.ts';
 import { env } from '../lib/env.ts';
 import type { ScenarioResult } from '../run.ts';
 
 // B6 — ingest-invalid-url-01
-// Layer 2: pasting a non-Airbnb URL and clicking INGEST NOW shows an error
-// message and leaves no orphaned property in a non-terminal state.
+// Layer 2: a non-Airbnb URL cannot start training. The Add Property screen
+// keeps Train Now disabled until the URL contains "airbnb." (rewritten
+// 2026-10-01 -- this scenario used to expect a server-side error after the
+// click, from before the client-side guard existed).
 //
-// Navigation path (qa-test account has no properties → empty-state screen):
-//   Dashboard empty-state "Add Your First Property" → Add Property screen
-//   → type URL → click INGEST NOW → wait for backend error → judge screenshot.
+// Navigation path: Dashboard → "+ Add Property" tile → Add Property screen
+//   → type URL → judge the button looks disabled → click it anyway.
 //
-// DB assertion: after the run, no property rows belonging to qa-test are in
-// Pending / Ingesting / Ingest_Error state with the test URL.
+// Assertions: zero POST /api/ingest requests, and no property row at all for
+// the test URL. (A bogus URL that DOES contain "airbnb." goes through the
+// scrape-failure path -- tracked under R3 in scenarios.md, not here.)
 
 const INVALID_URL = 'https://example.com/not-an-airbnb-listing';
 const QA_TEST_OWNER = '2bf084d9-8ab2-47aa-8788-2d0c7db876d7';
@@ -22,7 +24,7 @@ const QA_TEST_OWNER = '2bf084d9-8ab2-47aa-8788-2d0c7db876d7';
 export async function runB6(): Promise<ScenarioResult> {
   const start = Date.now();
   const id = 'ingest-invalid-url-01';
-  const name = 'B6: Invalid Airbnb URL returns graceful error';
+  const name = 'B6: Non-Airbnb URL cannot start training (Train Now stays disabled)';
   console.log(`[${id}] starting...`);
 
   const browser = await chromium.launch({ headless: true });
@@ -38,11 +40,11 @@ export async function runB6(): Promise<ScenarioResult> {
     await loginAs(page);
     notes.push('logged in');
 
-    // Navigate to Add Property (empty-state centred button)
+    // Navigate to Add Property (the "+ Add Property" tile after the last card)
     const vp = page.viewportSize() ?? VP;
-    await page.mouse.click(vp.width * DASHBOARD.addPropertyX, vp.height * DASHBOARD.addPropertyY);
-    notes.push('clicked Add Your First Property');
-    await page.waitForTimeout(4_000);
+    await openAddPropertyFromDashboard(page);
+    notes.push('clicked the Add Property tile');
+    await page.waitForTimeout(2_000);
 
     const navSS = await page.screenshot({ fullPage: true });
     const navVerdict = await judgeScreenshot(
@@ -64,26 +66,38 @@ export async function runB6(): Promise<ScenarioResult> {
     await page.keyboard.type(INVALID_URL, { delay: 20 });
     notes.push('typed invalid URL');
 
-    // Click INGEST NOW
-    await page.mouse.click(vp.width * ADD_PROPERTY.x, vp.height * ADD_PROPERTY.ingestY);
-    notes.push('clicked INGEST NOW');
+    // The tips card makes the form taller than one viewport, so scroll the
+    // button into view first -- same as D8/D9.
+    await page.mouse.wheel(0, 1400);
+    await page.waitForTimeout(400);
 
-    // Wait for the backend to respond with an error (scraper will reject non-Airbnb URL).
-    // The SSE stream errors fast for invalid URLs — 30s is generous.
-    await page.waitForTimeout(30_000);
-
+    // The Add Property screen guards the URL client-side: Train Now stays
+    // disabled until the text contains "airbnb." (add_property_screen.dart
+    // `canIngest`, added so a typo no longer runs the multi-minute flow and
+    // dies with a generic scrape error). Click it anyway -- a disabled button
+    // must do nothing: no dispatch, no property row.
+    let ingestDispatches = 0;
+    page.on('request', (req) => {
+      if (req.url().includes('/api/ingest') && req.method() === 'POST') ingestDispatches++;
+    });
     const errorSS = await page.screenshot({ fullPage: true });
     artifacts.errorScreenshot = errorSS.toString('base64');
     const errorVerdict = await judgeScreenshot(
       errorSS,
-      'The Add Property screen still visible, showing an error message, red text, ' +
-      'or an error snackbar/banner indicating that the ingest failed or the URL is ' +
-      'invalid. Must NOT show a success state or a dashboard with a new property.',
+      'The Add Property screen with a TRAIN NOW button that is greyed out / disabled ' +
+      '(flat grey, low contrast, not the vivid purple of an enabled primary button). ' +
+      'It must NOT be on a dashboard and must NOT show a success state.',
     );
     artifacts.errorVerdict = errorVerdict.raw;
-    notes.push(`error judge: ${errorVerdict.pass ? 'PASS' : 'FAIL'} — ${errorVerdict.notes}`);
+    notes.push(`disabled-button judge: ${errorVerdict.pass ? 'PASS' : 'FAIL'} — ${errorVerdict.notes}`);
 
-    // DB assertion: no orphan row with this URL in a non-terminal state.
+    await page.mouse.click(vp.width * ADD_PROPERTY.x, vp.height * 0.863);
+    notes.push('clicked the disabled TRAIN NOW anyway');
+    await page.waitForTimeout(4_000);
+    notes.push(`/api/ingest dispatches after the click: ${ingestDispatches}`);
+    artifacts.ingestDispatches = ingestDispatches;
+
+    // DB assertion: no property row with this URL exists at all (any status).
     // Uses an authenticated client scoped to the qa-test account so that RLS
     // on the properties table only returns rows owned by that account.
     const { data: authData } = await supabaseAnon.auth.signInWithPassword({
@@ -95,21 +109,20 @@ export async function runB6(): Promise<ScenarioResult> {
     const { data: orphans } = await authed
       .from('properties')
       .select('id, status')
-      .eq('airbnb_url', INVALID_URL)
-      .in('status', ['Pending', 'Ingesting']);
+      .eq('airbnb_url', INVALID_URL);
 
     const orphanCount = orphans?.length ?? 0;
-    notes.push(`orphan rows in non-terminal state: ${orphanCount}`);
+    notes.push(`property rows created for the invalid URL: ${orphanCount}`);
     artifacts.orphanCount = orphanCount;
 
-    // Clean up any rows the ingest may have left (e.g. Ingest_Error)
+    // Clean up any rows that slipped through
     await authed
       .from('properties')
       .delete()
       .eq('airbnb_url', INVALID_URL);
     notes.push('cleaned up any test rows');
 
-    status = errorVerdict.pass && orphanCount === 0 ? 'pass' : 'fail';
+    status = errorVerdict.pass && ingestDispatches === 0 && orphanCount === 0 ? 'pass' : 'fail';
     details = notes.join(' | ');
   } catch (err) {
     status = 'fail';

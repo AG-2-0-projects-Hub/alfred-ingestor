@@ -8,6 +8,7 @@ import { runG2 } from './scenarios/g2.ts';
 import { runA2 } from './scenarios/a2.ts';
 import { runA3 } from './scenarios/a3.ts';
 import { runA4 } from './scenarios/a4.ts';
+import { runB1 } from './scenarios/b1.ts';
 import { runB6 } from './scenarios/b6.ts';
 import { runB7 } from './scenarios/b7.ts';
 import { runB15 } from './scenarios/b15.ts';
@@ -17,6 +18,8 @@ import { runD7 } from './scenarios/d7.ts';
 import { runD8 } from './scenarios/d8.ts';
 import { runD9 } from './scenarios/d9.ts';
 import { runP1 } from './scenarios/p1.ts';
+import { runP8 } from './scenarios/p8.ts';
+import { runP9 } from './scenarios/p9.ts';
 import { runQ1 } from './scenarios/q1.ts';
 
 export type ScenarioResult = {
@@ -93,6 +96,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runA2,
     runA3,
     runA4,
+    // Layer 3 — core Train Now end-to-end (backend, real deployed staging)
+    runB1,
     // Layer 2 — ingest error paths
     runB6,
     runB7,
@@ -105,6 +110,9 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runD9,
     // Layer 2 — Telegram host escalation
     runP1,
+    runP8,
+    // Layer 2 — host escalation email fallback
+    runP9,
     // Layer 2 — first-login onboarding
     runQ1,
   ];

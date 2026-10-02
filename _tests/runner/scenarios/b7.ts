@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { judgeScreenshot } from '../lib/screenshot-judge.ts';
-import { hydratePage, loginAs, VP, DASHBOARD, ADD_PROPERTY } from '../lib/playwright-helpers.ts';
+import { hydratePage, loginAs, openAddPropertyFromDashboard, VP, ADD_PROPERTY } from '../lib/playwright-helpers.ts';
 import type { ScenarioResult } from '../run.ts';
 
 // B7 — ingest-bad-file-01
@@ -33,11 +33,11 @@ export async function runB7(): Promise<ScenarioResult> {
     await loginAs(page);
     notes.push('logged in');
 
-    // Navigate to Add Property
+    // Navigate to Add Property (the "+ Add Property" tile after the last card)
     const vp = page.viewportSize() ?? VP;
-    await page.mouse.click(vp.width * DASHBOARD.addPropertyX, vp.height * DASHBOARD.addPropertyY);
-    notes.push('clicked Add Your First Property');
-    await page.waitForTimeout(4_000);
+    await openAddPropertyFromDashboard(page);
+    notes.push('clicked the Add Property tile');
+    await page.waitForTimeout(2_000);
 
     const navSS = await page.screenshot({ fullPage: true });
     const navVerdict = await judgeScreenshot(
@@ -71,17 +71,20 @@ export async function runB7(): Promise<ScenarioResult> {
             (document.querySelector('flt-glass-pane') as HTMLElement) ??
             document.body;
 
-          const opts = (type: string) => ({
+          // Plain object, not a named arrow fn: tsx/esbuild wraps named functions in a
+          // `__name(...)` helper that doesn't exist inside the browser page ("__name is
+          // not defined" — that broke this scenario before 2026-10-01).
+          const opts = {
             bubbles: true,
             cancelable: true,
             dataTransfer: dt,
             clientX: x,
             clientY: y,
-          });
+          };
 
-          target.dispatchEvent(new DragEvent('dragenter', opts('dragenter')));
-          target.dispatchEvent(new DragEvent('dragover',  opts('dragover')));
-          target.dispatchEvent(new DragEvent('drop',      opts('drop')));
+          target.dispatchEvent(new DragEvent('dragenter', opts));
+          target.dispatchEvent(new DragEvent('dragover',  opts));
+          target.dispatchEvent(new DragEvent('drop',      opts));
           return 'dispatched';
         } catch (e) {
           return `error: ${(e as Error).message}`;
