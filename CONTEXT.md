@@ -10,16 +10,13 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🔴 **Merge prep (2026-10-01) is DONE and COMMITTED locally as `775b1ca` — NOT pushed.** Founder
-  pushes `staging`, opens PR `staging→main`, merges manually (planned 2026-10-02). State + post-merge
-  checks: `_Context/HANDOFF_pre-merge-prep_2026-10-01.md` (after merge: `gcloud builds list
-  --region=europe-west3` SUCCESS, `alfred-backend` 100% on the new revision, `/health` 200).
-  Next, with a proper plan + FIX_VERIFY: the auth gaps on merge/resolve/knowledge endpoints
-  (`QUEUE.md`; frontend must send the token on the 3 merge/resolve calls FIRST, then enforce).
-- 🟡 C1/C3/G4/G5 re-verified on staging 2026-10-01 (live probes, API/DB legs only, not saved into the
-  runner); A1/B12 untouched by this merge. After the merge deploys, mark Sentry ALFRED-SCRAPER-2
-  (FT-SE-004) resolved. Feedback dialog FT-WF-001/002 → `QUEUE.md`.
-- 🟡 Host escalation email: SendGrid live (staging + prod env); real domain later (`ROADMAP.md` M2).
+- 🟢 **MERGED to prod 2026-10-02** (PR #10 `e4da0b0`; staging commit `6ab242f`) and founder-verified on
+  prod (Train Now, email alerts, Telegram Disconnect, escalations, auth). Builds/revisions/health/Sentry
+  clean. Not yet watched live: the hero-image *fallback* branch. Domain auth for email: `ROADMAP.md` M2.
+- 🔴 **NEXT SESSION: start from `_Context/CONTINUATION_PROMPT_2026-10-02.md`** (self-contained; it has Claude
+  restate the issues for founder confirmation first, then FIX_VERIFY each): (1) email confirmation gate +
+  Telegram-style UI, (2) auth gaps on merge/resolve/knowledge endpoints, (3) stay dates + disconnect 24 h
+  after check-out. Details + decisions: `QUEUE.md`. A1/B12 still unautomated; feedback dialog → `QUEUE.md`.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
 - 🟡 guide.html rework + walkthrough/`GlassPanel` opacity live in `QUEUE.md` (opacity: **do not
   attempt** without the founder — it burned 2 days and broke things before).
@@ -33,57 +30,53 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   reach the DropZone (an `.exe` drop got the red inline rejection) — the earlier "not working"
   conclusion may have been stale coordinates, so a supported-file drop is worth one more try.
 
-**Last Session:** 2026-10-01 (**Got beta-tester escalation email actually delivering, then prepared
-the `staging→main` merge: a new live E2E found and fixed 3 real scraper/ingest bugs, the QA suite is
-back to 18/18, and the Pending Intake queue was promoted into scenarios.** All uncommitted except
-`593ccc3` — staging backend rev `alfred-backend-staging-00046-2dn`, scraper `…-00010-x5x` already
-deployed; prod has migrations + env vars applied (inert until the merge deploys the code).
+**Last Session:** 2026-10-01→02 (**Got the beta-tester escalation email delivering, prepared and shipped
+the `staging→main` merge (PR #10, `e4da0b0`, live on prod 2026-10-02), and the founder tested prod end
+to end — everything passed. Follow-ups are queued, with a continuation prompt.** Final commit `6ab242f`.
   - **Email:** Gmail SMTP from Cloud Run failed 5/5 and Resend's sandbox only reaches its owner →
-    **SendGrid Single Sender** (verified `alfred.bnb.host@gmail.com`; `email_client.py`, `593ccc3`).
-    Real delivery to a non-owner inbox confirmed. "Never arrived" had three stacked causes: an
-    empty env value (nested-quote `$(cat)` via `wsl bash -lc`), a trailing `\r` from the
-    Windows-saved key file ("Illegal header value", swallowed as a warning), and the endpoint only
-    sending on a genuine enable/address change. Env set on staging + prod Cloud Run.
-  - **Prod parity:** applied the `welcome_modal_seen` + escalation-email migrations to prod; per-table
-    column hashes, RLS, policies, realtime and buckets match staging. `MERGE_TO_MAIN_PROTOCOL.md`
-    corrected (prod Cloud Run *does* auto-deploy on `main`; staging has no trigger) + a "things a
-    git merge does not carry" checklist (migrations, env vars, secrets).
-  - **New B1** (`b1.ts`, layer 3, real Firecrawl + Gemini + real Bungalow files, no browser) — its
-    first run FAILED: no hero image in ~40% of scrapes. Root cause: `433bc66` (09-28) replaced the
-    template's mandatory `**Thumbnail:**` line with an optional LLM JSON field. Three FIX_VERIFY
-    fixes (FMEA'd, approved): `_pick_hero_url` fallback (thumbnail → curated_photos[0] →
-    gallery[0]) in `ingest_worker.py`; `data_completeness` made an enum (a run had returned
-    "Partial", which would have disabled the `Low` retry trigger); the scraper's dead Supabase
-    upsert deleted (42P10 on every scrape since 2026-06-02 — Sentry FT-SE-004). Verified: replay of 5
-    real saved scrapes + 7 edge cases, 6 live scrapes all "High", 0 × 42P10 on scraper rev 00010,
-    B1 live PASS (188 s, then 138 s in the final full run).
-  - **QA suite:** first full run 9/17, all 8 failures were test drift, not product bugs. Repaired in
-    two passes (B6, B7, B15, D6, D9, P1, P8) — final `npm run full` **18/18**. Real causes: a stale
-    drop-zone y; tsx/esbuild's `__name` helper breaking named fns inside `page.evaluate`; B6's
-    expectation predated the client-side "airbnb." guard (rewritten: button disabled, zero
-    `/api/ingest` POSTs, no row); Profile dialog auto-scroll moving "How to use"; the vision judge
-    false-PASSing a QR/deep-link check. B7's synthetic drag-drop onto the Flutter canvas does work.
-  - **Docs:** `scenarios.md` — B1/B6/B7 rewritten, new section **R** (R1–R10, honest
-    partial/pending), 42 Pending Intake rows promoted; `lessons.md` +6 entries; QUEUE/ROADMAP/
-    feedback BACKLOG refreshed (FT-SE-004 closed, stale prod-migration item closed).
-  - **Non-bugs:** "Bungalowww didn't delete" (row belongs to stale `prodtest@test.com`); "signup sent
-    no confirmation email" (already-registered email → Supabase `identities: []`, anti-enumeration;
-    the app already shows the notice); the Sentry "resources exhausted" email was ALFRED-BACKEND-2, a
-    transient Vertex 429 during the merge step of this session's own B1 run.
-  - **Founder directives this session:** scope = only what is connected to the prod merge (walkthrough
-    opacity → QUEUE, never attempt); Qwen judges only Playwright UI screenshots, Claude judges
-    scrape/ingest/merge pipeline output; never commit/push unasked.
-  - **Merge-gate probes (founder asked, 2026-10-01 evening):** live read-only probes on deployed staging,
-    all passed — **G4** (staging + prod bundles serve `sb_publishable_`, anon reads 0 rows on all 8
-    tables), **G5** (13 host endpoints → 401 without/with garbage token; valid token vs another
-    host's data → 403 on 5 endpoints), **C1** (guest question answered in 15.6 s, no escalation),
-    **C3** (smoke emergency → intervene + `emergency_fire` + `__SYS_INTERVENE__` in 13.3 s; UI/push
-    legs not driven). Found, queued, not fixed (pre-existing, also on `main`): `merge`/`resolve`/
-    `add-knowledge`/`query-knowledge`/`ingest` have no auth gate; `resume`/`retry-scrape` don't check
-    ownership. Also queued: server-side file-type filter (UI-only today). Sentry
-    FT-SE-001/002/003 resolved at the founder's yes.
-  - **Not done:** A1, B12 unautomated (untouched by the merge); `supabase` still in
-    `scraper/requirements.txt` + the scraper's `INGESTOR_SUPABASE_*` env (queued).)
+    **SendGrid Single Sender** (verified `alfred.bnb.host@gmail.com`; `email_client.py`). "Never
+    arrived" had three stacked causes: an empty env value (nested-quote `$(cat)` via `wsl bash -lc`), a
+    trailing `\r` from the Windows-saved key file, and the endpoint only sending on a genuine
+    enable/address change. Env set on staging + prod Cloud Run.
+  - **Prod parity + protocol:** applied the `welcome_modal_seen` + escalation-email migrations to prod;
+    columns/RLS/policies/realtime/buckets match staging. `MERGE_TO_MAIN_PROTOCOL.md` corrected (prod
+    Cloud Run auto-deploys on `main`; staging has no trigger) + a "what a git merge does not carry"
+    checklist (migrations, env vars, secrets).
+  - **New B1** (`b1.ts`, layer 3, real Firecrawl + Gemini + real files) failed first run: no hero image
+    in ~40% of scrapes. Root cause `433bc66` (09-28): the template's mandatory `**Thumbnail:**` line
+    became an optional LLM field. Three FIX_VERIFY fixes: `_pick_hero_url` fallback (thumbnail →
+    curated_photos[0] → gallery[0]); `data_completeness` made an enum (a run returned "Partial");
+    the scraper's dead Supabase upsert deleted (42P10 every scrape since 2026-06-02, FT-SE-004).
+    Verified offline on 5 real scrapes + 7 edge cases, 6 live scrapes all "High", B1 PASS (188 s/138 s).
+  - **QA suite 9/17 → 18/18:** every failure was test drift. Non-obvious causes: tsx/esbuild `__name`
+    breaks named fns in `page.evaluate`; B6 predated the client-side "airbnb." guard (rewritten); the
+    Profile dialog auto-scrolls after Connect Telegram; the vision judge false-PASSed a QR/link check
+    (prefer DB/network ground truth). B7's synthetic drag-drop onto the Flutter canvas does work.
+  - **Docs:** `scenarios.md` B1/B6/B7 rewritten + section **R** (R1–R10) + 42 Pending Intake rows
+    promoted; `lessons.md` +8; QUEUE/ROADMAP/feedback BACKLOG refreshed.
+  - **Merge-gate probes (live staging, all passed):** G4 (staging + prod bundles publishable key, anon
+    0 rows on 8 tables), G5 (13 host endpoints 401 without/garbage token; 403 vs another host's data),
+    C1 (reply in 15.6 s), C3 (`emergency_fire` → intervene in 13.3 s; UI/push legs not driven).
+  - **Shipped + verified on prod (2026-10-02):** Cloud Build SUCCESS; `alfred-backend-00027-ps4` +
+    `alfred-scraper-00010-whc` at 100%; `/health` 200; env intact; prod scraper smoke "High"; prod
+    bundle safe; Sentry clean; ALFRED-SCRAPER-2 + FT-SE-001/002/003 resolved. **Founder's prod test:**
+    Train Now, email alerts (alert arrived), Telegram Disconnect, escalations, login/logout/signup — all
+    perfect. The hero-image fallback branch itself still hasn't been watched live.
+  - **Queued from the founder's feedback (not built — own session, FIX_VERIFY):** (1) email **confirmation
+    gate** + Telegram-style Profile UI (today anyone can type someone else's address and that person
+    keeps getting alerts); (2) **stay dates** on a guest + chat disconnect **24 h after check-out** —
+    found: `guests.check_in/check_out` exist with synthetic defaults (now/+96h), an hourly
+    `auto-archive-conversations` cron only archives, and the Make.com "Expired booking" behaviour was
+    never ported (⚠️ synthetic dates would lock out existing guests if enforced blindly); (3) **auth
+    gaps** on merge/resolve/add-knowledge/query-knowledge/ingest (+ resume/retry-scrape ownership) —
+    corrected: a guest can read `property_id` via RLS and add-knowledge WRITES; (4) server-side
+    file-type filter. All in `QUEUE.md`; start from `_Context/CONTINUATION_PROMPT_2026-10-02.md`.
+  - **Non-bugs:** "Bungalowww didn't delete" (stale `prodtest@test.com` row); "signup sent no email"
+    (already-registered → `identities: []`); the Sentry email was ALFRED-BACKEND-2, a transient Vertex 429.
+  - **Directives:** scope = merge-connected only (walkthrough opacity → QUEUE, never attempt); Qwen
+    judges only Playwright UI screenshots, Claude judges pipeline output; never commit/push unasked.
+  - **Parallel session note:** another session (2026-10-02) added a model-routing/eval line to
+    `ROADMAP.md` + `_Context/Model_Routing_and_Eval_Plan_2026-10-02.md` — not part of this session.)
 
 **Prior Session:** 2026-09-28→30 (**Ran the feedback-triage protocol's first-ever execution,
 found+fixed a real gap in its own source coverage, then chased a beta-tester bug report to a real

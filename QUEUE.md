@@ -58,11 +58,56 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       `/api/ingest/add-knowledge`, `/api/ingest/query-knowledge` and the `/api/ingest` dispatcher have
       no auth at all (live-confirmed: an unauthenticated call reaches the handler and gets a 404/422,
       not a 401), and `/ingest/{id}/resume` + `/retry-scrape` check the token but not that the caller
-      owns the property. The only protection is that property UUIDs are unguessable. Practical risk:
-      someone holding a property UUID could burn Gemini calls (merge/resolve) or read its knowledge
-      (query-knowledge). Proposal: one shared `_require_host` + `host_owns_property` guard like
+      owns the property. The only protection is that property UUIDs are unguessable — **but a guest
+      can read it** (RLS policies "guest reads own booking"/"guest reads own conversation" let a
+      guest's booking JWT select their own `guests`/`conversations` row, which carries
+      `property_id`; a technically skilled guest could pull it from the REST API). Corrected
+      2026-10-02 — it is more than "burn Gemini calls": with a property UUID, **no login** needed:
+      `add-knowledge` WRITES text into the property's `master_json` (Alfred then answers guests from
+      it — fake door code / rules injection) and returns the whole knowledge base; `merge`/`resolve`
+      return `master_json` for an already-processed property; `query-knowledge` reads it. And any
+      **logged-in** host who knows another property's UUID can call `retry-scrape` to overwrite its
+      Airbnb URL and re-run it. Likelihood low (needs a tech-savvy guest/host), impact real — do it
+      before the beta widens. Proposal: one shared `_require_host` + `host_owns_property` guard like
       `messages.py` already uses; keep anonymous `/ingest` only if the add-property flow truly needs it.
       Needs FMEA (the anonymous-ingest path was deliberate) + extend G5. touches: `backend/routers/ingest.py`, `backend/routers/merge_resolve.py`
+- [ ] 🔴 Escalation-email **confirmation gate + Telegram-style UI** (founder prod test 2026-10-02: alerts
+      arrive and work, but anyone can type someone else's address and that person keeps getting alerts
+      until they unsubscribe). Design: the Profile "Email alerts" section copies the Telegram row —
+      email field + a button ("Send escalation alerts via email") instead of the checkbox. Click →
+      backend stores the address as **pending** and sends a **confirmation email** with a one-time
+      link; the row shows "Waiting for confirmation — check your inbox (it may land in spam)"
+      (+ resend/cancel). Clicking the link (public token GET, like the unsubscribe one) marks it
+      confirmed + enabled and the row flips to "Email connected — you'll get an alert there when a
+      guest needs you" (+ Disconnect), like "Telegram connected". Alerts only ever go to a
+      **confirmed** address; editing the address resets it to unconfirmed. The spam tip ("mark it
+      'not spam' so you always get your alerts") goes in a "How to use" help panel, same widget as
+      Telegram's. Decisions to settle first: existing already-enabled addresses → require
+      re-confirmation (recommended, fail-safe) vs grandfather; token expiry (~24-48 h?). Needs a
+      migration (staging then prod — remember the merge doesn't carry it), FIX_VERIFY, and P9 rewritten
+      for the new flow (it currently drives the checkbox).
+      touches: `backend/routers/messages.py`, `backend/services/email_client.py`, `backend/services/supabase_client.py`, `frontend/lib/widgets/profile_dialog.dart`, `_tests/runner/scenarios/p9.ts`, `migrations/`
+- [ ] 🟡 Stay dates on a guest (founder 2026-10-02): where the host creates/handles a guest — the
+      conversation window (the red-bubble live chat) — add fields to enter/display the guest's
+      **check-in and check-out date**. The check-in/out *times* already come from the scraped/ingested
+      property data; the *dates* are per stay, entered manually for now (later pulled from Airbnb's
+      reservation info). Purpose: Alfred can answer "when do I check out?" with the real date, and the
+      chat **disconnects 24 h after check-out** (founder: a grace window for follow-ups, forgotten
+      items, feedback). **Existing pieces found 2026-10-02:** `guests.check_in`/`check_out` columns
+      already exist; `create_guest` fills them with TESTING defaults (now / now+96h, "until Channex
+      feeds real dates"); an hourly pg_cron job `auto-archive-conversations` archives a conversation
+      once `check_out < now()` (dashboard archive only — a new guest message revives it, so the guest
+      is never actually cut off); and the old Make.com bot had the real behaviour
+      (`_Context/Supabase Alfred Airbnb - E - The Bot.blueprint.json`, route filter "Expired booking":
+      `check_out_date < addDays(now; -1)` → no AI answer; guest gets "Your stay has ended. I have
+      forwarded your message directly to the host." and the host gets a Telegram "[EXPIRED] Guest X:
+      <message>" via the property's host) — **the native port never carried it over**. ⚠️ Gotcha: every
+      existing guest has a synthetic check_out, so enforcing the cutoff blindly would lock real
+      guests out ~5 days after link creation — enforce only for explicitly entered dates (e.g. make the
+      defaults null or add a "dates confirmed" flag). Open: enter at link-creation time or inside the
+      live-chat window (or both)?; expired-reply channels (web/Telegram/WhatsApp) and host alert
+      channel (Telegram/email); time zone of check-out. Likely needs a small `guests` migration.
+      touches: `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `backend/routers/messages.py`, `backend/services/gemini_messenger.py`
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
       PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
