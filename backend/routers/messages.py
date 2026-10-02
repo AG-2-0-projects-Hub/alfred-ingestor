@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import os
 import random
@@ -1002,49 +1003,148 @@ class EscalationEmailRequest(BaseModel):
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# Double opt-in (2026-10-02): a host can only REQUEST alerts to an address; they
+# start once the address's owner confirms via the e-mailed link. The DB trigger
+# host_profiles_lock_alert_email_cols stops a host's own session from writing
+# these columns directly, so this endpoint is the only way in.
+_CONFIRM_TTL = timedelta(hours=48)
+_CONFIRM_HOST_COOLDOWN = timedelta(seconds=60)     # resend spacing, per host
+_CONFIRM_ADDRESS_COOLDOWN = timedelta(minutes=10)  # per address, across all hosts
+# RFC 2606 reserved TLD: can never receive mail, so the confirm link may be
+# handed back in the response instead (lets QA play the mailbox owner). Harmless
+# in any environment — it can only "confirm" an undeliverable address.
+_TEST_ONLY_ADDRESS_SUFFIX = "@example.invalid"
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _email_action_page(body_html: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(
+        '<html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<title>Alfred</title></head>"
+        '<body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px">'
+        f"{body_html}</body></html>",
+        status_code=status_code,
+    )
+
+
+def _build_confirmation_email_html(email: str, confirm_url: str) -> str:
+    return (
+        f"<p>Someone asked Alfred to email <b>{_escape_html(email)}</b> whenever a guest "
+        "needs a host's attention.</p>"
+        f'<p><a href="{confirm_url}">Review and confirm</a> — alerts only start once you do. '
+        "The link works for 48 hours.</p>"
+        "<p>If this wasn't you, ignore this email. Nothing will be sent to you.</p>"
+    )
+
 
 @router.post("/host/escalation-email")
 async def set_escalation_email(
     req: EscalationEmailRequest, authorization: str | None = Header(default=None),
 ):
-    """Save a host's email-escalation opt-in. The only write path for these
-    two fields (the Profile dialog writes its other fields directly via RLS) —
-    this needs server-side logic the direct-write path can't do: a fresh
-    unsubscribe token on activation, and a receipt email that only fires on a
-    genuine activation or address change, never on an unrelated profile save."""
+    """enabled=true REQUESTS email alerts: the address is stored as pending and
+    a one-time confirmation link is e-mailed to it. Alerts only start once its
+    owner confirms (confirm_escalation_email_submit below). enabled=false drops
+    the address and cancels any pending request. Requesting a different address
+    switches the old one off immediately — nothing is ever sent to an
+    unconfirmed address."""
     host_id = await _require_host(authorization)
-    email = req.email.strip()
-    if req.enabled and not _EMAIL_RE.match(email):
-        raise HTTPException(status_code=400, detail="A valid email is required to enable this.")
+
+    if not req.enabled:
+        await asyncio.to_thread(
+            supabase_client.update_host_escalation_email, host_id, None, False, None,
+        )
+        return {"status": "disconnected"}
+
+    email = req.email.strip().lower()
+    if len(email) > 254 or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="A valid email is required.")
 
     current = await asyncio.to_thread(
         supabase_client.get_host_notification_settings, host_id
     )
-    activating = req.enabled and (
-        not current["escalation_email_enabled"]
-        or current["notification_email"] != (email or None)
-    )
-    # Regenerated on every (re)activation so a stale link from a prior
-    # activation can't unexpectedly toggle a new one back off.
-    token = secrets.token_urlsafe(24) if activating else current["escalation_email_unsub_token"]
+    if current["escalation_email_enabled"] and current["notification_email"] == email:
+        return {"status": "connected"}  # already confirmed — nothing to send
 
+    now = datetime.now(timezone.utc)
+    pending_until = current["escalation_email_confirm_expires_at"]
+    if pending_until:
+        issued_at = datetime.fromisoformat(pending_until.replace("Z", "+00:00")) - _CONFIRM_TTL
+        if now - issued_at < _CONFIRM_HOST_COOLDOWN:
+            raise HTTPException(status_code=429, detail="Please wait a minute before requesting another email.")
+    recently = await asyncio.to_thread(
+        supabase_client.escalation_email_recently_requested,
+        email, host_id, (now + _CONFIRM_TTL - _CONFIRM_ADDRESS_COOLDOWN).isoformat(),
+    )
+    if recently:
+        raise HTTPException(status_code=429, detail="A confirmation email was just sent to that address. Try again in a few minutes.")
+
+    raw_token = secrets.token_urlsafe(32)
     await asyncio.to_thread(
         supabase_client.update_host_escalation_email,
-        host_id, email or None, req.enabled, token,
+        host_id, email, False, None,
+        _hash_token(raw_token), (now + _CONFIRM_TTL).isoformat(),
     )
 
-    if activating:
-        backend_url = os.environ.get("BACKEND_URL", "").strip().rstrip("/")
-        unsub_url = f"{backend_url}/api/host/escalation-email/unsubscribe?token={token}"
-        await email_client.send_email(
-            email, "Alfred email alerts are on",
-            "<p>You'll now get an email here whenever a guest needs a host's "
-            "attention and Alfred is waiting on you.</p>"
-            f'<p style="color:#888;font-size:12px;margin-top:24px">'
-            f'<a href="{unsub_url}" style="color:#888">Stop these email alerts</a></p>',
-        )
+    backend_url = os.environ.get("BACKEND_URL", "").strip().rstrip("/")
+    confirm_url = f"{backend_url}/api/host/escalation-email/confirm?token={raw_token}"
+    if email.endswith(_TEST_ONLY_ADDRESS_SUFFIX):
+        return {"status": "pending", "confirm_url": confirm_url}
 
-    return {"status": "saved"}
+    sent = await email_client.send_email(
+        email, "Confirm Alfred email alerts", _build_confirmation_email_html(email, confirm_url),
+    )
+    if not sent:
+        # Don't leave the host staring at "check your inbox" for a mail that
+        # was never sent — drop the pending request and say so.
+        await asyncio.to_thread(
+            supabase_client.update_host_escalation_email, host_id, None, False, None,
+        )
+        raise HTTPException(status_code=502, detail="Couldn't send the confirmation email.")
+    return {"status": "pending"}
+
+
+@router.get("/host/escalation-email/confirm", response_class=HTMLResponse)
+async def confirm_escalation_email_page(token: str):
+    """Public — the token is the authorization. Shows a page with a Confirm
+    button and changes NOTHING: mail scanners that prefetch links must not be
+    able to confirm for the recipient. The POST below does the confirming."""
+    email = await asyncio.to_thread(
+        supabase_client.get_pending_escalation_email, _hash_token(token)
+    )
+    if not email:
+        return _email_action_page(
+            "<p>This confirmation link is no longer valid — it may have expired or already "
+            "been used. Ask for a new one from your Alfred profile.</p>", 400,
+        )
+    return _email_action_page(
+        f"<p>Send Alfred escalation alerts to <b>{_escape_html(email)}</b>?</p>"
+        f'<form method="post" action="?token={quote(token)}">'
+        '<button type="submit" style="font-size:16px;padding:10px 20px">'
+        "Yes, send me alerts</button></form>"
+    )
+
+
+@router.post("/host/escalation-email/confirm", response_class=HTMLResponse)
+async def confirm_escalation_email_submit(token: str):
+    """Public — the token is the authorization. One atomic UPDATE: valid and
+    unexpired -> alerts on (with a fresh unsubscribe token); otherwise nothing
+    changes. A second click finds the token already spent."""
+    email = await asyncio.to_thread(
+        supabase_client.confirm_escalation_email,
+        _hash_token(token), secrets.token_urlsafe(24),
+    )
+    if not email:
+        return _email_action_page(
+            "<p>This confirmation link is no longer valid — it may have expired or already "
+            "been used. Ask for a new one from your Alfred profile.</p>", 400,
+        )
+    return _email_action_page(
+        f"<p>Done — Alfred will email <b>{_escape_html(email)}</b> when a guest needs "
+        "attention. Every alert includes a link to stop them.</p>"
+    )
 
 
 @router.get("/host/escalation-email/unsubscribe", response_class=HTMLResponse)

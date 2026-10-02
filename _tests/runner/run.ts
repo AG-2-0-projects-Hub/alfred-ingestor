@@ -20,6 +20,7 @@ import { runD9 } from './scenarios/d9.ts';
 import { runP1 } from './scenarios/p1.ts';
 import { runP8 } from './scenarios/p8.ts';
 import { runP9 } from './scenarios/p9.ts';
+import { runP10 } from './scenarios/p10.ts';
 import { runQ1 } from './scenarios/q1.ts';
 
 export type ScenarioResult = {
@@ -111,8 +112,9 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     // Layer 2 — Telegram host escalation
     runP1,
     runP8,
-    // Layer 2 — host escalation email fallback
+    // Layer 2 + 3 — host escalation email fallback (double opt-in: UI, then backend gate)
     runP9,
+    runP10,
     // Layer 2 — first-login onboarding
     runQ1,
   ];

@@ -768,7 +768,8 @@ def get_host_notification_settings(host_id: str) -> dict:
     "not configured"."""
     result = (
         get_client().table("host_profiles")
-        .select("notification_email, escalation_email_enabled, escalation_email_unsub_token")
+        .select("notification_email, escalation_email_enabled, escalation_email_unsub_token, "
+                "escalation_email_confirm_expires_at")
         .eq("id", host_id)
         .maybe_single()
         .execute()
@@ -778,19 +779,80 @@ def get_host_notification_settings(host_id: str) -> dict:
         "notification_email": data.get("notification_email"),
         "escalation_email_enabled": bool(data.get("escalation_email_enabled")),
         "escalation_email_unsub_token": data.get("escalation_email_unsub_token"),
+        "escalation_email_confirm_expires_at": data.get("escalation_email_confirm_expires_at"),
     }
 
 
 def update_host_escalation_email(
     host_id: str, email: str | None, enabled: bool, unsub_token: str | None,
+    confirm_hash: str | None = None, confirm_expires_at: str | None = None,
 ) -> None:
     """Persist a host's email-escalation settings. unsub_token is the caller's
-    responsibility to (re)generate on activation — this just stores it."""
+    responsibility to (re)generate on activation — this just stores it.
+    The pending-confirmation pair defaults to None, so every caller that
+    doesn't pass it (unsubscribe, disconnect) also cancels a pending request.
+    A host's own session cannot write these columns (DB trigger
+    host_profiles_lock_alert_email_cols) — only this service-role path can."""
     get_client().table("host_profiles").update({
         "notification_email": email,
         "escalation_email_enabled": enabled,
         "escalation_email_unsub_token": unsub_token,
+        "escalation_email_confirm_hash": confirm_hash,
+        "escalation_email_confirm_expires_at": confirm_expires_at,
     }).eq("id", host_id).execute()
+
+
+def get_pending_escalation_email(token_hash: str) -> str | None:
+    """Address awaiting confirmation for this token hash, or None if the link
+    is unknown, already used, or past its expiry. Read-only."""
+    result = (
+        get_client().table("host_profiles")
+        .select("notification_email")
+        .eq("escalation_email_confirm_hash", token_hash)
+        .gt("escalation_email_confirm_expires_at", _now())
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("notification_email") if result else None
+
+
+def confirm_escalation_email(token_hash: str, unsub_token: str) -> str | None:
+    """Atomically turn a still-valid pending confirmation into an active alert
+    address (one UPDATE, so a double click or a race can't confirm twice).
+    Returns the confirmed address, or None if the link is unknown/used/expired."""
+    result = (
+        get_client().table("host_profiles")
+        .update({
+            "escalation_email_enabled": True,
+            "escalation_email_unsub_token": unsub_token,
+            "escalation_email_confirm_hash": None,
+            "escalation_email_confirm_expires_at": None,
+        })
+        .eq("escalation_email_confirm_hash", token_hash)
+        .gt("escalation_email_confirm_expires_at", _now())
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0].get("notification_email") if rows else None
+
+
+def escalation_email_recently_requested(
+    email: str, exclude_host_id: str, issued_after_expiry: str,
+) -> bool:
+    """True if ANOTHER host asked for a confirmation to this address recently
+    (their pending expiry is later than `issued_after_expiry`, i.e. it was
+    issued inside the cooldown window). Stops one address being mail-bombed
+    from many accounts."""
+    result = (
+        get_client().table("host_profiles")
+        .select("id")
+        .eq("notification_email", email)
+        .neq("id", exclude_host_id)
+        .gt("escalation_email_confirm_expires_at", issued_after_expiry)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
 
 
 def get_host_id_by_unsub_token(token: str) -> str | None:
