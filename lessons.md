@@ -3,6 +3,24 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-02 — "The ID is unguessable" is not a defence when RLS shows that ID to a lower-trust user (and I called it one before checking)
+
+**Context:** After the G5 probes found endpoints (`merge`, `resolve`, `add-knowledge`, `query-knowledge`, `ingest`) with no auth gate, I told the founder the only protection was that property UUIDs are unguessable and the risk was "someone burning Gemini calls".
+**Discovery:** Both halves were incomplete. RLS policies "guest reads own booking" / "guest reads own conversation" let a guest's booking JWT select their own `guests`/`conversations` row, and both carry `property_id` — so a technically skilled guest can obtain the ID. And `add-knowledge` *writes* into `master_json` (Alfred then answers other guests from it) while `merge`/`resolve` return the whole `master_json` for an already-processed property; `retry-scrape` lets any logged-in host overwrite another property's Airbnb URL. I only found this when asked to explain the gap "exactly" and re-read the handlers instead of the summary I had written earlier.
+**Impact:** When someone says an ID or URL "is a secret", enumerate who can read it (RLS policies, URLs shown in UIs, API responses) before accepting it as access control, and read what each unguarded endpoint actually does (read vs write) rather than trusting the first description. Correct a wrong reassurance out loud as soon as it is found.
+**Global Candidate:** Yes — general security-reasoning rule for any project using RLS with several trust levels.
+
+---
+
+## 2026-10-02 — The Make.com bot's "Expired booking" behaviour was never carried into the native port, and the stay dates the port does keep are synthetic
+
+**Context:** Planning stay dates on a guest (check-in/check-out entry + a 24 h grace window after check-out before the chat disconnects), the founder pointed at the old Make.com blueprint.
+**Discovery:** The blueprint's route filter "Expired booking" (`check_out_date < addDays(now; -1)`) meant: no AI answer; the guest gets "Your stay has ended. I have forwarded your message directly to the host." and the host gets a Telegram "[EXPIRED] Guest X: <message>". The native port (2026-09) kept only the data shape: `guests.check_in`/`check_out` exist, but `create_guest` fills them with testing defaults (now / now+96h, "until Channex feeds real dates"), an hourly pg_cron job `auto-archive-conversations` merely archives the dashboard row once `check_out < now()`, and any new guest message revives it — so a guest is never actually cut off. CONTEXT.md had noted the blueprint targeted a schema that no longer exists, which is why it was "ported, not revived" — but the behaviour list was never diffed.
+**Impact:** When porting from an old automation, diff its *behaviours* (every filter/branch), not just its tables, and record what was dropped. Before enforcing a cutoff on `check_out`, existing guests' synthetic dates must be handled (enforce only for explicitly entered dates, or null the defaults) or real guests get locked out ~5 days after link creation.
+**Global Candidate:** No — project-specific.
+
+---
+
 ## 2026-10-01 — A Windows-saved secret `.txt` carries an invisible trailing `\r` that `$(cat file)` does not strip, and an HTTP client rejects it
 
 **Context:** Wiring a SendGrid API key (saved via Notepad to the Desktop) into Cloud Run env vars for the host escalation email.

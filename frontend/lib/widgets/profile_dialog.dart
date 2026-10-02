@@ -45,7 +45,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _nicknameController = TextEditingController();
   final _bioController = TextEditingController();
   final _notificationEmailController = TextEditingController();
-  bool _escalationEmailEnabled = false;
   String? _avatarUrl;
   bool _loading = true;
   bool _loadError = false;
@@ -61,8 +60,24 @@ class _ProfileDialogState extends State<ProfileDialog> {
   bool _disconnectingTelegram = false;
   Timer? _telegramPollTimer;
   final _tgHelpDockLink = LayerLink();
-  OverlayEntry? _tgHelpOverlay;
   final _telegramSectionKey = GlobalKey();
+
+  // Email alerts (double opt-in): connected = confirmed and on; pending = a
+  // confirmation link was e-mailed and is neither used nor expired. Alerts only
+  // ever go to a confirmed address — the backend enforces it, this just mirrors
+  // the row so the section can show the right state.
+  bool _emailConnected = false;
+  DateTime? _emailPendingUntil;
+  bool _requestingEmail = false;
+  bool _droppingEmail = false;
+  Timer? _emailPollTimer;
+  final _emailHelpDockLink = LayerLink();
+  final _emailSectionKey = GlobalKey();
+
+  // One docked "How to use" panel at a time, shared by the Telegram and Email
+  // sections; _helpOpenFor says which one it currently belongs to.
+  OverlayEntry? _helpOverlay;
+  String? _helpOpenFor;
 
   SupabaseClient get _db => Supabase.instance.client;
   String? get _uid => _db.auth.currentUser?.id;
@@ -81,7 +96,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _bioController.dispose();
     _notificationEmailController.dispose();
     _telegramPollTimer?.cancel();
-    _tgHelpOverlay?.remove();
+    _emailPollTimer?.cancel();
+    _helpOverlay?.remove();
     super.dispose();
   }
 
@@ -92,7 +108,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
           .from('host_profiles')
           .select('display_name, nickname, bio, avatar_url, telegram_chat_id, '
               'active_conversation_booking_id, notification_email, '
-              'escalation_email_enabled')
+              'escalation_email_enabled, escalation_email_confirm_expires_at')
           .eq('id', _uid ?? '')
           .maybeSingle();
       // row == null here is a clean "no profile row yet" — expected for a
@@ -105,9 +121,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
         _telegramChatId = row['telegram_chat_id'] as String?;
         _activeConversationBookingId =
             row['active_conversation_booking_id'] as String?;
-        _notificationEmailController.text =
-            row['notification_email'] as String? ?? '';
-        _escalationEmailEnabled = row['escalation_email_enabled'] as bool? ?? false;
+        _applyEmailRow(row);
+        _startEmailPoll(); // no-op unless a confirmation is pending
       }
     } catch (_) {
       // A real failure (network, RLS) is NOT the same as "no row yet" — that
@@ -174,15 +189,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Future<void> _save() async {
     final uid = _uid;
     if (uid == null) return;
-    final notificationEmail = _notificationEmailController.text.trim();
-    if (_escalationEmailEnabled && !notificationEmail.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid email to enable email alerts.')),
-      );
-      return;
-    }
     setState(() => _saving = true);
     try {
+      // Email alerts are NOT saved here: like Telegram they act on their own
+      // button (request -> confirm by e-mail), so Save never touches them.
       await _db.from('host_profiles').upsert({
         'id': uid,
         'display_name': _nameController.text.trim(),
@@ -191,19 +201,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
         'avatar_url': _avatarUrl,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       });
-      try {
-        // Separate endpoint (not the direct upsert above): saving this pair
-        // needs server-side logic — minting an unsubscribe token and sending
-        // a receipt email on activation — that an RLS-direct write can't do.
-        // Non-fatal on failure: the rest of the profile already saved.
-        final token = _db.auth.currentSession?.accessToken;
-        await ApiClient.postJson('/api/host/escalation-email', {
-          'email': notificationEmail,
-          'enabled': _escalationEmailEnabled,
-        }, bearer: token);
-      } catch (_) {
-        // Swallowed — see comment above.
-      }
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -361,6 +358,121 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
   }
 
+  /// Mirrors the host_profiles row into the Email alerts section's state.
+  /// Pending only counts while its expiry is still in the future.
+  void _applyEmailRow(Map<String, dynamic>? row) {
+    final until = DateTime.tryParse(
+        row?['escalation_email_confirm_expires_at'] as String? ?? '');
+    _emailConnected = row?['escalation_email_enabled'] as bool? ?? false;
+    _emailPendingUntil =
+        (until != null && until.isAfter(DateTime.now())) ? until : null;
+    final address = row?['notification_email'] as String?;
+    if (address != null) _notificationEmailController.text = address;
+  }
+
+  Future<void> _refreshEmailState() async {
+    final row = await _db
+        .from('host_profiles')
+        .select('notification_email, escalation_email_enabled, '
+            'escalation_email_confirm_expires_at')
+        .eq('id', _uid ?? '')
+        .maybeSingle();
+    if (mounted) setState(() => _applyEmailRow(row));
+  }
+
+  /// The address's owner confirms from their inbox, so this dialog has no other
+  /// way to know — poll the owner-scoped row (same pattern as Telegram, capped
+  /// at 10 minutes) and flip to "connected" the moment it lands.
+  void _startEmailPoll() {
+    _emailPollTimer?.cancel();
+    if (_emailPendingUntil == null) return;
+    _emailPollTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (timer.tick >= 200) {
+        timer.cancel();
+        return;
+      }
+      try {
+        await _refreshEmailState();
+      } catch (_) {
+        // transient — the next tick retries
+      }
+      if (!mounted || _emailPendingUntil == null) timer.cancel();
+    });
+  }
+
+  void _emailError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: context.palette.danger),
+    );
+  }
+
+  /// Asks the backend to e-mail a confirmation link to the typed address. Also
+  /// serves as "Resend". Nothing is switched on until the owner confirms.
+  Future<void> _requestEmailAlerts() async {
+    final address = _notificationEmailController.text.trim();
+    if (!address.contains('@')) {
+      _emailError('Enter a valid email address.');
+      return;
+    }
+    setState(() => _requestingEmail = true);
+    try {
+      final token = _db.auth.currentSession?.accessToken;
+      await ApiClient.postJson('/api/host/escalation-email',
+          {'email': address, 'enabled': true}, bearer: token);
+      await _refreshEmailState();
+      _startEmailPoll();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _emailSectionKey.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+              alignment: 1.0);
+        }
+      });
+    } on ServerException catch (e) {
+      // Kept short on purpose: SnackBars sit under the dialog, so a long
+      // message is partly hidden behind it.
+      _emailError(switch (e.statusCode) {
+        400 => 'Enter a valid email address.',
+        429 => 'Too many requests — please wait a few minutes.',
+        502 => "Couldn't send the email — please try again.",
+        _ => e.userMessage,
+      });
+    } on ApiException catch (e) {
+      _emailError(e.userMessage);
+    } catch (_) {
+      _emailError('Could not request email alerts. Please try again.');
+    } finally {
+      if (mounted) setState(() => _requestingEmail = false);
+    }
+  }
+
+  /// Disconnect (connected) and Cancel (pending) are the same call: the backend
+  /// clears the address, the flag and any pending confirmation.
+  Future<void> _dropEmailAlerts() async {
+    setState(() => _droppingEmail = true);
+    try {
+      final token = _db.auth.currentSession?.accessToken;
+      await ApiClient.postJson('/api/host/escalation-email',
+          {'email': '', 'enabled': false}, bearer: token);
+      _emailPollTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _emailConnected = false;
+          _emailPendingUntil = null;
+        });
+      }
+    } on ApiException catch (e) {
+      _emailError(e.userMessage);
+    } catch (_) {
+      _emailError('Could not update email alerts. Please try again.');
+    } finally {
+      if (mounted) setState(() => _droppingEmail = false);
+    }
+  }
+
   static const List<List<String>> _telegramHelpLines = [
     ['When a guest needs you, you\'ll get an alert here with their message, '
         'Alfred\'s draft, and a ', 'Mark Resolved', ' button.'],
@@ -374,9 +486,20 @@ class _ProfileDialogState extends State<ProfileDialog> {
         'and the guest is notified.'],
   ];
 
+  static const List<List<String>> _emailHelpLines = [
+    ['Enter your address and tap ', 'Send escalation alerts via email', ' — '
+        'we send a confirmation link to it.'],
+    ['Open that email and tap ', 'Confirm', '. Alerts only start once you do, '
+        'so nobody gets emails they didn\'t ask for.'],
+    ['The confirmation email may land in ', 'Spam', ' — open it and mark it ',
+        'Not spam', ' so your alerts always reach your inbox.'],
+    ['Every alert includes a ', 'Stop these email alerts', ' link, and you '
+        'can ', 'Disconnect', ' here anytime.'],
+  ];
+
   /// Odd-indexed entries in each row are the bold spans (the pattern reads
   /// as plain/bold/plain/bold/... starting with plain).
-  List<InlineSpan> _telegramHelpSpans(List<String> parts, AppPalette palette) {
+  List<InlineSpan> _helpSpans(List<String> parts, AppPalette palette) {
     return [
       for (var i = 0; i < parts.length; i++)
         TextSpan(
@@ -388,11 +511,17 @@ class _ProfileDialogState extends State<ProfileDialog> {
     ];
   }
 
-  void _toggleTelegramHelp() {
-    if (_tgHelpOverlay != null) {
-      _tgHelpOverlay?.remove();
-      _tgHelpOverlay = null;
-      return;
+  /// Docked "How to use" panel shared by the Telegram and Email sections
+  /// ([key] says which one). Tapping the other section's button swaps it.
+  void _toggleHelp(
+      String key, LayerLink link, String title, List<List<String>> lines,
+      {bool growUp = false}) {
+    if (_helpOverlay != null) {
+      final wasOpenFor = _helpOpenFor;
+      _helpOverlay?.remove();
+      _helpOverlay = null;
+      _helpOpenFor = null;
+      if (wasOpenFor == key) return;
     }
     final screenW = MediaQuery.sizeOf(context).width;
     if (screenW < 900) {
@@ -401,10 +530,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
       showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('How Telegram replies work'),
+          title: Text(title),
           content: SizedBox(
             width: 360,
-            child: _buildTelegramHelpBody(context.palette),
+            child: _buildHelpBody(lines, context.palette),
           ),
           actions: [
             TextButton(
@@ -421,11 +550,14 @@ class _ProfileDialogState extends State<ProfileDialog> {
       builder: (overlayContext) => Positioned(
         width: 340,
         child: CompositedTransformFollower(
-          link: _tgHelpDockLink,
+          link: link,
           showWhenUnlinked: false,
-          targetAnchor: Alignment.topRight,
-          followerAnchor: Alignment.topLeft,
-          offset: const Offset(12, -12),
+          // growUp: the Email section sits low in the dialog, so its panel is
+          // anchored by its bottom edge and grows upward instead of running
+          // off the bottom of a short viewport.
+          targetAnchor: growUp ? Alignment.bottomRight : Alignment.topRight,
+          followerAnchor: growUp ? Alignment.bottomLeft : Alignment.topLeft,
+          offset: growUp ? const Offset(12, 12) : const Offset(12, -12),
           child: Material(
             color: Colors.transparent,
             child: Container(
@@ -446,7 +578,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     children: [
                       Expanded(
                         child: Text(
-                          'How Telegram replies work',
+                          title,
                           style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
@@ -455,7 +587,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
                         ),
                       ),
                       InkWell(
-                        onTap: _toggleTelegramHelp,
+                        onTap: () =>
+                            _toggleHelp(key, link, title, lines, growUp: growUp),
                         borderRadius: BorderRadius.circular(12),
                         child: Padding(
                           padding: const EdgeInsets.all(2),
@@ -466,7 +599,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  _buildTelegramHelpBody(context.palette),
+                  _buildHelpBody(lines, context.palette),
                 ],
               ),
             ),
@@ -474,16 +607,17 @@ class _ProfileDialogState extends State<ProfileDialog> {
         ),
       ),
     );
-    _tgHelpOverlay = entry;
+    _helpOverlay = entry;
+    _helpOpenFor = key;
     Overlay.of(context, rootOverlay: true).insert(entry);
   }
 
-  Widget _buildTelegramHelpBody(AppPalette palette) {
+  Widget _buildHelpBody(List<List<String>> lines, AppPalette palette) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final line in _telegramHelpLines) ...[
+        for (final line in lines) ...[
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -491,7 +625,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                   style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary)),
               Expanded(
                 child: Text.rich(
-                  TextSpan(children: _telegramHelpSpans(line, palette)),
+                  TextSpan(children: _helpSpans(line, palette)),
                   style: GoogleFonts.inter(
                       fontSize: 12, height: 1.5, color: palette.textSecondary),
                 ),
@@ -593,6 +727,118 @@ class _ProfileDialogState extends State<ProfileDialog> {
     );
   }
 
+  /// Three states, same shape as the Telegram section: nothing set up yet
+  /// (field + button), waiting for the address's owner to confirm, connected.
+  Widget _buildEmailSection(AppPalette palette) {
+    final address = _notificationEmailController.text.trim();
+    final linkStyle = TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      minimumSize: const Size(0, 0),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
+    if (_emailConnected) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.check_circle_rounded, size: 16, color: palette.success),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Email connected — you'll get an alert at $address when a "
+                  'guest needs you.',
+                  style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextButton(
+            style: linkStyle,
+            onPressed: _droppingEmail ? null : _dropEmailAlerts,
+            child: Text(
+              _droppingEmail ? 'Disconnecting…' : 'Disconnect',
+              style: TextStyle(fontSize: 12, color: palette.danger),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_emailPendingUntil != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.hourglass_top_rounded, size: 16, color: palette.textMuted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Waiting for confirmation — check the inbox of $address '
+                  '(it may land in spam).',
+                  style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              TextButton(
+                style: linkStyle,
+                onPressed: _requestingEmail ? null : _requestEmailAlerts,
+                child: Text(_requestingEmail ? 'Sending…' : 'Resend',
+                    style: const TextStyle(fontSize: 12)),
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                style: linkStyle,
+                onPressed: _droppingEmail ? null : _dropEmailAlerts,
+                child: Text(_droppingEmail ? 'Cancelling…' : 'Cancel',
+                    style: TextStyle(fontSize: 12, color: palette.danger)),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          label: 'Notification email',
+          child: TextField(
+            controller: _notificationEmailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              hintText: 'Email for guest-escalation alerts',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _requestingEmail ? null : _requestEmailAlerts,
+          icon: const Icon(Icons.email_outlined, size: 16),
+          label: Text(_requestingEmail
+              ? 'Sending…'
+              : 'Send escalation alerts via email'),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "We'll email a confirmation link first — alerts only start once "
+          'it is confirmed.',
+          style: TextStyle(fontSize: 11, color: palette.textMuted),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -683,7 +929,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
                               minimumSize: const Size(0, 0),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            onPressed: _toggleTelegramHelp,
+                            onPressed: () => _toggleHelp('telegram', _tgHelpDockLink,
+                                'How Telegram replies work', _telegramHelpLines),
                             child: const Text('How to use', style: TextStyle(fontSize: 12)),
                           ),
                         ),
@@ -694,34 +941,28 @@ class _ProfileDialogState extends State<ProfileDialog> {
                       child: _buildTelegramSection(palette),
                     ),
                     const SizedBox(height: 20),
-                    _label('Email alerts', palette),
-                    Semantics(
-                      label: 'Notification email',
-                      child: TextField(
-                        controller: _notificationEmailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                          hintText: 'Email for guest-escalation alerts',
-                          border: OutlineInputBorder(),
-                          isDense: true,
+                    Row(
+                      children: [
+                        Expanded(child: _label('Email alerts', palette)),
+                        CompositedTransformTarget(
+                          link: _emailHelpDockLink,
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _toggleHelp('email', _emailHelpDockLink,
+                                'How email alerts work', _emailHelpLines,
+                                growUp: true),
+                            child: const Text('How to use', style: TextStyle(fontSize: 12)),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    CheckboxListTile(
-                      value: _escalationEmailEnabled,
-                      onChanged: (v) =>
-                          setState(() => _escalationEmailEnabled = v ?? false),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(
-                        'Send escalation notifications via Email',
-                        style: GoogleFonts.inter(fontSize: 12, color: palette.textSecondary),
-                      ),
-                    ),
-                    Text(
-                      'Every alert includes an unsubscribe link.',
-                      style: TextStyle(fontSize: 11, color: palette.textMuted),
+                    Container(
+                      key: _emailSectionKey,
+                      child: _buildEmailSection(palette),
                     ),
                     const SizedBox(height: 8),
                     const Divider(),

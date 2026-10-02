@@ -8,6 +8,8 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-10-02 | "The ID is unguessable" is no defence when RLS shows the ID to a lower-trust user (guests can read `property_id`); also check whether an unguarded endpoint reads or WRITES (`add-knowledge` writes) — and correct a wrong reassurance as soon as it's found | security, rls, auth, uuid, endpoints, ingest, global-candidate |
+| 2026-10-02 | Make.com "Expired booking" behaviour (24 h after check-out → canned reply + host alert) was never ported; `guests.check_in/check_out` hold synthetic defaults (now/+96h) so enforcing a cutoff blindly would lock real guests out | port, make-com, blueprint, check-out, guests, cron, stay-dates |
 | 2026-10-01 | A Windows-saved secret `.txt` carries an invisible trailing `\r` that `$(cat)` doesn't strip and HTTP headers reject — `tr -d '\r\n'`, and verify the deployed value's length, not just that the env var name exists | secrets, windows, crlf, env-vars, cloud-run, email, sendgrid, global-candidate |
 | 2026-10-01 | `wsl bash -lc '… $(…) …'` from the Bash tool can silently yield an empty variable — put anything non-trivial in a script file and echo value lengths | wsl, bash, quoting, shell-scripting, secrets, global-candidate |
 | 2026-10-01 | The escalation-email endpoint only sends on a genuine enable/address change; re-saving the same state is a silent 200 no-op — reset the test host before each delivery test | email, escalation, testing, endpoint-guard |
