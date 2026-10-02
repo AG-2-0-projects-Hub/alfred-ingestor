@@ -3,6 +3,42 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-02 — RLS is row-level only: a consent/gate column enforced just in the backend is bypassable with a free account
+
+**Context:** Adding a confirmation step (double opt-in) before host escalation alerts go to an e-mail address. The obvious design was "backend endpoint stores the address as pending; the confirm link flips the flag".
+**Discovery:** `host_profiles` has an owner-only UPDATE policy (`id = auth.uid()`) and `authenticated` holds UPDATE on every column, so any logged-in host can PATCH `notification_email` / `escalation_email_enabled` / the unsubscribe token straight through the REST API — never touching the backend. Reproduced live on staging (the write was accepted) before designing the fix; the alert sender only checks those three columns, so the gate would have been decorative. Fix: a BEFORE INSERT/UPDATE trigger that keeps the old values when `current_user in ('authenticated','anon')` (backend = `service_role`, SQL editor/migrations = `postgres`, both pass), plus storing only a hash of the confirmation token because the host can also *read* their own row.
+**Impact:** For any column that gates an outbound or privileged action, ask "can the row's owner write/read this directly through PostgREST?" — row policies don't protect columns. Prefer a trigger over enumerating column grants (the app legitimately writes many other columns of the same row). Secrets the owner must not know (confirm tokens) go in as hashes, since owner-readable rows leak raw values.
+**Global Candidate:** Yes — any AG project with RLS where a user owns a row that also carries gating state.
+
+---
+
+## 2026-10-02 — FIX_VERIFY Step 0 means reproducing, and reading the protocol file first; my "verified facts" were code reads
+
+**Context:** Starting the continuation prompt's three items. I answered Step 1 ("write back what you understood") with findings from reading code/grants, without having opened `FIX_VERIFY_PROTOCOL.md` (the prompt's own Step 0 list) — the founder had to ask whether I was applying it.
+**Discovery:** Once I actually reproduced against staging with throwaway data (QA host row, throwaway properties, restore + soft-delete afterwards), the picture changed in two places the code-read had missed or understated: the direct-REST write bypass of any backend-only gate, and `/api/ingest` overwriting another property's name and starting a run with only its UUID. Each was a hypothesis until a probe ran it twice.
+**Impact:** At the start of any FIX_VERIFY item: read the protocol file, then label each claim "reproduced" vs "read from code" and only call the former a fact. Probe scripts that must not leak values print booleans/lengths, guard on the staging project ref, and clean up in `finally`.
+**Global Candidate:** No — process point for this project's protocol (already enforced mechanically by `wrap_up.sh`).
+
+---
+
+## 2026-10-02 — Pre-commit UI testing without a push: serve the release build locally and proxy `/api` to staging; force failure paths with a zero-traffic tagged revision
+
+**Context:** Verifying a Flutter change with Playwright before committing, when Vercel only builds on a pushed branch and the staging backend's CORS allow-list (`FRONTEND_URL`) has no localhost.
+**Discovery:** (1) `flutter build web --pwa-strategy=none --release`, then a ~40-line Node server that serves `build/web` and forwards `/api/*` to the staging backend on the same origin — it also rewrites `assets/.env` on the fly so the app calls the local origin; the on-disk build stays untouched. Run the suite with `STAGING_FRONTEND_URL=http://localhost:3000` (dotenv won't override an already-set env var). Supabase itself allows any origin. (2) A path that only fails with a broken dependency (e.g. SendGrid down) can be exercised for real with `gcloud run services update … --no-traffic --tag=<x> --update-env-vars=KEY=bad`, hitting the tag URL, then `update-traffic --remove-tags=<x>`; live traffic stays pinned to the good revision throughout. (3) Reserved `.invalid` addresses make a safe test seam. (4) The vision judge false-FAILed twice on expectations phrased as negations ("the X text is gone") and on states that legitimately differ from my assumption — look at the screenshot yourself, and phrase judge expectations as positive content.
+**Impact:** Reuse (1)–(4) instead of pushing WIP just to get a preview. After (2), `gcloud run deploy` later re-points traffic to its new revision as usual.
+**Global Candidate:** Yes — Flutter-web + Cloud Run + Playwright projects.
+
+---
+
+## 2026-10-02 — Auto mode's "Production Reads" block applies even to read-only prod MCP queries, and a chat "yes" does not clear it
+
+**Context:** Needed one `count(*)` on prod `host_profiles` to size the re-confirmation of already-enabled addresses.
+**Discovery:** The auto-mode classifier denied a plain SELECT through the prod Supabase MCP twice, including after the founder said "yes" in chat; switching Claude Code to accept-edits mode let the same read run. (Writes to prod were previously cleared by an explicit chat instruction — reads are classified separately.)
+**Impact:** If a prod read is needed, say so up front and ask the founder to change the permission mode or run the query themselves; don't try workarounds.
+**Global Candidate:** No — Claude Code harness behaviour, project-specific wording.
+
+---
+
 ## 2026-10-02 — "The ID is unguessable" is not a defence when RLS shows that ID to a lower-trust user (and I called it one before checking)
 
 **Context:** After the G5 probes found endpoints (`merge`, `resolve`, `add-knowledge`, `query-knowledge`, `ingest`) with no auth gate, I told the founder the only protection was that property UUIDs are unguessable and the risk was "someone burning Gemini calls".

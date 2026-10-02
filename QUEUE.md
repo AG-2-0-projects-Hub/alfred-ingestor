@@ -14,6 +14,19 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
+- [ ] 🔴 The alert's "Open full conversation" link shows a **blank, misleading page** to anyone who isn't
+      signed in as the property's owner (found 2026-10-02 while verifying the email-alert gate — the
+      founder opened the escalation email's link and saw "No messages yet" + Autopilot + "Alfred is
+      handling this conversation" for a conversation that is really in `intervene` with a live
+      EMERGENCY). Reproduced: same URL as the owner = full thread, Intervene, "Mark Issue as Resolved";
+      logged out (fresh browser) = the blank screen. RLS is owner-scoped, so a non-owner/logged-out
+      viewer just reads zero rows and the page renders its empty defaults. Real-world trigger: a host
+      taps the link on a phone where they aren't signed in, or have a second account signed in — the
+      alert's own destination tells them nothing is wrong. Proposed fix (not applied — needs approval,
+      FIX_VERIFY): logged out → send to the sign-in screen and return to the same link afterwards;
+      signed in but the conversation is unreadable → say "You don't have access to this conversation —
+      are you signed in as this property's host?" instead of the empty Autopilot view.
+      touches: `frontend/lib/screens/chat_live_screen.dart`, `frontend/lib/main.dart` (routing)
 - [ ] 🔴 Walkthrough tip bubbles read as see-through (queued 2026-10-01, founder: **do NOT attempt
       unprompted** — a previous 2-day attempt broke other things and never landed). Known root
       cause: `BoxDecoration` paints `gradient` over `color`, so `GlassPanel`
@@ -67,26 +80,21 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       it — fake door code / rules injection) and returns the whole knowledge base; `merge`/`resolve`
       return `master_json` for an already-processed property; `query-knowledge` reads it. And any
       **logged-in** host who knows another property's UUID can call `retry-scrape` to overwrite its
-      Airbnb URL and re-run it. Likelihood low (needs a tech-savvy guest/host), impact real — do it
+      Airbnb URL and re-run it. **Reproduced live on staging 2026-10-02 (FIX_VERIFY Step 0, run twice):**
+      anonymous `add-knowledge` stored a fake door code in `master_json`; anonymous `/api/ingest` with an
+      existing property's UUID overwrote its name and started a run (`insert_property` upserts name/URL
+      and the dispatcher has no ownership check); `resume` with another host's property returned 200.
+      Likelihood low (needs a tech-savvy guest/host), impact real — do it
       before the beta widens. Proposal: one shared `_require_host` + `host_owns_property` guard like
       `messages.py` already uses; keep anonymous `/ingest` only if the add-property flow truly needs it.
       Needs FMEA (the anonymous-ingest path was deliberate) + extend G5. touches: `backend/routers/ingest.py`, `backend/routers/merge_resolve.py`
-- [ ] 🔴 Escalation-email **confirmation gate + Telegram-style UI** (founder prod test 2026-10-02: alerts
-      arrive and work, but anyone can type someone else's address and that person keeps getting alerts
-      until they unsubscribe). Design: the Profile "Email alerts" section copies the Telegram row —
-      email field + a button ("Send escalation alerts via email") instead of the checkbox. Click →
-      backend stores the address as **pending** and sends a **confirmation email** with a one-time
-      link; the row shows "Waiting for confirmation — check your inbox (it may land in spam)"
-      (+ resend/cancel). Clicking the link (public token GET, like the unsubscribe one) marks it
-      confirmed + enabled and the row flips to "Email connected — you'll get an alert there when a
-      guest needs you" (+ Disconnect), like "Telegram connected". Alerts only ever go to a
-      **confirmed** address; editing the address resets it to unconfirmed. The spam tip ("mark it
-      'not spam' so you always get your alerts") goes in a "How to use" help panel, same widget as
-      Telegram's. Decisions to settle first: existing already-enabled addresses → require
-      re-confirmation (recommended, fail-safe) vs grandfather; token expiry (~24-48 h?). Needs a
-      migration (staging then prod — remember the merge doesn't carry it), FIX_VERIFY, and P9 rewritten
-      for the new flow (it currently drives the checkbox).
-      touches: `backend/routers/messages.py`, `backend/services/email_client.py`, `backend/services/supabase_client.py`, `frontend/lib/widgets/profile_dialog.dart`, `_tests/runner/scenarios/p9.ts`, `migrations/`
+- [x] ~~🔴 Escalation-email confirmation gate + Telegram-style UI~~ — **shipped to prod 2026-10-02** (PR #11
+      `203fba6`, feature `19e5a5f`; FIX_VERIFY; founder-verified on staging and prod). Double opt-in: request →
+      e-mailed one-time link → owner presses Confirm → alerts start; alerts only ever go to a confirmed address;
+      a DB trigger stops a host session writing the alert columns directly; token stored hashed; 48 h expiry;
+      60 s/host + 10 min/address cooldowns; prod's one enabled host was reset to re-confirm. P9 rewritten, P10
+      added. Leftover ceiling: confirmation mails come from a Gmail single sender, so they may land in spam until
+      the domain is authenticated (`ROADMAP.md` M2) — the "How to use" panel carries the Not-spam tip.
 - [ ] 🟡 Stay dates on a guest (founder 2026-10-02): where the host creates/handles a guest — the
       conversation window (the red-bubble live chat) — add fields to enter/display the guest's
       **check-in and check-out date**. The check-in/out *times* already come from the scraped/ingested

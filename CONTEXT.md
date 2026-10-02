@@ -10,13 +10,16 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🟢 **MERGED to prod 2026-10-02** (PR #10 `e4da0b0`; staging commit `6ab242f`) and founder-verified on
-  prod (Train Now, email alerts, Telegram Disconnect, escalations, auth). Builds/revisions/health/Sentry
-  clean. Not yet watched live: the hero-image *fallback* branch. Domain auth for email: `ROADMAP.md` M2.
-- 🔴 **NEXT SESSION: start from `_Context/CONTINUATION_PROMPT_2026-10-02.md`** (self-contained; it has Claude
-  restate the issues for founder confirmation first, then FIX_VERIFY each): (1) email confirmation gate +
-  Telegram-style UI, (2) auth gaps on merge/resolve/knowledge endpoints, (3) stay dates + disconnect 24 h
-  after check-out. Details + decisions: `QUEUE.md`. A1/B12 still unautomated; feedback dialog → `QUEUE.md`.
+- 🟢 **Email-alert confirmation gate SHIPPED to prod 2026-10-02** (PR #11 `203fba6`; migration applied first;
+  founder-verified on staging + prod; prod's one enabled host reset to re-confirm). Not yet watched live: the
+  hero-image *fallback* branch. Email domain auth: `ROADMAP.md` M2 (mails may land in spam until then).
+- 🔴 **NEXT: the two items left from `_Context/CONTINUATION_PROMPT_2026-10-02.md`** — (B) auth gaps on
+  merge/resolve/add-knowledge/query-knowledge/ingest + resume/retry-scrape ownership (reproduced 2026-10-02:
+  anonymous `add-knowledge` stores text in `master_json`; anonymous `/api/ingest` on an existing property UUID
+  overwrites its name and starts a run), (C) stay dates + disconnect 24 h after check-out. Plan Mode + FIX_VERIFY
+  each; `FIX_VERIFY_PROTOCOL.md` first, claims labelled reproduced vs read. Details/decisions: `QUEUE.md`.
+- 🔴 `QUEUE.md`: the escalation email's "Open full conversation" link shows a blank "Alfred is handling this"
+  page to anyone not signed in as the property's host (reproduced) — fix before the beta widens.
 - 🟡 Founder should self-verify the raw Postgres error text in the duplicate-URL ingest banner.
 - 🟡 guide.html rework + walkthrough/`GlassPanel` opacity live in `QUEUE.md` (opacity: **do not
   attempt** without the founder — it burned 2 days and broke things before).
@@ -30,7 +33,35 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   reach the DropZone (an `.exe` drop got the red inline rejection) — the earlier "not working"
   conclusion may have been stale coordinates, so a supported-file drop is worth one more try.
 
-**Last Session:** 2026-10-01→02 (**Got the beta-tester escalation email delivering, prepared and shipped
+**Last Session:** 2026-10-02 later (**Built the email-alert confirmation gate (double opt-in) with FIX_VERIFY,
+verified it on staging and with a real mailbox, shipped it to prod (PR #11 `203fba6`), founder-verified on prod.**
+Feature commit `19e5a5f`.
+  - **Step 0 — reproduced twice on staging with throwaway data:** (1) a logged-in host can PATCH
+    `notification_email`/`escalation_email_enabled`/`escalation_email_unsub_token` straight through the REST API
+    (RLS is row-level only), so a backend-only gate would have been bypassable; (2) anonymous `add-knowledge`
+    stores text in a property's `master_json`, anonymous `/api/ingest` on an existing UUID overwrites its name and
+    starts a run, and `resume` accepts any host's token on another host's property (these are item B, still open).
+    I had skipped reading `FIX_VERIFY_PROTOCOL.md` and presented code reads as facts until the founder called it.
+  - **Built:** migration `2026-10-02_escalation_email_confirmation.sql` (token hash + 48 h expiry; trigger
+    `host_profiles_lock_alert_email_cols` ignores a host session's writes to the 5 alert columns; resets already-enabled
+    addresses). Backend: POST requests (pending + e-mailed one-time link; 60 s/host + 10 min/address cooldowns; send
+    failure → 502, nothing left pending), GET /confirm is a button page only (scanner-safe), POST /confirm is one
+    atomic UPDATE; `@example.invalid` addresses return the link (test seam). Frontend: Profile "Email alerts" mirrors
+    Telegram (Waiting + Resend/Cancel, live flip, Disconnect, shared "How to use" panel with the spam tip).
+  - **Verified before any commit:** new P10 (backend gate, 23 checks) + rewritten P9 + P1/P8 on a LOCAL release
+    build (served same-origin, `/api` proxied to staging); full suite 19/19. By hand: expiry, 502-on-send-failure
+    (zero-traffic tagged Cloud Run revision with a broken key), cross-host cooldown. Real mailbox: confirmation
+    arrived (spam → "Not spam"), an escalation while UNCONFIRMED sent nothing, Confirm flipped it, the next
+    escalation delivered the alert. After the push P9/P1/P8 PASS on the Vercel deploy too.
+  - **Shipped:** prod migration applied just before the merge (columns/trigger/no-enabled/advisors clean); Cloud
+    Build SUCCESS; `alfred-backend-00028-888` + `alfred-scraper-00011-75d` at 100%; `/health` 200; env intact;
+    bundle publishable-only; Sentry clean. Prod's backend env: `BACKEND_URL`/SendGrid/`EMAIL_FROM` already set.
+  - **Found, not fixed (QUEUE 🔴):** the alert email's "Open full conversation" link renders "No messages yet /
+    Autopilot" for anyone not signed in as the host (reproduced logged-out vs owner).
+  - **Not done:** items B and C; G4/G5 re-probes before the merge (the change didn't touch keys; P10 covers the new
+    endpoint's 401s). `ROADMAP.md`'s uncommitted line belongs to the model-routing session.)
+
+**Prior Session:** 2026-10-01→02 (**Got the beta-tester escalation email delivering, prepared and shipped
 the `staging→main` merge (PR #10, `e4da0b0`, live on prod 2026-10-02), and the founder tested prod end
 to end — everything passed. Follow-ups are queued, with a continuation prompt.** Final commit `6ab242f`.
   - **Email:** Gmail SMTP from Cloud Run failed 5/5 and Resend's sandbox only reaches its owner →
