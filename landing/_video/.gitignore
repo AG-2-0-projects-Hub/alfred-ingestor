@@ -1,0 +1,9 @@
+# heavy or superseded Veo takes and contact sheets stay local; locked/ is the source of truth
+finals/
+drafts/
+test/
+test2/
+sheet-*.png
+fine-*.png
+*.webm
+frames/llave-en-puerta-ref.png

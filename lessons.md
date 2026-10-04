@@ -1194,3 +1194,43 @@ WSL-only tool, since that overstates the restriction and undersells why push spe
 **Global Candidate:** Yes — suggested one-line addition to `BRAND_IDENTITY_PROTOCOL.md` Step 3.4.
 
 ---
+
+## 2026-10-04 — Veo first/last frames are conditioning, not a lock: measure it and repair the seams on the page
+**Context:** Four chained Veo 3.1 transition clips (still to still) for the Mayordommo landing, the same image used as one clip's last frame and the next clip's first frame.
+**Discovery:** Per-frame SSIM against the supplied stills: first frames 0.93-0.99, last frames only 0.73-0.94, with the best match about 0.25-0.4 s before the last frame (Veo keeps drifting). Seams therefore glitched (a cup mid-lift at the end of one clip, at rest at the start of the next). Prompts with "do not open / do not turn" planted the very actions to avoid, and an ambiguous start frame (key already in the lock, door ajar) made Veo invent "insert, wiggle, pull out". Two regeneration rounds (about $6) made it worse; the fix that worked cost $0: stop each clip about 0.25 s early, hold on the exact still, 0.2 s crossfade, a cream CSS flare over the ghost moments, and swap to an existing take. Same prompt and seed at Lite 720p vs 1080p gave a near-identical shot (SSIM 0.97 once, 0.92 once), so iterate cheap and render the approved seed once.
+**Impact:** Measure joins with `ffmpeg ssim` before showing clips; write start/end stills whose states are physically reachable; describe the action positively; repair on the page before regenerating.
+**Global Candidate:** Yes — belongs in `PREMIUM_LANDING_PAGE.md` motion step.
+
+---
+
+## 2026-10-04 — When the founder says "redo from scratch", ask what stays; do not regenerate parts they liked
+**Context:** Veo clip review rounds; the founder had said clips 1-4 were "great except three things", then asked for a rewrite "with the proper description".
+**Discovery:** I regenerated every clip, lost the arch zoom they loved, introduced new glitches and spent about $6 before they said "maybe the very first try was the best". Each earlier iteration was still on disk, so going back and repairing the praised one was free.
+**Impact:** Keep every iteration labelled on disk, state what stays untouched before spending, fix only the named defects, cap spend per round and reject bad takes frame by frame before showing them. Saved as memory `feedback_dont_regenerate_what_works`.
+**Global Candidate:** Yes — behavioural, belongs with the collaboration rules.
+
+---
+
+## 2026-10-04 — Vertex Veo facts for our project (verified by running them)
+**Context:** First use of Veo on Vertex (`google-genai` 2.8, `vertexai=True`, project `alfred-prod-502215`, `us-central1`, ADC token fetched in-process).
+**Discovery:** `veo-3.1-fast-generate-001` and `veo-3.1-lite-generate-001` both accept a first frame plus `last_frame` at 1080p and 6 s (the Gemini API docs say 1080p needs 8 s; Vertex did not). At most 4 concurrent requests, the 5th returns 429 `RESOURCE_EXHAUSTED` and is not billed. List prices per clip of 6 s (confirm in billing): Lite 720p $0.18, Lite 1080p $0.30, Fast 720p $0.48, Fast 1080p $0.60. Model Garden for this project lists managed video generation = Veo only (2.0, 3.0, 3.0 Fast, 3.1, 3.1 Fast, 3.1 Lite); CogVideoX and Wan 2.1/2.2 exist only as self-deployed GPU endpoints; Kling, Runway, Luma, Seedance and Sora are not on Vertex. Veo upscaling (1080p/4K) was announced April 2026 as private preview, unconfirmed for us.
+**Impact:** Use Lite 720p for drafts, same seed at 1080p for the final, run at most 4 at a time, never print the token.
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-04 — Tool gotchas: Git Bash rewrites `/mnt/c/...` in `wsl bash`, and a Bash `cd` moved the session's working directory
+**Context:** Running scratchpad scripts in WSL from the Bash and PowerShell tools during the landing build.
+**Discovery:** In the Bash tool (Git Bash) `wsl bash /mnt/c/...script.sh` is path-converted to `C:/Program Files/Git/mnt/c/...` and fails; the PowerShell tool passes it through. A stray `cd /tmp` in the Bash tool changed the session's primary working directory to `/tmp`, so relative Artifact `file_path` and `root` arguments stopped resolving. Headless Playwright Chromium in this environment played H.264 mp4 (not needed to test with webm).
+**Impact:** Run WSL script files from the PowerShell tool, use absolute UNC paths for Artifact publishes, and `Set-Location` back to the project after any directory change.
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-05 — Hero overlay clipped on wide windows: place from the window box, not from the image's floor line
+**Context:** The pixel butler stood in a lit doorway inside an arch-shaped clip window over a cover-fit photo; the founder saw his feet cut off.
+**Discovery:** The photo's floor line was computed from the cover-fit image only. On wide viewports (aspect above 16:9, such as 1920x950) the cover crop pushed the floor below the window's bottom clip (88% of the stage) and the 1.06 zoom pushed it further; on ultrawide the fixed 560 px window also cropped the arch because the doorway sits at 0.75 of the width.
+**Impact:** Choose the vertical object-position so the threshold sits inside the window, clamp the feet above the window's bottom edge, and centre the window on the doorway; verify with a script that compares the sprite's bounding box with the window box at 1280x720, 1440x900, 1920x1080, 1920x950, 2560x1080, 1366x657, 1024x768 and 3440x1440 (all pass).
+**Global Candidate:** No — specific to this layout.
+
+---

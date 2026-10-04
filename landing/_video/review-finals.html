@@ -1,0 +1,177 @@
+<title>Veo Final Clips</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Marcellus&display=swap">
+<style>
+/* Layout: header, a seam player (page treatment vs raw cuts) for the repaired second iteration, its source cards, the first iteration for comparison, notes. Dark-first, Mayordommo palette. */
+:root{
+  --bg:#160C24; --fg:#F4EFF8; --muted:#BCA9D5; --brand:#AB81F2; --brandtx:#BA96F6; --hand:#F4B64C; --ok:#90CEA8;
+  --g1:rgba(255,255,255,.15); --g2:rgba(255,255,255,.04); --e1:rgba(255,255,255,.8); --e2:rgba(255,255,255,.07); --rim:rgba(255,255,255,.22);
+  --sh:0 18px 50px -22px rgba(0,0,0,.65); --line:rgba(244,239,248,.14); --onbtn:#160C24; --chip:rgba(244,239,248,.08); --watch:#F4B64C;
+  --amb:radial-gradient(60% 46% at 10% 4%,rgba(171,129,242,.5),transparent 70%),radial-gradient(46% 40% at 94% 70%,rgba(244,182,76,.26),transparent 72%),radial-gradient(80% 38% at 50% 100%,rgba(98,53,175,.7),transparent 72%);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C; --watch:#8A5A00;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18); --onbtn:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}}
+:root[data-theme="light"]{
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C; --watch:#8A5A00;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18); --onbtn:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:500 15px/1.55 'Manrope',system-ui,sans-serif;padding-inline:clamp(16px,4vw,48px);padding-block:40px 72px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:var(--amb);pointer-events:none}
+.page{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-synthesis:none;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,5.2vw,56px);line-height:1.04}
+h2{font-size:clamp(22px,2.6vw,28px);line-height:1.1}
+p{margin:0}
+.lead{max-width:68ch;color:var(--muted);margin-top:14px;font-size:16px}
+.glass{position:relative;border-radius:22px;background:linear-gradient(135deg,var(--g1),var(--g2));-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--sh),inset 0 1px 0 var(--rim)}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(45deg,var(--e1),var(--e2) 26%,var(--e2) 74%,var(--e1));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.card{padding:22px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.vid,.stage{position:relative;border-radius:14px;overflow:hidden;background:#160C24;aspect-ratio:16/9;border:1px solid var(--line)}
+.vid video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.stage img,.stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.stage video{opacity:0;transition:opacity .2s linear}
+.stage.raw video{transition:none}
+.stage .flare{position:absolute;inset:0;opacity:0;pointer-events:none;background:radial-gradient(70% 70% at 50% 48%,rgba(255,238,200,.98),rgba(246,232,208,.92) 55%,rgba(244,236,224,.8))}
+.ctl{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.btn{font:700 14px/1 'Manrope',sans-serif;border:0;cursor:pointer;color:var(--onbtn);background:var(--hand);padding:12px 20px;border-radius:12px}
+.btn:hover{filter:brightness(1.06)}.btn:active{transform:translateY(1px)}
+.seg{display:inline-flex;border-radius:12px;background:var(--chip);padding:3px;gap:2px}
+.seg button{font:700 13px/1 'Manrope',sans-serif;border:0;cursor:pointer;color:var(--muted);background:transparent;padding:9px 14px;border-radius:9px}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+:focus-visible{outline:2px solid var(--brandtx);outline-offset:3px}
+.meta{color:var(--muted);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+.route{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chip{display:inline-block;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:var(--chip);color:var(--muted)}
+ul{margin:0;padding-left:1.1em;display:grid;gap:6px;font-size:14px}
+.good{color:var(--ok);font-weight:700}
+.watch{color:var(--watch);font-weight:700}
+.notes{padding:26px;display:grid;gap:12px}
+.notes p,.notes ul{max-width:76ch}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+</style>
+
+<div class="page">
+<header>
+  <h1>Back to the second iteration</h1>
+  <p class="lead">You were right: I regenerated clips you already liked. Nothing here is regenerated except clip 5. Clips 1 to 4 are the second iteration (Veo 3.1 Fast, 1080p), the one you called great apart from three things, repaired on the page instead of in Veo. The player joins them the way the page will: each shot holds on its exact still, the clip stops a little early, a short crossfade lands on the next still, and a cream flare covers the moments Veo gets messy.</p>
+</header>
+
+<section class="card glass" aria-label="Seam player">
+  <div class="ctl">
+    <h2>The whole story</h2>
+    <button class="btn" id="play" type="button">Play</button>
+    <span class="seg" role="group" aria-label="Seam mode"><button type="button" id="m-page" aria-pressed="true">Page seams</button><button type="button" id="m-raw" aria-pressed="false">Raw cuts</button></span>
+    <span class="meta" id="now">Ready</span>
+  </div>
+  <div class="stage" id="stage"></div>
+</section>
+
+<section class="card glass notes">
+  <h2>What I repaired, and how</h2>
+  <ul>
+    <li><span class="good">The zoom into the arch is back.</span> Clip 1 is the original second-iteration take, untouched.</li>
+    <li><span class="good">Cup glitch:</span> clip 1 stops 0.3 s before its end, where it matches the still best (0.98, versus 0.94 on its very last frame), and holds on the still with the hands resting on the cup. Clip 2 starts from that same still, so the cup is held at both sides of the join.</li>
+    <li><span class="good">Second walker:</span> gone. Clip 3 is the first take (nobody else in the courtyard) instead of the push-in take that had the walker. Its dip to black at about 2.4 s is covered by the flare.</li>
+    <li><span class="good">Door and key:</span> clip 4 now stops at 2.15 s, inside the arch, before the doors swing shut. The flare takes over and lands on the closed-door still with the key in the lock. Then clip 5 does your sequence: doors closed, quarter turn of the key, doors swing open, light fills the frame with cream.</li>
+    <li><span class="watch">Placeholder:</span> clip 5 here is a 720p draft. If you like it, I render the same seed at 1080p ($0.30). It is the only new generation in this chain.</li>
+    <li><span class="watch">Flare timing:</span> I set the windows by eye from the frames (clip 1 about 3.0 to 3.9 s, clip 3 about 1.7 to 3.2 s, clip 4 about 1.5 to 2.15 s). They are the thing to judge in "Page seams".</li>
+  </ul>
+  <h2>Which iteration was which</h2>
+  <p>First: four Lite 720p drafts (the cheap ones, shown at the bottom). Second: the same four prompts on Fast 1080p, which is the base here. Third and fourth: my retakes and my from-scratch redo, both dropped.</p>
+  <h2>Spend</h2>
+  <p>This page costs <strong>$0</strong>: clips 1 to 4 already existed. The session is at about $10.21 (list price; confirm in billing). Clip 5 at 1080p would add $0.30.</p>
+</section>
+
+<section class="grid" id="clips"></section>
+
+<section class="card glass notes">
+  <h2>First iteration, for comparison</h2>
+  <p class="meta">The four Lite 720p drafts you first reviewed. Same prompts and stills as the second iteration, a different model and resolution, so the takes differ.</p>
+</section>
+<section class="grid" id="first"></section>
+</div>
+
+<script>
+(function(){
+  var D=[
+    {f:'finals/01-hero-to-teach-fast1080.mp4',a:'Hero',b:'Enseña',n:'Second iteration, untouched. Zoom into the arch, light blooms, the terrace emerges with the hands on the cup.',flare:[3.0,3.4,3.9],end:null},
+    {f:'finals/02-teach-to-train-fast1080.mp4',a:'Enseña',b:'Entrena',n:'Second iteration, untouched. The cup is lifted away, the light floods to cream, the wall lantern emerges.',flare:null,end:null},
+    {f:'finals/03-train-to-autopilot-fast1080.mp4',a:'Entrena',b:'Autopiloto',n:'Second iteration, first take (no second walker). Bloom, a dip to black, the courtyard emerges. The flare covers the dip.',flare:[1.7,2.4,3.2],end:null},
+    {f:'finals/04b-autopilot-to-stepin-push-fast1080.mp4',a:'Autopiloto',b:'Entra',n:'Second iteration, push-in take, used only up to 2.15 s. The rest (doors swinging, key wobble) is not used.',flare:[1.5,2.15,2.15],end:2.15},
+    {f:'drafts/05-s11.mp4',a:'Entra',b:'Resumen',n:'New, 720p placeholder. Closed doors, quarter turn of the key, the door swings open, light fills the frame with cream.',flare:null,end:null}
+  ];
+  var FIRST=[
+    {f:'test/01-hero-to-teach-lite720.mp4',p:'frames/hero-courtyard-dusk.jpg',a:'Hero',b:'Enseña'},
+    {f:'test/02-teach-to-train-lite720.mp4',p:'frames/anfitrion-terraza.jpg',a:'Enseña',b:'Entrena'},
+    {f:'test/03-train-to-autopilot-lite720.mp4',p:'frames/farol-pared.jpg',a:'Entrena',b:'Autopiloto'},
+    {f:'test/04-autopilot-to-stepin-lite720.mp4',p:'frames/huesped-llega.jpg',a:'Autopiloto',b:'Entra'}
+  ];
+  var STILLS=['frames/hero-courtyard-dusk.jpg','frames/anfitrion-terraza.jpg','frames/farol-pared.jpg','frames/huesped-llega.jpg','frames/s5-closed.jpg','frames/bone.jpg'];
+  var stage=document.getElementById('stage'),clips=document.getElementById('clips'),first=document.getElementById('first'),now=document.getElementById('now'),btn=document.getElementById('play');
+  var still=document.createElement('img');still.alt='';still.src=STILLS[0];stage.appendChild(still);
+  var vs=D.map(function(c){var v=document.createElement('video');v.src=c.f;v.muted=true;v.playsInline=true;v.preload='auto';stage.appendChild(v);return v;});
+  var flare=document.createElement('div');flare.className='flare';stage.appendChild(flare);
+  function card(c,poster,label){
+    var el=document.createElement('article');el.className='card glass';
+    el.innerHTML='<div class="route"><span class="chip">'+label+'</span><h2>'+c.a+' to '+c.b+'</h2></div><div class="vid"><video src="'+c.f+'" poster="'+poster+'" controls muted playsinline loop preload="none"></video></div>'+(c.n?'<p class="meta">'+c.n+'</p>':'');
+    return el;
+  }
+  D.forEach(function(c,i){clips.appendChild(card(c,STILLS[i],'Clip '+(i+1)));});
+  FIRST.forEach(function(c,i){first.appendChild(card(c,c.p,'First, clip '+(i+1)));});
+  var mode='page',token=0,running=false;
+  var mp=document.getElementById('m-page'),mr=document.getElementById('m-raw');
+  function setMode(m){mode=m;mp.setAttribute('aria-pressed',m==='page');mr.setAttribute('aria-pressed',m==='raw');stage.classList.toggle('raw',m==='raw');}
+  mp.onclick=function(){setMode('page')};mr.onclick=function(){setMode('raw')};
+  function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+  function flareSet(o,decay){flare.style.transition=decay?'opacity .6s ease':'none';flare.style.opacity=o;}
+  function reset(){vs.forEach(function(v){v.pause();v.style.opacity=0;});flareSet(0,false);still.src=STILLS[0];}
+  function ease(u){return u*u*(3-2*u)}
+  function flareAt(i,t){var w=D[i].flare;if(mode!=='page'||!w){flareSet(0,false);return;}
+    var u=t<w[0]?0:t<w[1]?(t-w[0])/(w[1]-w[0]):t<w[2]?1-(t-w[1])/(w[2]-w[1]):(w[2]===w[1]?1:0);
+    flareSet((0.9*ease(Math.max(0,Math.min(1,u)))).toFixed(3),false);}
+  async function run(){
+    var my=++token;running=true;btn.textContent='Stop';reset();now.textContent='Hold on the first still';
+    if(mode==='page')await wait(900);
+    for(var i=0;i<vs.length;i++){
+      if(my!==token)return;
+      var v=vs[i];
+      if(!isFinite(v.duration))await new Promise(function(r){v.addEventListener('loadedmetadata',r,{once:true})});
+      v.currentTime=0;
+      try{await v.play();}catch(e){now.textContent='Playback blocked, press Play again';running=false;btn.textContent='Play';return;}
+      v.style.opacity=1;now.textContent='Clip '+(i+1)+' of 5';
+      var cut=mode==='page'&&D[i].end!==null;
+      var end=mode==='page'?(cut?D[i].end:v.duration-0.25):v.duration-0.04,fading=false;
+      await new Promise(function(res){
+        (function tick(){
+          if(my!==token){res();return;}
+          var t=v.currentTime;flareAt(i,t);
+          if(mode==='page'&&!cut&&!fading&&t>=end-0.2){fading=true;still.src=STILLS[i+1];v.style.opacity=0;}
+          if(t>=end||v.ended){v.pause();res();return;}
+          requestAnimationFrame(tick);
+        })();
+      });
+      if(my!==token)return;
+      if(mode==='page'){
+        still.src=STILLS[i+1];v.style.transition='none';v.style.opacity=0;
+        if(cut){flareSet(0,true);}else{flareSet(0,false);}
+        setTimeout(function(){v.style.transition='';},50);
+        now.textContent=(i<4?'Hold on the still':'End');await wait(i<4?900:1500);
+      }
+    }
+    running=false;btn.textContent='Play';now.textContent='Done';
+  }
+  btn.onclick=function(){if(running){token++;running=false;btn.textContent='Play';now.textContent='Stopped';reset();}else{run();}};
+})();
+</script>

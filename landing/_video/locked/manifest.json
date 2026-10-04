@@ -1,0 +1,20 @@
+{
+  "_note": "LOCKED by the founder 2026-10-04. Second-iteration Veo clips (Fast 1080p) repaired on the page, plus one new Lite 1080p clip. Do not regenerate clips 1-4. Seams: each shot holds on its exact still; a clip stops at `end` seconds (null = duration minus 0.25 s), crossfades 0.2 s to the next still; `flare` = [start, peak, end] seconds of a cream flare over the clip's messy moment (end == peak means the clip is cut at the peak and the flare decays over 0.6 s on the next still). Review: https://claude.ai/artifact/DHMGtuj66U3wW6DWrVKn3A (v4).",
+  "order": ["hero", "ensena", "entrena", "autopiloto", "entra", "resumen"],
+  "stills": {
+    "hero": "stills/hero-courtyard-dusk.jpg",
+    "ensena": "stills/anfitrion-terraza.jpg",
+    "entrena": "stills/farol-pared.jpg",
+    "autopiloto": "stills/huesped-llega.jpg",
+    "entra": "stills/s5-closed.jpg",
+    "resumen": "stills/bone.jpg"
+  },
+  "clips": [
+    {"n": 1, "file": "01-hero-to-teach.mp4", "from": "hero", "to": "ensena", "model": "veo-3.1-fast-generate-001", "res": "1080p", "source": "finals/01-hero-to-teach-fast1080.mp4", "prompt": "prompts/01-hero-to-teach.txt", "end": null, "flare": [3.0, 3.4, 3.9], "note": "zoom into the arch; hands rest on the cup at the end"},
+    {"n": 2, "file": "02-teach-to-train.mp4", "from": "ensena", "to": "entrena", "model": "veo-3.1-fast-generate-001", "res": "1080p", "source": "finals/02-teach-to-train-fast1080.mp4", "prompt": "prompts/02-teach-to-train.txt", "end": null, "flare": null, "note": "cup lifted away, floods to cream, wall lantern emerges"},
+    {"n": 3, "file": "03-train-to-autopilot.mp4", "from": "entrena", "to": "autopiloto", "model": "veo-3.1-fast-generate-001", "res": "1080p", "source": "finals/03-train-to-autopilot-fast1080.mp4", "prompt": "prompts/03-train-to-autopilot.txt", "end": null, "flare": [1.7, 2.4, 3.2], "note": "take A (no second walker); dip to black ~2.4 s covered by the flare"},
+    {"n": 4, "file": "04-autopilot-to-door.mp4", "from": "autopiloto", "to": "entra", "model": "veo-3.1-fast-generate-001", "res": "1080p", "source": "finals/04b-autopilot-to-stepin-push-fast1080.mp4", "prompt": "prompts/04b-autopilot-to-stepin-push.txt", "end": 2.15, "flare": [1.5, 2.15, 2.15], "note": "push through the arch only; cut at 2.15 s before the doors swing shut, flare lands on the closed-door still"},
+    {"n": 5, "file": "05-key-to-bone.mp4", "from": "entra", "to": "resumen", "model": "veo-3.1-lite-generate-001", "res": "1080p", "seed": 11, "source": "drafts/05-s11-1080p.mp4", "prompt": "prompts/v2-05-key-to-bone.txt", "end": null, "flare": null, "note": "closed doors, quarter turn of the key, door opens, light fills the frame to bone (last frame = flat #F4ECE0)"}
+  ],
+  "stillSources": {"entra": "frames/s5-closed-raw.png (2752x1536); the other four stills: brand-assets/web/*.webp"}
+}

@@ -1,0 +1,110 @@
+<title>Veo Test Clips</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Marcellus&display=swap">
+<style>
+/* Layout: header, a chained player for the whole story, then four clip cards with notes. Dark-first, Mayordommo palette. */
+:root{
+  --bg:#160C24; --fg:#F4EFF8; --muted:#BCA9D5; --brand:#AB81F2; --brandtx:#BA96F6; --hand:#F4B64C; --ok:#90CEA8;
+  --g1:rgba(255,255,255,.15); --g2:rgba(255,255,255,.04); --e1:rgba(255,255,255,.8); --e2:rgba(255,255,255,.07); --rim:rgba(255,255,255,.22);
+  --sh:0 18px 50px -22px rgba(0,0,0,.65); --line:rgba(244,239,248,.14); --onbtn:#160C24; --chip:rgba(244,239,248,.08);
+  --amb:radial-gradient(60% 46% at 10% 4%,rgba(171,129,242,.5),transparent 70%),radial-gradient(46% 40% at 94% 70%,rgba(244,182,76,.26),transparent 72%),radial-gradient(80% 38% at 50% 100%,rgba(98,53,175,.7),transparent 72%);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18); --onbtn:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}}
+:root[data-theme="light"]{
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18); --onbtn:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:500 15px/1.55 'Manrope',system-ui,sans-serif;padding-inline:clamp(16px,4vw,48px);padding-block:40px 72px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:var(--amb);pointer-events:none}
+.page{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-synthesis:none;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,5.2vw,56px);line-height:1.04}
+h2{font-size:clamp(22px,2.6vw,28px);line-height:1.1}
+p{margin:0}
+.lead{max-width:68ch;color:var(--muted);margin-top:14px;font-size:16px}
+.glass{position:relative;border-radius:22px;background:linear-gradient(135deg,var(--g1),var(--g2));-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--sh),inset 0 1px 0 var(--rim)}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(45deg,var(--e1),var(--e2) 26%,var(--e2) 74%,var(--e1));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.card{padding:22px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.vid{position:relative;border-radius:14px;overflow:hidden;background:#160C24;aspect-ratio:16/9;border:1px solid var(--line)}
+.vid video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.story .vid video{opacity:0}
+.story .vid video.on{opacity:1}
+.ctl{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.btn{font:700 14px/1 'Manrope',sans-serif;border:0;cursor:pointer;color:var(--onbtn);background:var(--hand);padding:12px 20px;border-radius:12px}
+.btn:hover{filter:brightness(1.06)}.btn:active{transform:translateY(1px)}
+:focus-visible{outline:2px solid var(--brandtx);outline-offset:3px}
+.meta{color:var(--muted);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+.route{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chip{display:inline-block;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:var(--chip);color:var(--muted)}
+ul{margin:0;padding-left:1.1em;display:grid;gap:6px;font-size:14px}
+.good{color:var(--ok);font-weight:700}
+.notes{padding:26px;display:grid;gap:12px}
+.notes p,.notes ul{max-width:76ch}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+</style>
+
+<div class="page">
+<header>
+  <h1>Veo test clips</h1>
+  <p class="lead">Four six-second clips, one between each pair of stills, so the landing can move from shot to shot without a cut. These are the cheap drafts (Veo 3.1 Lite, 720p). Each clip starts on one still and ends on the next, so they chain.</p>
+</header>
+
+<section class="card glass story" aria-label="Whole story">
+  <div class="ctl"><h2>The whole story</h2><button class="btn" id="play" type="button">Play the four in a row</button><span class="meta" id="now">24 s, no audio</span></div>
+  <div class="vid" id="chain"></div>
+</section>
+
+<section class="grid" id="clips"></section>
+
+<section class="card glass notes">
+  <h2>What I see</h2>
+  <ul>
+    <li><span class="good">Works:</span> the light really does carry the picture from one shot to the next. Clip 1 (courtyard to terrace) and clip 2 (terrace to wall lantern) are the strongest: the warm light blooms, dust drifts through it, and the next scene settles out of it.</li>
+    <li><span class="good">Works:</span> every clip lands on the exact next still, so the chain is continuous, and no faces appear. The guest in clip 3 is seen from behind and looks natural.</li>
+    <li>Clips 3 and 4 lean on a soft dissolve more than a camera move. Clip 4 has one odd vertical light slab for about a second before the doors appear.</li>
+    <li>The camera barely dollies. The "through the door" feeling comes from the light, not from motion. A stronger push-in needs prompt work or the higher tier.</li>
+    <li>Cost: four clips at about $0.18 each, $0.72 in total (list price, to confirm in billing).</li>
+  </ul>
+  <p>Decision for you: keep these 720p drafts and wire them into the scroll (cheapest), regenerate the best prompts on Veo Fast 1080p for about $0.60 a clip, or tune the prompts for a stronger camera move first.</p>
+</section>
+</div>
+
+<script>
+(function(){
+  var CLIPS=[
+    {f:'test/01-hero-to-teach-lite720.mp4',p:'frames/hero-courtyard-dusk.jpg',a:'Hero',b:'Enseña',n:'Courtyard arch to the terrace. The doorway light blooms, dust drifts through it, the terrace settles in.'},
+    {f:'test/02-teach-to-train-lite720.mp4',p:'frames/anfitrion-terraza.jpg',a:'Enseña',b:'Entrena',n:'Terrace lantern to the wall lantern. The light fills the frame, then the wall emerges.'},
+    {f:'test/03-train-to-autopilot-lite720.mp4',p:'frames/farol-pared.jpg',a:'Entrena',b:'Autopiloto',n:'Wall lantern to the guest arriving. A soft dissolve through the light.'},
+    {f:'test/04-autopilot-to-stepin-lite720.mp4',p:'frames/huesped-llega.jpg',a:'Autopiloto',b:'Entra',n:'Archway to the key in the door. Light narrows to a slit and the hand turns the key.'}
+  ];
+  var clips=document.getElementById('clips'),chain=document.getElementById('chain'),vs=[];
+  CLIPS.forEach(function(c,i){
+    var card=document.createElement('article');card.className='card glass';
+    card.innerHTML='<div class="route"><span class="chip">Clip '+(i+1)+'</span><h2>'+c.a+' to '+c.b+'</h2></div><div class="vid"><video src="'+c.f+'" poster="'+c.p+'" controls muted playsinline loop preload="metadata"></video></div><p class="meta">'+c.n+'</p>';
+    clips.appendChild(card);
+    var v=document.createElement('video');v.src=c.f;v.poster=c.p;v.muted=true;v.playsInline=true;v.preload='auto';if(i===0)v.className='on';chain.appendChild(v);vs.push(v);
+  });
+  var cur=0,playing=false,now=document.getElementById('now'),btn=document.getElementById('play');
+  function show(i){vs.forEach(function(v,k){v.classList.toggle('on',k===i)});cur=i;now.textContent='Clip '+(i+1)+' of 4';}
+  vs.forEach(function(v,i){v.addEventListener('ended',function(){if(!playing)return;if(i<3){show(i+1);vs[i+1].currentTime=0;vs[i+1].play();}else{playing=false;btn.textContent='Play the four in a row';now.textContent='24 s, no audio';show(0);vs[0].currentTime=0;}});});
+  btn.addEventListener('click',function(){
+    if(playing){playing=false;vs[cur].pause();btn.textContent='Play the four in a row';return;}
+    playing=true;btn.textContent='Pause';
+    if(vs[cur].ended||cur===3&&vs[cur].currentTime>5.9){show(0);vs[0].currentTime=0;}
+    var p=vs[cur].play();if(p&&p.catch)p.catch(function(){playing=false;btn.textContent='Play the four in a row';});
+  });
+})();
+</script>
