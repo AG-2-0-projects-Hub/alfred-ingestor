@@ -1,0 +1,313 @@
+<title>Mayordommo Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Marcellus&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,300..400,0,0&display=block">
+<style>
+/* Layout concept: the current webapp structure (stats row, property cards, conversation with hand-off) re-skinned in the Mayordommo brand.
+   Glass follows the app's GlassPanel recipe (tint, backdrop blur ~18px, inner highlight, 1px edge) but in our palette and over our photography.
+   Dark is the default; light uses hairlines and no glow, as locked in brand-assets/DESIGN.md. Sample data and Spanish copy are placeholders. */
+:root{
+  --canvas:#160C24; --surface:#25153C; --ink:#F4EFF8; --muted:#BCA9D5; --hand:#F4B64C; --on-hand:#160C24;
+  --brand:#AB81F2; --brand-text:#BA96F6; --status:#90CEA8; --danger:#DB6D63;
+  --glass:rgba(37,21,60,.46); --glass-strong:rgba(37,21,60,.64); --glass-edge:rgba(244,239,248,.10); --glass-hi:rgba(255,255,255,.07); --blur:24px; --sat:160%;
+  --g1:rgba(255,255,255,.15); --g2:rgba(255,255,255,.04); --gs1:rgba(255,255,255,.23); --gs2:rgba(255,255,255,.1);
+  --e1:rgba(255,255,255,.8); --e2:rgba(255,255,255,.07); --rim:rgba(255,255,255,.22); --sh:0 26px 56px -26px rgba(0,0,0,.7);
+  --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --hand-shadow:0 0 0 1px rgba(244,182,76,.6),0 8px 36px -8px rgba(244,182,76,.5);
+  --bubble-guest:rgba(244,239,248,.09); --bubble-alfred:#AB81F2; --on-alfred:#160C24; --bubble-host:#F4EFF8; --on-host:#160C24;
+  --photo-op:.5; --photo-veil:rgba(22,12,36,.35);
+  --font-display:'Marcellus',Georgia,serif; --font-ui:'Manrope',system-ui,sans-serif;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --canvas:#F4ECE0; --surface:#FCF8F1; --ink:#1B102C; --muted:#5E4D75; --hand:#F4B64C; --on-hand:#1B102C;
+  --brand:#6235AF; --brand-text:#6235AF; --status:#2E6A4C; --danger:#A6382E;
+  --glass:rgba(252,248,241,.5); --glass-strong:rgba(252,248,241,.64); --glass-edge:rgba(98,53,175,.30); --glass-hi:rgba(255,255,255,.55); --blur:26px; --sat:175%;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --gs1:rgba(255,255,255,.76); --gs2:rgba(255,255,255,.5);
+  --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85); --sh:0 26px 52px -24px rgba(98,53,175,.5);
+  --hand-shadow:0 0 0 1px rgba(244,182,76,.85),0 8px 28px -8px rgba(244,182,76,.5);
+  --bubble-guest:rgba(255,255,255,.58); --bubble-alfred:#6235AF; --on-alfred:#F4EFF8; --bubble-host:#1B102C; --on-host:#F4EFF8;
+  --photo-op:0; --photo-veil:rgba(244,236,224,.16);
+  color-scheme:light;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{font-synthesis:none}
+body{margin:0;background:var(--canvas);color:var(--ink);font:500 15px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased}
+h1,h2,h3,p{margin:0}
+h1,h2,h3{font-family:var(--font-display);font-weight:400}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--brand-text);outline-offset:2px}
+.mi{font-family:'Material Symbols Outlined';font-weight:400;font-style:normal;font-size:20px;line-height:1;width:1em;height:1em;overflow:hidden;display:inline-block;letter-spacing:normal;text-transform:none;white-space:nowrap;direction:ltr;font-feature-settings:'liga';-webkit-font-feature-settings:'liga'}
+
+/* review chrome (not part of the design) */
+.chrome{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:16px clamp(16px,3vw,32px)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab,.themebtn{border:0;cursor:pointer;border-radius:999px;padding:9px 16px;font:600 13px/1.2 var(--font-ui);background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--glass-edge)}
+.tab[aria-selected=true]{background:var(--brand);color:var(--on-alfred);box-shadow:none}
+.themebtn{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
+.note{font:500 12px/1.4 var(--font-ui);color:var(--muted);padding:0 clamp(16px,3vw,32px) 12px}
+
+/* app surface */
+.app{position:relative;isolation:isolate;overflow:hidden;margin:0 clamp(12px,3vw,32px) 32px;border-radius:20px;min-height:680px;background:var(--canvas);box-shadow:0 0 0 1px var(--glass-edge)}
+/* background: soft light shapes (no circles) + frosted grain. Dark = D3 "resplandor suave", light = L1 "alba lila".
+   The Brillo toggle turns the same colours up (dark: D2 door light) for marketing surfaces. */
+.app::after{content:"";position:absolute;inset:0;z-index:-1;background-image:var(--noise);background-size:240px;opacity:.3;mix-blend-mode:overlay;pointer-events:none}
+.bl{position:absolute;z-index:-2;border-radius:50%;filter:blur(44px);pointer-events:none}
+.k1{left:-16%;top:-26%;width:70%;height:80%;background:radial-gradient(closest-side,#AB81F2,transparent);opacity:.5}
+.k2{right:-14%;bottom:-24%;width:62%;height:70%;background:radial-gradient(closest-side,#F4B64C,transparent);opacity:.32}
+.k3{left:30%;bottom:-40%;width:70%;height:60%;background:radial-gradient(closest-side,#6235AF,transparent);opacity:.7}
+:root[data-int="punchy"] .k1{opacity:.4}
+:root[data-int="punchy"] .k2{right:-24%;top:4%;bottom:auto;width:78%;height:96%;background:radial-gradient(closest-side,#F4B64C 0%,rgba(244,182,76,.55) 42%,transparent 100%);opacity:.9}
+:root[data-int="punchy"] .k3{left:-26%;bottom:-34%;width:92%;height:84%;opacity:.9}
+:root[data-theme="light"] .k1{left:-24%;top:24%;width:150%;height:56%;transform:rotate(-8deg);background:linear-gradient(90deg,rgba(171,129,242,.62),rgba(98,53,175,.58));opacity:1}
+:root[data-theme="light"] .k2{left:-14%;right:auto;top:-30%;bottom:auto;width:64%;height:70%;background:#F4B64C;opacity:.34}
+:root[data-theme="light"] .k3{left:auto;right:-14%;bottom:-36%;width:78%;height:66%;background:#6235AF;opacity:.62}
+:root[data-theme="light"][data-int="punchy"] .k1{background:linear-gradient(90deg,rgba(171,129,242,.9),rgba(98,53,175,.85))}
+:root[data-theme="light"][data-int="punchy"] .k2{width:72%;height:84%;opacity:.55}
+:root[data-theme="light"][data-int="punchy"] .k3{opacity:.85}
+
+/* glass: tint gradient + backdrop blur + rim light on two opposite corners (top right, bottom left) + frosted grain */
+.glass{position:relative;background:linear-gradient(135deg,var(--g1),var(--g2));backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat));box-shadow:var(--sh),inset 0 1px 0 var(--rim)}
+.glass::before{content:"";position:absolute;inset:0;z-index:2;border-radius:inherit;padding:1px;pointer-events:none;background:linear-gradient(45deg,var(--e1),var(--e2) 26%,var(--e2) 74%,var(--e1));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.glass::after{content:"";position:absolute;inset:0;z-index:2;border-radius:inherit;background-image:var(--noise);background-size:200px;opacity:.1;mix-blend-mode:soft-light;pointer-events:none}
+.glass.strong{--g1:var(--gs1);--g2:var(--gs2)}
+.attn{--e1:rgba(244,182,76,.95);--e2:rgba(244,182,76,.24);box-shadow:var(--hand-shadow),var(--sh)}
+
+/* nav pill */
+.pill{position:relative;z-index:5;display:flex;align-items:center;gap:8px;width:min(calc(100% - 32px),1040px);margin:16px auto 0;padding:8px 10px 8px 16px;border-radius:999px}
+.brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;margin-right:auto}
+.brand img{width:30px;height:30px;display:block}
+.brand .mk-l{display:none}
+:root[data-theme="light"] .brand .mk-d{display:none}
+:root[data-theme="light"] .brand .mk-l{display:block}
+.wm{font:400 24px/1 var(--font-display);letter-spacing:.01em}
+.ib{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:transparent;border:0;color:var(--muted);cursor:pointer}
+.ib:hover{background:var(--glass-hi);color:var(--ink)}
+.avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--brand);color:var(--on-alfred);font:700 13px/1 var(--font-ui)}
+.out{border:0;background:transparent;color:var(--muted);font:600 13px/1 var(--font-ui);padding:8px 12px;border-radius:999px;cursor:pointer}
+
+/* chips and buttons */
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;font:600 12px/1.4 var(--font-ui);letter-spacing:.02em;padding:5px 10px;white-space:nowrap}
+.chip-status{color:var(--status);box-shadow:inset 0 0 0 1px var(--status);background:rgba(22,12,36,.35)}
+:root[data-theme="light"] .chip-status{background:rgba(252,248,241,.7)}
+.chip-status::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.chip-hand{background:var(--hand);color:var(--on-hand)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:10px;font:700 13px/1.2 var(--font-ui);padding:10px 14px;cursor:pointer;white-space:nowrap}
+.btn-hand{background:var(--hand);color:var(--on-hand)}
+.btn-sec{background:rgba(171,129,242,.12);color:var(--brand-text);box-shadow:inset 0 0 0 1px rgba(171,129,242,.4)}
+:root[data-theme="light"] .btn-sec{background:rgba(98,53,175,.07);box-shadow:inset 0 0 0 1px rgba(98,53,175,.32)}
+
+/* dashboard */
+.dash{position:relative;z-index:1;width:min(calc(100% - 32px),1040px);margin:28px auto 0;display:flex;flex-direction:column;gap:28px;padding-bottom:40px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.stat{border-radius:var(--r,14px);padding:16px 20px;display:flex;flex-direction:column;gap:2px}
+.stat b{font:400 36px/1.1 var(--font-display);font-variant-numeric:tabular-nums}
+.stat span{font:600 12px/1.4 var(--font-ui);letter-spacing:.02em;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+.card{border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.ph{position:relative;height:150px;background-size:cover;background-position:center}
+.ph::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(22,12,36,.0) 55%,rgba(22,12,36,.55))}
+.ph .chip{position:absolute;top:12px;right:12px;z-index:1}
+.cbody{padding:16px 18px 4px;display:flex;flex-direction:column;gap:4px;flex:1}
+.cbody h3{font:600 18px/1.3 var(--font-ui)}
+.cbody p{font:500 13px/1.45 var(--font-ui);color:var(--muted)}
+.cfoot{display:flex;align-items:center;gap:8px;padding:14px 18px 18px}
+.cfoot .ib{width:32px;height:32px}
+.cfoot .sp{margin-left:auto;display:flex;gap:2px}
+.add{border-radius:16px;min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;box-shadow:inset 0 0 0 1px var(--glass-edge);background:transparent;border:1px dashed var(--glass-edge)}
+.add .plus{display:grid;place-items:center;width:52px;height:52px;border-radius:50%;background:rgba(171,129,242,.16);color:var(--brand-text)}
+.add b{font:600 15px/1.3 var(--font-ui);color:var(--brand-text)}
+.add .hint{font:500 13px/1.4 var(--font-ui);color:var(--muted)}
+
+/* conversation */
+.conv{position:relative;z-index:1;display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:16px;width:min(calc(100% - 32px),1100px);margin:20px auto 0;padding-bottom:32px;min-height:640px}
+.list{border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.list h2{font-size:24px;margin-bottom:4px}
+.item{display:grid;grid-template-columns:36px 1fr auto;gap:2px 12px;align-items:center;padding:12px;border-radius:12px;cursor:default}
+.item.sel{background:var(--glass-strong);box-shadow:var(--hand-shadow)}
+.item .av{grid-row:span 2;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:rgba(171,129,242,.2);color:var(--brand-text);font:700 13px/1 var(--font-ui)}
+.item b{font:600 14px/1.3 var(--font-ui)}
+.item small{font:500 12px/1.4 var(--font-ui);color:var(--muted);grid-column:2/4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .t{font:500 12px/1 var(--font-ui);color:var(--muted)}
+.chat{border-radius:16px;display:flex;flex-direction:column;min-width:0}
+.chead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 20px;box-shadow:inset 0 -1px 0 var(--glass-edge)}
+.chead .who{display:flex;flex-direction:column;margin-right:auto}
+.chead .who b{font:600 15px/1.3 var(--font-ui)}
+.chead .who small{font:500 12px/1.4 var(--font-ui);color:var(--muted)}
+.seg{display:inline-flex;padding:3px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--glass-edge)}
+.seg span{padding:7px 14px;border-radius:999px;font:600 12px/1 var(--font-ui);color:var(--muted)}
+.seg .on{background:var(--hand);color:var(--on-hand)}
+.msgs{flex:1;display:flex;flex-direction:column;gap:10px;padding:18px 20px}
+.day{align-self:center;font:600 11px/1 var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.m{max-width:min(78%,460px);border-radius:14px;padding:10px 14px;font:500 14px/1.5 var(--font-ui)}
+.m.g{align-self:flex-start;background:var(--bubble-guest);box-shadow:inset 0 0 0 1px var(--glass-edge)}
+.m.a{align-self:flex-end;background:var(--bubble-alfred);color:var(--on-alfred)}
+.m.h{align-self:flex-end;background:var(--bubble-host);color:var(--on-host)}
+.m small{display:block;font:600 11px/1.3 var(--font-ui);letter-spacing:.02em;opacity:.75;margin-bottom:2px}
+.handoff{align-self:stretch;border-radius:14px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;background:var(--glass-strong)}
+.handoff p{font:500 14px/1.5 var(--font-ui)}
+.composer{display:flex;align-items:center;gap:10px;padding:14px 20px 18px;box-shadow:inset 0 1px 0 var(--glass-edge);flex-wrap:wrap}
+.field{flex:1;min-width:180px;border-radius:12px;padding:12px 14px;font:500 14px/1.4 var(--font-ui);color:var(--muted);background:var(--bubble-guest);box-shadow:inset 0 0 0 1px var(--glass-edge)}
+
+/* landing composite */
+.shot{position:relative;margin:0 clamp(12px,3vw,32px) 32px;border-radius:20px;overflow:hidden;aspect-ratio:16/9;min-height:520px;background:#160C24 url(web/farol-pared-1280.webp) 60% 50%/cover;isolation:isolate;
+  --g1:rgba(255,255,255,.15);--g2:rgba(255,255,255,.04);--e1:rgba(255,255,255,.8);--e2:rgba(255,255,255,.07);--rim:rgba(255,255,255,.22);--sh:0 26px 56px -26px rgba(0,0,0,.7);--blur:22px;--sat:150%;color:#F4EFF8}
+.shot .pill{position:absolute;left:50%;transform:translateX(-50%);top:16px;margin:0;color:#F4EFF8}
+.shot .pill .ib{color:#BCA9D5}
+.shot .pill .out{color:#BCA9D5}
+.shot .brand .mk-l{display:none!important}
+.shot .brand .mk-d{display:block!important}
+.shot .ov{position:absolute;left:clamp(16px,4vw,48px);bottom:clamp(16px,4vw,48px);width:min(calc(100% - 32px),400px);border-radius:24px;padding:22px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;color:#F4EFF8}
+.shot .ov p{font:500 15px/1.5 var(--font-ui)}
+.shot .ov .place{font:600 12px/1.4 var(--font-ui);letter-spacing:.02em;color:#BCA9D5}
+.shot .btn-sec{background:rgba(171,129,242,.16);color:#BA96F6;box-shadow:inset 0 0 0 1px rgba(171,129,242,.4)}
+.shot .float{position:absolute;right:clamp(16px,5vw,64px);top:clamp(88px,22%,160px);width:min(calc(100% - 32px),340px);display:flex;flex-direction:column;gap:10px}
+.shot .float .m{backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.shot .float .g{background:rgba(244,239,248,.12);color:#F4EFF8;box-shadow:inset 0 0 0 1px rgba(244,239,248,.16)}
+.shot .float .a{background:rgba(171,129,242,.9);color:#160C24}
+
+@media (max-width:820px){
+  .conv{grid-template-columns:1fr}
+  .shot{aspect-ratio:auto;min-height:640px}
+  .shot .float{top:88px}
+  .pill .out{display:none}
+}
+</style>
+
+<div class="chrome">
+  <div class="tabs" role="tablist" aria-label="Pantallas">
+    <button class="tab" role="tab" id="t-panel" aria-selected="true" data-s="panel">Panel</button>
+    <button class="tab" role="tab" id="t-conv" aria-selected="false" data-s="conv">Conversación</button>
+    <button class="tab" role="tab" id="t-land" aria-selected="false" data-s="land">En la landing</button>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="themebtn" id="int" type="button"><span class="mi" aria-hidden="true">brightness_6</span><span id="int-l">Brillo: suave</span></button>
+    <button class="themebtn" id="theme" type="button"><span class="mi" aria-hidden="true">light_mode</span><span id="theme-l">Ver en claro</span></button>
+  </div>
+</div>
+<p class="note">Mockup de diseño. La estructura es la de la app actual; el estilo es el nuevo. Datos y textos de ejemplo.</p>
+
+<!-- 1. Panel -->
+<section class="app screen" id="s-panel" aria-label="Panel">
+  <i class="bl k1"></i><i class="bl k2"></i><i class="bl k3"></i>
+  <header class="pill glass">
+    <a class="brand" href="#"><img class="mk-d" src="logo/mayordommo-flat-dark.svg" alt="" width="30" height="30"><img class="mk-l" src="logo/mayordommo-flat-light.svg" alt="" width="30" height="30"><span class="wm">mayordommo</span></a>
+    <span class="avatar" aria-hidden="true">S</span>
+    <button class="ib" type="button" aria-label="Ajustes"><span class="mi" aria-hidden="true">settings</span></button>
+    <button class="ib" type="button" aria-label="Ayuda"><span class="mi" aria-hidden="true">help</span></button>
+    <button class="out" type="button">Salir</button>
+  </header>
+  <main class="dash">
+    <div class="stats">
+      <div class="stat glass"><b>47</b><span>Respuestas de Alfred</span></div>
+      <div class="stat glass"><b>6.2 h</b><span>Horas ahorradas (est.)</span></div>
+      <div class="stat glass"><b>81%</b><span>En autopiloto</span></div>
+      <div class="stat glass"><b>19</b><span>Huéspedes atendidos</span></div>
+    </div>
+    <div class="cards">
+      <article class="card glass attn">
+        <div class="ph" style="background-image:url(web/hero-courtyard-dusk-1280.webp);background-position:75% 50%"><span class="chip chip-hand">Te necesitan</span></div>
+        <div class="cbody"><h3>Casa Jacaranda</h3><p>Marina pregunta por la alberca de noche.</p></div>
+        <div class="cfoot"><button class="btn btn-hand" type="button">Responder tú</button><span class="sp"><button class="ib" type="button" aria-label="Calendario"><span class="mi" aria-hidden="true">calendar_month</span></button><button class="ib" type="button" aria-label="Historial"><span class="mi" aria-hidden="true">history</span></button></span></div>
+      </article>
+      <article class="card glass">
+        <div class="ph" style="background-image:url(web/casita-costa-noche-1280.webp)"><span class="chip chip-status">Autopiloto</span></div>
+        <div class="cbody"><h3>Casita Costa</h3><p>Todo en orden.</p></div>
+        <div class="cfoot"><button class="btn btn-sec" type="button">+ Huésped</button><button class="btn btn-sec" type="button">Detalles</button><span class="sp"><button class="ib" type="button" aria-label="Calendario"><span class="mi" aria-hidden="true">calendar_month</span></button></span></div>
+      </article>
+      <article class="card glass">
+        <div class="ph" style="background-image:url(web/loft-cdmx-noche-1280.webp)"><span class="chip chip-status">Autopiloto</span></div>
+        <div class="cbody"><h3>Loft Roma Norte</h3><p>Todo en orden.</p></div>
+        <div class="cfoot"><button class="btn btn-sec" type="button">+ Huésped</button><button class="btn btn-sec" type="button">Detalles</button><span class="sp"><button class="ib" type="button" aria-label="Calendario"><span class="mi" aria-hidden="true">calendar_month</span></button></span></div>
+      </article>
+      <div class="add"><span class="plus"><span class="mi" aria-hidden="true">add</span></span><b>Agregar casa</b><span class="hint">Conecta tu anuncio de Airbnb</span></div>
+    </div>
+  </main>
+</section>
+
+<!-- 2. Conversation with hand-off -->
+<section class="app screen" id="s-conv" aria-label="Conversación" hidden>
+  <i class="bl k1"></i><i class="bl k2"></i><i class="bl k3"></i>
+  <header class="pill glass">
+    <a class="brand" href="#"><img class="mk-d" src="logo/mayordommo-flat-dark.svg" alt="" width="30" height="30"><img class="mk-l" src="logo/mayordommo-flat-light.svg" alt="" width="30" height="30"><span class="wm">mayordommo</span></a>
+    <span class="avatar" aria-hidden="true">S</span>
+    <button class="ib" type="button" aria-label="Ajustes"><span class="mi" aria-hidden="true">settings</span></button>
+    <button class="out" type="button">Salir</button>
+  </header>
+  <main class="conv">
+    <aside class="list glass">
+      <h2>Conversaciones</h2>
+      <div class="item sel"><span class="av">M</span><b>Marina</b><span class="chip chip-hand">Te necesitan</span><small>Casa Jacaranda · ¿Podemos usar la alberca después de las 10…</small></div>
+      <div class="item"><span class="av">D</span><b>Diego</b><span class="t">hace 2 h</span><small>Loft Roma Norte · Gracias, ya encontramos la llave.</small></div>
+      <div class="item"><span class="av">L</span><b>Lucía</b><span class="t">ayer</span><small>Casita Costa · El wifi es Costa2026 y la clave está en…</small></div>
+    </aside>
+    <section class="chat glass strong">
+      <div class="chead">
+        <span class="avatar" aria-hidden="true">M</span>
+        <div class="who"><b>Marina</b><small>Casa Jacaranda</small></div>
+        <div class="seg" role="group" aria-label="Quién responde"><span>Autopiloto</span><span class="on">Yo respondo</span></div>
+      </div>
+      <div class="msgs">
+        <span class="day">Hoy</span>
+        <div class="m a"><small>Alfred</small>Bienvenida a Casa Jacaranda. Soy Alfred, tu asistente invisible para una estancia perfecta. Pregúntame lo que necesites: entrada, wifi, detalles de la casa o recomendaciones locales. Y si necesitas a tu anfitrión, le aviso al instante.</div>
+        <div class="m g">Hola, ¿a qué hora podemos llegar? Nuestro vuelo aterriza a la 1.</div>
+        <div class="m a"><small>Alfred</small>¡Hola, Marina! 😊 El check-in es a partir de las 3 de la tarde. Si llegan antes, platícame y le pregunto a Santiago si la casa ya está lista.</div>
+        <div class="m g">¿Podemos usar la alberca después de las 10 de la noche?</div>
+        <div class="m a"><small>Alfred</small>Déjame confirmarlo con Santiago. Me pongo en contacto con él de inmediato y te aviso en cuanto me responda.</div>
+        <div class="handoff attn"><span class="chip chip-hand">Te necesitan</span><p>Alfred no tiene una regla sobre el uso de la alberca de noche. Responde tú y la conversación queda a tu cargo.</p></div>
+        <div class="m h"><small>Tú</small>Hola, Marina. Pueden usarla hasta las 11, solo pedimos no hacer ruido.</div>
+      </div>
+      <div class="composer">
+        <div class="field">Escribe un mensaje</div>
+        <button class="btn btn-hand" type="button">Enviar</button>
+        <button class="btn btn-sec" type="button">Marcar como resuelto</button>
+      </div>
+    </section>
+  </main>
+</section>
+
+<!-- 3. The same components on a landing shot -->
+<section class="shot screen" id="s-land" aria-label="En la landing" hidden>
+  <header class="pill glass">
+    <a class="brand" href="#"><img class="mk-d" src="logo/mayordommo-flat-dark.svg" alt="" width="30" height="30"><img class="mk-l" src="logo/mayordommo-flat-light.svg" alt="" width="30" height="30"><span class="wm">mayordommo</span></a>
+    <button class="btn btn-hand" type="button">Unirme a la lista</button>
+  </header>
+  <div class="float">
+    <div class="m g">¿Podemos usar la alberca después de las 10 de la noche?</div>
+    <div class="m a">Déjame confirmarlo con Santiago. Me pongo en contacto con él de inmediato y te aviso en cuanto me responda.</div>
+  </div>
+  <div class="ov glass attn">
+    <span class="chip chip-hand">Te necesitan</span>
+    <span class="place">Casa Jacaranda</span>
+    <p>Marina pregunta si pueden usar la alberca después de las 10 de la noche.</p>
+    <button class="btn btn-sec" type="button">Responder tú</button>
+  </div>
+</section>
+
+<script>
+(function(){
+  document.documentElement.lang='es';
+  var root=document.documentElement;
+  root.setAttribute('data-theme','dark');
+  var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s));};
+  function show(id){
+    $$('.screen').forEach(function(s){s.hidden=s.id!=='s-'+id;});
+    $$('.tab').forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.s===id));});
+  }
+  $$('.tab').forEach(function(t){t.addEventListener('click',function(){show(t.dataset.s);});});
+  var ib=document.getElementById('int');
+  ib.addEventListener('click',function(){
+    var p=root.getAttribute('data-int')!=='punchy';
+    root.setAttribute('data-int',p?'punchy':'soft');
+    document.getElementById('int-l').textContent=p?'Brillo: intenso':'Brillo: suave';
+  });
+  var tb=document.getElementById('theme');
+  tb.addEventListener('click',function(){
+    var light=root.getAttribute('data-theme')!=='light';
+    root.setAttribute('data-theme',light?'light':'dark');
+    tb.querySelector('.mi').textContent=light?'dark_mode':'light_mode';
+    document.getElementById('theme-l').textContent=light?'Ver en oscuro':'Ver en claro';
+  });
+})();
+</script>

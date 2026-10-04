@@ -1,0 +1,239 @@
+<title>Alfred Light Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Marcellus&display=swap">
+<style>
+/* Layout: header, then a 2x2 grid of variant cards (night + day tile, size test, chat avatar). Dark-first, Mayordommo palette only. */
+:root{
+  --bg:#160C24; --fg:#F4EFF8; --muted:#BCA9D5; --brand:#AB81F2; --brandtx:#BA96F6; --hand:#F4B64C;
+  --g1:rgba(255,255,255,.15); --g2:rgba(255,255,255,.04); --e1:rgba(255,255,255,.8); --e2:rgba(255,255,255,.07); --rim:rgba(255,255,255,.22);
+  --sh:0 18px 50px -22px rgba(0,0,0,.65); --line:rgba(244,239,248,.14);
+  --bub:#AB81F2; --onbub:#160C24; --chip:rgba(244,239,248,.08);
+  --amb:radial-gradient(60% 46% at 10% 4%,rgba(171,129,242,.5),transparent 70%),radial-gradient(46% 40% at 94% 70%,rgba(244,182,76,.26),transparent 72%),radial-gradient(80% 38% at 50% 100%,rgba(98,53,175,.7),transparent 72%);
+  --night:#160C24; --nightglow:radial-gradient(70% 55% at 50% 38%,rgba(171,129,242,.34),transparent 72%);
+  --day:#F4ECE0; --dayglow:radial-gradient(60% 40% at 8% 6%,rgba(244,182,76,.26),transparent 70%),linear-gradient(172deg,transparent 40%,rgba(171,129,242,.34) 56%,rgba(98,53,175,.26) 66%,transparent 80%);
+  --plum:#25153C;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18);
+  --bub:#6235AF; --onbub:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}}
+:root[data-theme="light"]{
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18);
+  --bub:#6235AF; --onbub:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:500 15px/1.55 'Manrope',system-ui,sans-serif;padding-inline:clamp(16px,4vw,48px);padding-block:40px 72px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:var(--amb);pointer-events:none}
+.page{max-width:1180px;margin:0 auto}
+h1,h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-synthesis:none;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,5.2vw,56px);line-height:1.04;letter-spacing:.01em}
+h2{font-size:clamp(22px,2.6vw,28px);line-height:1.1}
+p{margin:0}
+.lead{max-width:64ch;color:var(--muted);margin-top:14px;font-size:16px}
+.glass{position:relative;border-radius:22px;background:linear-gradient(135deg,var(--g1),var(--g2));-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--sh),inset 0 1px 0 var(--rim)}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(45deg,var(--e1),var(--e2) 26%,var(--e2) 74%,var(--e1));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;margin-top:30px}
+.card{padding:22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.card .note{color:var(--muted);margin-top:6px;font-size:14px;max-width:48ch}
+.tag{display:inline-block;font:700 10.5px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:4px 7px;border-radius:6px;margin-left:8px;vertical-align:middle;background:var(--chip);color:var(--muted)}
+.tag.gold{background:rgba(244,182,76,.2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--hand)}
+.pair{display:flex;gap:12px;flex-wrap:wrap}
+figure.stage{margin:0;position:relative;border-radius:16px;overflow:hidden;flex:1 1 220px;min-width:0;height:250px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;border:1px solid var(--line)}
+figure.stage.night{background:var(--nightglow),var(--night)}
+figure.stage.day{background:var(--dayglow),var(--day)}
+figure.stage figcaption{position:absolute;top:10px;left:12px;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.1em;text-transform:uppercase;z-index:2}
+.night figcaption{color:#BCA9D5}.day figcaption{color:#5E4D75}
+.cw{position:relative;line-height:0;max-width:100%}
+canvas{image-rendering:pixelated;display:block;max-width:100%;position:relative;z-index:1}
+.bloom{position:absolute;border-radius:50%;pointer-events:none;transform:translate(-50%,-50%)}
+.night .bloom{mix-blend-mode:screen;z-index:2}.day .bloom{z-index:0}
+@keyframes pulse{0%,100%{opacity:.82;transform:translate(-50%,-50%) scale(1)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.09)}}
+.bloom.pulse{animation:pulse 2.2s ease-in-out infinite}
+.sizes{display:flex;align-items:flex-end;gap:18px;padding:12px 14px;border-radius:14px;background:var(--night);border:1px solid var(--line);min-height:96px}
+.sizes .lbl{font:600 11px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#BCA9D5;margin-left:auto;align-self:flex-start}
+.chat{display:flex;align-items:flex-end;gap:10px}
+.avt{flex:none;background:var(--plum);border-radius:10px;padding:3px;border:1px solid var(--line)}
+.bub{background:var(--bub);color:var(--onbub);padding:10px 14px;border-radius:16px 16px 16px 4px;max-width:44ch;font-size:14px;line-height:1.45}
+.reco{padding:28px;margin-top:22px;display:grid;gap:14px}
+.reco p{max-width:72ch}
+.reco b{font-weight:700}
+@media (max-width:980px){.grid{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){.bloom.pulse{animation:none}}
+</style>
+
+<div class="page">
+<header>
+  <h1>Alfred, light study</h1>
+  <p class="lead">The Needs you state, round two. The lantern is bigger and brighter, and its light now reaches Alfred and the space around him. The first card is the version you saw. Each card shows night and day, plus the size test: the glow has to read when he is small.</p>
+</header>
+<section class="grid" id="grid"></section>
+<section class="reco glass" id="reco"></section>
+</div>
+
+<script>
+(()=>{
+const PAL={k:'#1B102C',p:'#25153C',d:'#5E4D75',A:'#6235AF',m:'#AB81F2',l:'#BA96F6',s:'#BCA9D5',w:'#F4EFF8',g:'#F4B64C',c:'#90CEA8'};
+class Grid{
+  constructor(w,h){this.w=w;this.h=h;this.a=new Array(w*h).fill('.');this.odd=w%2===1;this.c=this.odd?(w-1)/2:w/2-1}
+  at(x,y){return x<0||y<0||x>=this.w||y>=this.h?'.':this.a[y*this.w+x]}
+  set(x,y,c){if(x>=0&&y>=0&&x<this.w&&y<this.h)this.a[y*this.w+x]=c}
+  rect(x0,y0,x1,y1,c){for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)this.set(x,y,c)}
+  ell(cx,cy,rx,ry,c){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const dx=(x+.5-cx)/rx,dy=(y+.5-cy)/ry;if(dx*dx+dy*dy<=1)this.set(x,y,c)}}
+  sym(u0,u1,y0,y1,c){for(let y=y0;y<=y1;y++)for(let u=u0;u<=u1;u++){this.set(this.c-u,y,c);this.set(this.odd?this.c+u:this.c+1+u,y,c)}}
+  each(fn){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const c=this.a[y*this.w+x];if(c!=='.')fn(x,y,c)}}
+  map(fn){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const i=y*this.w+x,n=fn(x,y,this.a[i]);if(n!==undefined)this.a[i]=n}}
+  outline(col){const add=[];for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++)if(this.at(x,y)==='.'&&(this.at(x+1,y)!=='.'||this.at(x-1,y)!=='.'||this.at(x,y+1)!=='.'||this.at(x,y-1)!=='.'))add.push([x,y]);add.forEach(([x,y])=>this.set(x,y,col))}
+  rim(from,to){const add=[];this.each((x,y,c)=>{if(from.includes(c)&&(this.at(x,y-1)==='.'||this.at(x+1,y)==='.'))add.push([x,y])});add.forEach(([x,y])=>this.set(x,y,to))}
+}
+const bayer=(x,y)=>{let r=0;for(let i=0;i<3;i++){const xi=(x>>i)&1,yi=(y>>i)&1;r|=((xi^yi)<<(2*(2-i)+1))|(yi<<(2*(2-i)))}return r};
+
+/* Alfred, L: 0 = lantern down, 1 = small lantern (round one), 2 = bigger lantern */
+function baseA(L,f){
+  const g=new Grid(28,34);
+  g.sym(1,1,28,30,'p'); g.sym(2,3,28,30,'d');
+  g.sym(1,4,31,32,'p'); g.sym(3,4,31,31,'d');
+  g.sym(0,5,23,27,'A'); g.sym(0,4,16,22,'A'); g.sym(5,5,17,17,'A');
+  g.sym(6,7,17,24,'A');
+  g.sym(5,5,18,24,'k');
+  g.map((x,y,c)=>c==='A'&&(g.at(x-1,y)==='.'||g.at(x,y+1)==='.')?'p':undefined);
+  g.sym(0,0,24,27,'p');
+  g.ell(14,6.8,7,5.8,'s');
+  g.map((x,y,c)=>c==='s'&&(y<=3||(y<=7&&Math.abs(x+.5-14)>=5.6))?'w':undefined);
+  g.map((x,y,c)=>c==='s'&&(g.at(x-1,y)==='.'||g.at(x,y+1)==='.')?'l':undefined);
+  g.sym(2,3,6,6,'w');
+  if(f===2){g.sym(2,3,8,8,'k')}else{g.sym(2,3,7,8,'k'); g.sym(3,3,7,7,'w')}
+  g.sym(0,0,9,9,'l'); g.sym(5,5,9,9,'m');
+  g.sym(0,3,10,10,'w'); g.sym(3,3,11,11,'w');
+  g.sym(0,2,13,13,'w');
+  g.sym(1,2,14,14,'m'); g.sym(1,3,15,15,'m'); g.sym(1,2,16,16,'m'); g.sym(0,0,14,16,'p');
+  g.sym(0,1,17,18,'w');
+  g.sym(0,2,19,22,'p'); g.sym(0,0,20,20,'m'); g.sym(0,0,22,22,'m');
+  g.sym(2,2,17,18,'m'); g.sym(3,3,19,22,'m');
+  g.set(9,19,L?'g':'c');
+  g.rect(6,23,7,24,'.');
+  g.rect(8,21,12,22,'A'); g.rect(8,22,12,22,'p');
+  g.rect(12,21,13,22,'w');
+  g.rect(8,23,10,27,'w'); g.rect(9,24,9,27,'s'); g.rect(8,27,10,27,'s');
+  if(!L){ g.rect(20,25,21,26,'w'); }
+  else{
+    g.rect(20,20,21,26,'.'); g.rect(22,18,23,19,'A'); g.rect(22,20,23,21,'w'); g.set(23,22,'s');
+    if(L===1){
+      g.rect(21,23,25,23,'m'); g.rect(21,24,21,27,'d'); g.rect(25,24,25,27,'d');
+      g.rect(22,24,24,27,'g'); g.rect(23,25,23,26,'w'); g.rect(21,28,25,28,'d');
+    }else{
+      g.rect(20,23,26,23,'m'); g.rect(20,24,20,30,'d'); g.rect(26,24,26,30,'d');
+      g.rect(21,24,25,30,'g'); g.rect(23,25,23,25,'w'); g.rect(22,26,24,28,'w'); g.rect(23,29,23,29,'w'); g.rect(20,31,26,31,'d');
+    }
+  }
+  g.rim(['A','p','d'],'l'); g.outline('k');
+  return g;
+}
+
+/* light pass: brighten Alfred and the space near the lantern, in clean pixel bands */
+const RAMP={k:'d',p:'A',d:'s',A:'m',m:'l',l:'w',s:'w'};
+function light(g,lx,ly,v,f){
+  const k=f?1.07:1, R=v.R*k, R2=v.R2*k;
+  const dist=(x,y)=>Math.hypot(x+.5-lx,(y+.5-ly)*1.1);
+  const edge=(x,y)=>g.at(x+1,y)==='.'||g.at(x-1,y)==='.'||g.at(x,y-1)==='.'||g.at(x,y+1)==='.';
+  const ch=[];
+  g.each((x,y,c)=>{
+    if(c==='g')return;
+    const lv=1-dist(x,y)/R; if(lv<=0)return;
+    const chk=(x+y)&1;
+    if(edge(x,y)&&(lv>.45||(lv>.2&&chk))){ch.push([x,y,'g']);return}
+    if(!RAMP[c])return;
+    if(lv>.6*v.ramp){ch.push([x,y,RAMP[RAMP[c]]||RAMP[c]]);return}
+    if(lv>.3*v.ramp||(lv>.12*v.ramp&&chk)){ch.push([x,y,RAMP[c]])}
+  });
+  for(let y=0;y<g.h;y++)for(let x=0;x<g.w;x++){
+    if(g.at(x,y)!=='.')continue;
+    const d=dist(x,y),t=Math.max(0,d-4.2)/R2;
+    if(v.hot&&d<6){ch.push([x,y,'w']);continue}
+    if(t>=1)continue;
+    if(t<.34)ch.push([x,y,'g']);
+    else if(t<.6){if((x+y)&1)ch.push([x,y,'g'])}
+    else if(t<.85){if(x%2===0&&y%2===0)ch.push([x,y,'g'])}
+  }
+  if(v.pool){
+    const cxp=(lx+22)/2,cyp=g.floorY+1.2,rx=R2*.9,ry=2.4*v.pool;
+    for(let y=g.floorY;y<=g.floorY+4;y++)for(let x=0;x<g.w;x++){
+      if(g.at(x,y)!=='.')continue;
+      const q=Math.hypot((x+.5-cxp)/rx,(y+.5-cyp)/ry);
+      if(q<.5)ch.push([x,y,'g']);
+      else if(q<1&&(x+y)%2===0)ch.push([x,y,'g']);
+    }
+  }
+  ch.forEach(([x,y,c])=>g.set(x,y,c));
+}
+const W=52,H=46,DX=12,DY=4;
+function alfred(v,f){
+  const a=baseA(v.L,f===2?2:0), g=new Grid(W,H);
+  // note: blink uses f===2 inside baseA; flicker uses f===1 here
+  a.each((x,y,c)=>g.set(x+DX,y+DY,c));
+  g.floorY=34+DY;
+  const lx=(v.L===2?23.5:23.5)+DX, ly=(v.L===2?27.5:26)+DY;
+  if(v.R)light(g,lx,ly,v,f===1);
+  return {g,lx,ly};
+}
+
+const VARS=[
+ {name:'Current',tag:'round one',note:'Small lantern, no light on the scene. It disappears at small sizes.',L:1,bloom:0},
+ {name:'Halo',tag:'suave',note:'Bigger lantern and a pixel halo. The side of Alfred facing it catches gold, and his coat lifts a shade.',L:2,R:12,ramp:1,rim:1,R2:6,pool:0,hot:0,bloom:0},
+ {name:'Lit room',tag:'suave',note:'Wider halo, a pool of light on the floor and a soft bloom over the whole scene.',L:2,R:15,ramp:1,rim:1,R2:9,pool:1,hot:0,bloom:.6},
+ {name:'Intenso',tag:'landing only',gold:1,note:'Hot core, the widest halo and a slow pulsing bloom. This is the Brillo intenso level, for landing shots that must catch the eye.',L:2,R:19,ramp:.9,rim:1,R2:12,pool:1.2,hot:1,bloom:1,pulse:1}
+];
+const TXT='Déjame confirmarlo con Santiago. Me pongo en contacto con él de inmediato y te aviso en cuanto me responda.';
+let F=0; const mounts=[];
+function draw(m){
+  const {g,lx,ly}=alfred(m.v,F), cv=m.cv;
+  const cell=m.auto?Math.max(3,Math.min(6,Math.floor((m.host.clientWidth||W*5)/W))):m.cell;
+  const dpr=window.devicePixelRatio||1,s=Math.max(1,Math.round(cell*dpr));
+  cv.width=g.w*s;cv.height=g.h*s;cv.style.width=(g.w*s/dpr)+'px';cv.style.height=(g.h*s/dpr)+'px';
+  const x=cv.getContext('2d');x.clearRect(0,0,cv.width,cv.height);
+  g.each((i,j,c)=>{x.fillStyle=PAL[c];x.fillRect(i*s,j*s,s,s)});
+  const cssCell=g.w*s/dpr/g.w;
+  m.blooms.forEach(b=>{b.el.style.left=(lx+.0)*cssCell+'px';b.el.style.top=ly*cssCell+'px';const d=b.k*m.v.R2*2*cssCell;b.el.style.width=d+'px';b.el.style.height=d+'px'});
+}
+function mount(host,v,cell,mode){
+  const cw=document.createElement('div');cw.className='cw';
+  const cv=document.createElement('canvas');cw.appendChild(cv);
+  const m={v,cell,cv,blooms:[],host,auto:cell==='auto'};
+  if(v.bloom){
+    const a=mode==='night'?v.bloom*.7:v.bloom*.5;
+    const mk=(k,alpha,pulse)=>{const el=document.createElement('div');el.className='bloom'+(pulse?' pulse':'');
+      el.style.background=`radial-gradient(closest-side,rgba(244,182,76,${alpha}) 0%,rgba(244,182,76,${alpha*.45}) 42%,rgba(244,182,76,0) 100%)`;cw.appendChild(el);m.blooms.push({el,k});};
+    mk(2.3,a,v.pulse);
+    if(v.pulse)mk(4.8,a*.42,false);
+  }
+  host.appendChild(cw);mounts.push(m);draw(m);
+}
+const grid=document.getElementById('grid');
+VARS.forEach(v=>{
+  const el=document.createElement('article');el.className='card glass';
+  el.innerHTML=`<div><h2>${v.name}<span class="tag${v.gold?' gold':''}">${v.tag}</span></h2><p class="note">${v.note}</p></div>
+   <div class="pair"><figure class="stage night"><figcaption>Night</figcaption></figure><figure class="stage day"><figcaption>Day</figcaption></figure></div>
+   <div class="sizes"><span class="lbl">1x · 2x</span></div>
+   <div class="chat"><div class="avt"></div><div class="bub">${TXT}</div></div>`;
+  grid.appendChild(el);
+  mount(el.querySelector('.night'),v,'auto','night');
+  mount(el.querySelector('.day'),v,'auto','day');
+  const sz=el.querySelector('.sizes');
+  [1,2].forEach(c=>{const h=document.createElement('div');sz.insertBefore(h,sz.querySelector('.lbl'));mount(h,v,c,'night')});
+  mount(el.querySelector('.avt'),v,1,'night');
+});
+document.getElementById('reco').innerHTML='<h2>Which light</h2><p><b>Lit room for the product, Intenso for the landing.</b> That matches the brand rule: Brillo suave everywhere, Brillo intenso only for landing shots.</p><p>Lit room is the first one that stays visible at avatar size, and it lights the floor and Alfred without washing him out. Intenso adds a hot core and a slow pulse, so use it in one place, like the hero moment when he steps in. Halo is the quiet fallback if you want less.</p><p>The lantern hangs at his hip, so the light falls on his coat and the floor, and his face stays mostly dark. I can raise the lantern to chest height so it lights his face too. That changes his pose, so it is your call.</p><p>Pixels carry the glow edge and the floor pool. The soft bloom is CSS laid on top, so it scales cleanly and can be animated by scroll.</p>';
+let rz=0;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>mounts.forEach(draw),120)});
+const rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(!rm){let n=0;setInterval(()=>{n++;const nf=(n%9===0)?2:(n%2);if(nf!==F){F=nf;mounts.forEach(draw)}},520)}
+})();
+</script>

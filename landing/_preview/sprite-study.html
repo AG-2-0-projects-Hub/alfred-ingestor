@@ -1,0 +1,297 @@
+<title>Alfred Sprite Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Marcellus&display=swap">
+<style>
+/* Layout: header, one glass control bar, three sprite rows (two stages left, size test + chat + brand screen right), one recommendation card. Dark-first, Mayordommo palette only. */
+:root{
+  --bg:#160C24; --fg:#F4EFF8; --muted:#BCA9D5; --brand:#AB81F2; --brandtx:#BA96F6; --hand:#F4B64C; --ok:#90CEA8;
+  --g1:rgba(255,255,255,.15); --g2:rgba(255,255,255,.04); --e1:rgba(255,255,255,.8); --e2:rgba(255,255,255,.07); --rim:rgba(255,255,255,.22);
+  --sh:0 18px 50px -22px rgba(0,0,0,.65); --line:rgba(244,239,248,.14);
+  --bub:#AB81F2; --onbub:#160C24; --chip:rgba(244,239,248,.08);
+  --amb:radial-gradient(60% 46% at 10% 4%,rgba(171,129,242,.5),transparent 70%),radial-gradient(46% 40% at 94% 70%,rgba(244,182,76,.26),transparent 72%),radial-gradient(80% 38% at 50% 100%,rgba(98,53,175,.7),transparent 72%);
+  --night:#160C24; --nightglow:radial-gradient(70% 55% at 50% 38%,rgba(171,129,242,.42),transparent 72%),radial-gradient(60% 40% at 80% 100%,rgba(244,182,76,.2),transparent 70%);
+  --day:#F4ECE0; --dayglow:radial-gradient(60% 40% at 8% 6%,rgba(244,182,76,.3),transparent 70%),linear-gradient(172deg,transparent 40%,rgba(171,129,242,.38) 56%,rgba(98,53,175,.3) 66%,transparent 80%);
+  --plum:#25153C;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18);
+  --bub:#6235AF; --onbub:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}}
+:root[data-theme="light"]{
+  --bg:#F4ECE0; --fg:#1B102C; --muted:#5E4D75; --brand:#6235AF; --brandtx:#6235AF; --ok:#2E6A4C;
+  --g1:rgba(255,255,255,.62); --g2:rgba(255,255,255,.3); --e1:rgba(255,255,255,.95); --e2:rgba(98,53,175,.2); --rim:rgba(255,255,255,.85);
+  --sh:0 18px 44px -24px rgba(98,53,175,.45); --line:rgba(27,16,44,.18);
+  --bub:#6235AF; --onbub:#FCF8F1; --chip:rgba(27,16,44,.07);
+  --amb:radial-gradient(55% 40% at 8% 4%,rgba(244,182,76,.36),transparent 70%),linear-gradient(172deg,transparent 36%,rgba(171,129,242,.5) 52%,rgba(98,53,175,.38) 62%,transparent 76%),radial-gradient(52% 44% at 96% 96%,rgba(98,53,175,.55),transparent 70%);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:500 15px/1.55 'Manrope',system-ui,sans-serif;padding-inline:clamp(16px,4vw,48px);padding-block:40px 72px}
+.page{position:relative;isolation:isolate;max-width:1180px;margin:0 auto}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:var(--amb);pointer-events:none}
+h1,h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-synthesis:none;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,5.2vw,56px);line-height:1.04;letter-spacing:.01em}
+h2{font-size:clamp(24px,3vw,32px);line-height:1.1}
+p{margin:0}
+.lead{max-width:62ch;color:var(--muted);margin-top:14px;font-size:16px}
+.glass{position:relative;border-radius:22px;background:linear-gradient(135deg,var(--g1),var(--g2));-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--sh),inset 0 1px 0 var(--rim)}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(45deg,var(--e1),var(--e2) 26%,var(--e2) 74%,var(--e1));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:14px 24px;padding:14px 20px;margin-top:28px;border-radius:999px}
+.btn{font:700 14px/1 'Manrope',sans-serif;border:0;cursor:pointer;color:var(--onbub);background:var(--bub);padding:12px 20px;border-radius:999px}
+.btn:hover{filter:brightness(1.08)}
+.btn:active{transform:translateY(1px)}
+:focus-visible{outline:2px solid var(--brandtx);outline-offset:3px}
+.sl{display:flex;align-items:center;gap:12px;flex:1 1 260px;min-width:0}
+.sl label{font-size:13px;color:var(--muted);white-space:nowrap}
+.sl output{font-variant-numeric:tabular-nums;font-size:13px;min-width:3.2ch;text-align:right;color:var(--muted)}
+input[type=range]{flex:1;min-width:0;accent-color:var(--brand);height:24px}
+.seg{display:inline-flex;padding:3px;border-radius:999px;background:var(--chip)}
+.seg button{font:600 13px/1 'Manrope',sans-serif;color:var(--muted);background:transparent;border:0;padding:9px 14px;border-radius:999px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.seg button.gold[aria-pressed=true]{background:var(--hand);color:#160C24}
+.rows{display:flex;flex-direction:column;gap:28px;margin-top:28px}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:28px;padding:26px}
+.left{display:flex;flex-direction:column;gap:14px;min-width:0}
+.stages{display:flex;gap:14px;flex-wrap:wrap}
+figure.stage{margin:0;position:relative;border-radius:16px;overflow:hidden;width:250px;height:330px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:20px;border:1px solid var(--line)}
+figure.stage.night{background:var(--nightglow),var(--night)}
+figure.stage.day{background:var(--dayglow),var(--day)}
+figure.stage figcaption{position:absolute;top:10px;left:12px;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.1em;text-transform:uppercase}
+.night figcaption{color:#BCA9D5}.day figcaption{color:#5E4D75}
+canvas{image-rendering:pixelated;display:block;max-width:100%}
+.info{display:flex;flex-direction:column;gap:18px;min-width:0}
+.info .sub{color:var(--muted);margin-top:6px;max-width:56ch}
+.sizes{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;padding:14px 16px;border-radius:14px;background:var(--night);border:1px solid var(--line)}
+.sizes .lbl{font:600 11px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#BCA9D5;margin-left:auto;align-self:flex-start}
+.chat{display:flex;align-items:flex-end;gap:10px}
+.avt{flex:none;background:var(--plum);border-radius:10px;padding:4px;border:1px solid var(--line)}
+.bub{background:var(--bub);color:var(--onbub);padding:10px 14px;border-radius:16px 16px 16px 4px;max-width:44ch;font-size:14px;line-height:1.45}
+.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:14px}
+.checks li{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline}
+.tag{font:700 10.5px/1 'Manrope',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:4px 7px;border-radius:6px;white-space:nowrap}
+.tag.ok{background:rgba(144,206,168,.18);color:var(--ok)}
+.tag.warn{background:rgba(244,182,76,.2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--hand)}
+.reco{padding:28px;margin-top:28px;display:grid;gap:14px}
+.reco p{max-width:72ch}
+.reco b{font-weight:700}
+@media (max-width:900px){.row{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:560px){figure.stage{width:100%;flex:1 1 100%}.ctl{border-radius:22px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+<header>
+  <h1>Alfred, sprite study</h1>
+  <p class="lead">Three ways to give Alfred a pixel body. Each one is drawn on a small grid using only the locked palette. Press Manifest to watch the pixel-in, drag the slider to scrub it the way scrolling will, and switch the state to see where gold appears.</p>
+</header>
+
+<section class="ctl glass" aria-label="Controls">
+  <button class="btn" id="play" type="button">Manifest</button>
+  <div class="sl"><label for="t">Pixel-in</label><input id="t" type="range" min="0" max="100" value="100"><output id="tv" for="t">100%</output></div>
+  <div class="seg" role="group" aria-label="State">
+    <button type="button" id="s0" aria-pressed="true">Autopilot</button>
+    <button type="button" id="s1" class="gold" aria-pressed="false">Needs you</button>
+  </div>
+</section>
+
+<section class="rows" id="rows"></section>
+
+<section class="reco glass" id="reco">
+  <h2>Recommendation</h2>
+  <p><b>Use A as Alfred, and use C for the moment he manifests.</b></p>
+  <p>A is the only one that works as a recurring mascot. It has a body, a face and hands, so it can blink, raise the lantern when you are needed and sit at avatar size beside his chat bubbles. Its face is the weakest part of the drawing and would get a polish pass before it ships.</p>
+  <p>C belongs in the hero. The arch is the logo, the door is the gold light, and the butler appears from behind as the doorway lights up. That follows the "people only from behind" rule exactly.</p>
+  <p>B is the cleanest at small sizes and the strongest single idea: the flame turns gold when you are needed. I would keep it as the lantern A carries rather than a fourth character.</p>
+  <p>Your call: A with C as the hero moment (my pick), B alone, C alone, or another mix. Nothing is final until you pick; all of this was drawn in code and cost nothing.</p>
+</section>
+</div>
+
+<script>
+(()=>{
+const PAL={k:'#1B102C',p:'#25153C',d:'#5E4D75',A:'#6235AF',m:'#AB81F2',l:'#BA96F6',s:'#BCA9D5',w:'#F4EFF8',g:'#F4B64C',c:'#90CEA8'};
+class Grid{
+  constructor(w,h){this.w=w;this.h=h;this.a=new Array(w*h).fill('.');this.odd=w%2===1;this.c=this.odd?(w-1)/2:w/2-1}
+  at(x,y){return x<0||y<0||x>=this.w||y>=this.h?'.':this.a[y*this.w+x]}
+  set(x,y,c){if(x>=0&&y>=0&&x<this.w&&y<this.h)this.a[y*this.w+x]=c}
+  rect(x0,y0,x1,y1,c){for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)this.set(x,y,c)}
+  ell(cx,cy,rx,ry,c){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const dx=(x+.5-cx)/rx,dy=(y+.5-cy)/ry;if(dx*dx+dy*dy<=1)this.set(x,y,c)}}
+  sym(u0,u1,y0,y1,c){for(let y=y0;y<=y1;y++)for(let u=u0;u<=u1;u++){this.set(this.c-u,y,c);this.set(this.odd?this.c+u:this.c+1+u,y,c)}}
+  each(fn){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const c=this.a[y*this.w+x];if(c!=='.')fn(x,y,c)}}
+  map(fn){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){const i=y*this.w+x,n=fn(x,y,this.a[i]);if(n!==undefined)this.a[i]=n}}
+  outline(col){const add=[];for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++)if(this.at(x,y)==='.'&&(this.at(x+1,y)!=='.'||this.at(x-1,y)!=='.'||this.at(x,y+1)!=='.'||this.at(x,y-1)!=='.'))add.push([x,y]);add.forEach(([x,y])=>this.set(x,y,col))}
+  rim(from,to){const add=[];this.each((x,y,c)=>{if(from.includes(c)&&(this.at(x,y-1)==='.'||this.at(x+1,y)==='.'))add.push([x,y])});add.forEach(([x,y])=>this.set(x,y,to))}
+  paste(o){o.each((x,y,c)=>this.set(x,y,c))}
+}
+const bayer=(x,y)=>{let r=0;for(let i=0;i<3;i++){const xi=(x>>i)&1,yi=(y>>i)&1;r|=((xi^yi)<<(2*(2-i)+1))|(yi<<(2*(2-i)))}return r};
+
+/* ---------- A: El mayordomo ---------- */
+function buildA(st,f){
+  const g=new Grid(28,34);                                 // left-centre cell 13, right-centre 14
+  g.sym(1,1,28,30,'p'); g.sym(2,3,28,30,'d');              // trousers
+  g.sym(1,4,31,32,'p'); g.sym(3,4,31,31,'d');              // shoes
+  g.sym(0,5,23,27,'A'); g.sym(0,4,16,22,'A'); g.sym(5,5,17,17,'A'); // tails, torso, shoulder
+  g.sym(6,7,17,24,'A');                                    // sleeves
+  g.sym(5,5,18,24,'k');                                    // arm / torso gap
+  g.map((x,y,c)=>c==='A'&&(g.at(x-1,y)==='.'||g.at(x,y+1)==='.')?'p':undefined); // coat shade
+  g.sym(0,0,24,27,'p');                                    // tail seam
+  // head: lilac-grey face, white hair and moustache
+  g.ell(14,6.8,7,5.8,'s');
+  g.map((x,y,c)=>c==='s'&&(y<=3||(y<=7&&Math.abs(x+.5-14)>=5.6))?'w':undefined);
+  g.map((x,y,c)=>c==='s'&&(g.at(x-1,y)==='.'||g.at(x,y+1)==='.')?'l':undefined);
+  g.sym(2,3,6,6,'w');                                      // brows
+  if(f===1){g.sym(2,3,8,8,'k')}else{g.sym(2,3,7,8,'k'); g.sym(3,3,7,7,'w')} // eyes with a catch-light (blink on f=1)
+  g.sym(0,0,9,9,'l'); g.sym(5,5,9,9,'m');                  // nose + cheeks
+  g.sym(0,3,10,10,'w'); g.sym(3,3,11,11,'w');              // moustache
+  g.sym(0,2,13,13,'w');                                    // collar
+  g.sym(1,2,14,14,'m'); g.sym(1,3,15,15,'m'); g.sym(1,2,16,16,'m'); g.sym(0,0,14,16,'p'); // bow tie
+  g.sym(0,1,17,18,'w');                                    // shirt
+  g.sym(0,2,19,22,'p'); g.sym(0,0,20,20,'m'); g.sym(0,0,22,22,'m'); // waistcoat + buttons
+  g.sym(2,2,17,18,'m'); g.sym(3,3,19,22,'m');              // lapels
+  g.set(9,19,st?'g':'c');                                  // lapel pin
+  // left arm across the belly with the napkin
+  g.rect(6,23,7,24,'.');
+  g.rect(8,21,12,22,'A'); g.rect(8,22,12,22,'p');
+  g.rect(12,21,13,22,'w');
+  g.rect(8,23,10,27,'w'); g.rect(9,24,9,27,'s'); g.rect(8,27,10,27,'s');
+  // right arm
+  if(!st){ g.rect(20,25,21,26,'w'); }
+  else {   // raised, holding a gold lantern
+    g.rect(20,20,21,26,'.'); g.rect(22,18,23,19,'A'); g.rect(22,20,23,21,'w');
+    g.set(23,22,'s'); g.rect(21,23,25,23,'m'); g.rect(21,24,21,27,'d'); g.rect(25,24,25,27,'d');
+    g.rect(22,24,24,27,'g'); g.rect(23,25,23,26,'w'); g.rect(21,28,25,28,'d');
+  }
+  g.rim(['A','p','d'],'l'); g.outline('k');
+  return g;
+}
+
+/* ---------- B: La linterna ---------- */
+function buildB(st,f){
+  const g=new Grid(24,34), cx=12, cy=17.5;
+  g.ell(12,3.6,3.5,3.1,'s'); g.ell(12,3.6,2.0,1.5,'.');    // ring
+  g.sym(0,0,6,6,'s');                                       // finial
+  g.sym(0,3,7,7,'d'); g.sym(0,5,8,8,'d'); g.sym(0,8,9,9,'d'); // cap, overhangs the frame
+  g.sym(0,7,10,10,'d'); g.sym(6,7,11,24,'d'); g.sym(0,7,25,25,'d'); // frame
+  for(let y=11;y<=24;y++)for(let u=0;u<=5;u++){
+    for(const x of [11-u,12+u]){
+      const d=Math.hypot(x+.5-cx,(y+.5-cy)*.8),v=d+(((x+y+f)&1)?.45:-.45);
+      let c;
+      if(st) c=v<3.4?'g':v<5?'m':v<6.6?'A':'p';
+      else   c=v<4.4?'m':v<6.4?'A':'p';
+      g.set(x,y,c);
+    }
+  }
+  g.set(6,12,'l'); g.set(6,13,'l'); g.set(7,12,'l');         // glass reflection
+  g.sym(0,8,26,26,'d'); g.sym(0,6,27,27,'d'); g.sym(0,3,28,28,'d'); g.sym(3,4,29,29,'d'); // base + feet
+  const outer=st?'g':'l';
+  const rows=[[13,0,f?0:-1],[14,0,0],[15,0,1],[16,0,2],[17,0,3],[18,0,3],[19,0,3],[20,0,2],[21,0,1]];
+  rows.forEach(([y,a,b])=>{if(b>=a)g.sym(a,b,y,y,outer)});
+  [[15,0,0],[16,0,1],[17,0,2],[18,0,2],[19,0,2],[20,0,1]].forEach(([y,a,b])=>g.sym(a,b,y,y,'w'));
+  g.sym(1,1,17,18,'k');                                     // eyes
+  g.rim(['d'],'s'); g.outline('k');
+  return g;
+}
+
+/* ---------- C: La puerta ---------- */
+function buildC(st,f){
+  const g=new Grid(33,50),C=16,FL=41;
+  const arch=(x,y,R)=>{const dx=Math.abs(x-C);if(y+.5>=14)return dx<=R;const dy=(y+.5-14)/(R+1.3);return (dx/(R+.5))**2+dy*dy<=1};
+  for(let y=0;y<=FL;y++)for(let x=0;x<g.w;x++){
+    if(arch(x,y,6))g.set(x,y,'g');
+    else if(arch(x,y,8))g.set(x,y,(x>=C+8)?'s':'w');
+  }
+  g.sym(0,9,42,43,'w'); g.sym(0,9,43,43,'s');              // sill
+  // figure from behind: deep-amethyst tailcoat, white hair
+  const p=new Grid(33,50);
+  p.sym(0,4,30,30,'A'); p.sym(0,3,31,35,'A'); p.sym(4,5,31,36,'A'); p.sym(0,4,36,38,'A'); p.sym(1,2,39,41,'p');
+  p.map((x,y,c)=>c==='A'&&(p.at(x-1,y)==='.'||p.at(x,y+1)==='.')?'p':undefined);
+  p.ell(16.5,26.2,2.6,2.9,'w');                            // silver hair
+  p.sym(0,1,29,29,'s');                                    // collar
+  p.sym(0,0,31,38,'p'); p.sym(3,3,32,36,'p');             // back seam + arm seams
+  p.sym(4,5,37,37,'w');                                    // gloves
+  if(st){p.rect(20,31,21,37,'.');p.rect(20,31,21,33,'A');p.rect(21,28,22,30,'A');p.rect(21,25,22,27,'w')}
+  p.rim(['A'],'l'); p.outline('k');
+  g.paste(p);
+  g.set(16,37,'g'); g.set(16,38,'g');                      // vent shows the light
+  g.outline('k');
+  // floor reflection, drawn after the outline so it stays light
+  [[44,6],[46,4],[48,2]].forEach(([y,u])=>g.sym(0,u,y,y,'g'));
+  if(st)[[45,5],[47,3],[49,1]].forEach(([y,u])=>g.sym(0,u,y,y,'g'));
+  return g;
+}
+
+const SPR=[
+ {id:'A',name:'A · El mayordomo',build:buildA,cell:7,
+  sub:'Alfred as a character: silver hair, moustache, bow tie, napkin over the arm. Lapel pin is Celadon on autopilot and gold when he needs you; in that state he raises a lantern.',
+  chat:'¡Hola, Marina! 😊 El check-in es a partir de las 3 de la tarde. Si llegan antes, platícame y le pregunto a Santiago.',
+  checks:[['ok','Palette','Only the 10 locked palette colours. No hex outside palette.md.'],['ok','No robot, no sparkle','Reads as a person, not a bot or an AI icon.'],['ok','Gold means a person','Gold appears only in the Needs you state (pin and lantern).'],['warn','Has a face','Dot eyes and a moustache. The "no faces" rule is written for photography; a drawn mascot is your call.'],['ok','Relatable','Most expression and personality of the three. Can blink, hold props, point.']]},
+ {id:'B',name:'B · La linterna',build:buildB,cell:8,
+  sub:'Alfred as the light left on: a small lantern with a face in the flame. Cool lilac flame on autopilot, Lantern Gold when you are needed.',
+  chat:'Déjame confirmarlo con Santiago. Me pongo en contacto con él de inmediato y te aviso en cuanto me responda.',
+  checks:[['ok','Palette','Only the locked palette colours.'],['ok','No robot, no sparkle','A lantern with two dots. No stars, no bot shapes.'],['ok','Gold means a person','The colour change is the message: lilac flame to gold flame.'],['ok','No person','Nothing to clash with the "people only from behind" rule.'],['warn','Butler?','Says "light" more than "butler". The word Alfred is carried by the name, not the shape.']]},
+ {id:'C',name:'C · La puerta',build:buildC,cell:6,
+  sub:'The logo scene in pixels: a butler seen from behind in the lit doorway. On Needs you he raises a hand and the light grows.',
+  chat:'Bienvenida a Casa Jacaranda. Soy Alfred, tu asistente invisible para una estancia perfecta.',
+  checks:[['ok','Palette','Only the locked palette colours. Arch in Pearl, door in gold, as the logo spec says.'],['ok','No robot, no sparkle','No icon shapes at all.'],['ok','People rule','Seen from behind, exactly as the photography rule asks.'],['ok','Logo link','Same arch and door as the logo. Best fit for the hero doorway.'],['warn','Mascot?','No face means little expression. Better as a scene than as a recurring avatar.']]}
+];
+
+let T=1,ST=0,F=0;
+const px=(cv,g,cell,t)=>{
+  const dpr=window.devicePixelRatio||1,s=Math.max(1,Math.round(cell*dpr));
+  cv.width=g.w*s;cv.height=g.h*s;cv.style.width=(g.w*s/dpr)+'px';cv.style.height=(g.h*s/dpr)+'px';
+  const x=cv.getContext('2d');x.clearRect(0,0,cv.width,cv.height);
+  const cxm=g.w/2,cym=g.h*.55;
+  g.each((i,j,c)=>{
+    let col=PAL[c];
+    if(t<1){
+      const th=.5*bayer(i,j)/64+.5*Math.min(1,Math.hypot((i-cxm)/(g.w/2),(j-cym)/(g.h/2))/1.15);
+      if(t<th)return;
+      if(t-th<.09)col=PAL.m;
+    }
+    x.fillStyle=col;x.fillRect(i*s,j*s,s,s);
+  });
+};
+
+const rows=document.getElementById('rows');
+SPR.forEach(S=>{
+  const el=document.createElement('article');el.className='row glass';
+  el.innerHTML=`<div class="left"><div class="stages"><figure class="stage night"><figcaption>Night</figcaption><canvas data-k="big"></canvas></figure><figure class="stage day"><figcaption>Day</figcaption><canvas data-k="big"></canvas></figure></div>
+  <div class="sizes" aria-label="Size test"><canvas data-k="s1"></canvas><canvas data-k="s2"></canvas><canvas data-k="s3"></canvas><span class="lbl">1x · 2x · 3x</span></div></div>
+  <div class="info"><div><h2>${S.name}</h2><p class="sub">${S.sub}</p></div>
+  <div class="chat"><div class="avt"><canvas data-k="av"></canvas></div><div class="bub">${S.chat}</div></div>
+  <ul class="checks">${S.checks.map(c=>`<li><span class="tag ${c[0]}">${c[0]==='ok'?'Pass':'Check'}</span><span><b>${c[1]}.</b> ${c[2]}</span></li>`).join('')}</ul></div>`;
+  rows.appendChild(el);S.el=el;
+});
+const render=()=>{
+  SPR.forEach(S=>{
+    const g=S.build(ST,F);
+    S.el.querySelectorAll('canvas').forEach(cv=>{
+      const k=cv.dataset.k,cell=k==='big'?S.cell:k==='s1'?1:k==='s2'?2:k==='s3'?3:1;
+      px(cv,g,cell,T);
+    });
+  });
+};
+const tIn=document.getElementById('t'),tv=document.getElementById('tv');
+const setT=v=>{T=v;tIn.value=Math.round(v*100);tv.textContent=Math.round(v*100)+'%';render()};
+tIn.addEventListener('input',()=>{cancelAnimationFrame(raf);setT(tIn.value/100)});
+let raf=0;
+document.getElementById('play').addEventListener('click',()=>{
+  cancelAnimationFrame(raf);const t0=performance.now(),D=2800;
+  const step=n=>{const k=Math.min(1,(n-t0)/D),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;setT(e);if(k<1)raf=requestAnimationFrame(step)};
+  setT(0);raf=requestAnimationFrame(step);
+});
+const b0=document.getElementById('s0'),b1=document.getElementById('s1');
+const setS=v=>{ST=v;b0.setAttribute('aria-pressed',v===0);b1.setAttribute('aria-pressed',v===1);render()};
+b0.onclick=()=>setS(0);b1.onclick=()=>setS(1);
+
+const rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(!rm){let n=0;setInterval(()=>{n++;const nf=(n%7===0)?1:(n%2);if(nf!==F&&T>=1){F=nf;render()}},520)}
+render();
+window.__setT=setT;window.__setS=setS;
+})();
+</script>
