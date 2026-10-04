@@ -245,7 +245,7 @@ Source of truth: `palette.md` and `tokens.json` (Violet Hour 75% / Dusk Plum 25%
 ### Light theme (bone sections)
 - **Bone** `{colors.light-canvas}` and **Bone Light** `{colors.light-surface}`; **Aubergine Ink** `{colors.light-ink}` text and logo arch; **Dusk Violet** `{colors.light-ink-muted}` secondary text.
 - **Deep Amethyst** `{colors.light-brand}` brand, links and focus; **Deep Celadon** `{colors.light-status}` status; **Óxido** `{colors.light-danger}` urgent or failed with `{colors.light-on-danger}` on fills.
-- Gold stays `{colors.hand}` with `{colors.light-on-hand}` text, as a **chip or button fill only**. No brass or ochre text (`{colors.light-hand-text}` exists only as a rare fallback), no lilac wash on surfaces.
+- Gold stays `{colors.hand}` with `{colors.light-on-hand}` text, as a **chip or button fill only**. No brass or ochre text (`{colors.light-hand-text}` exists only as a rare fallback), no lilac wash on surfaces (a purple ambient *behind* frosted glass is allowed, see Glass and ambient background).
 
 All text pairs meet WCAG AA (lowest 5.1:1, see `palette.md`).
 
@@ -273,6 +273,28 @@ Radii: 10px controls, 12px inputs, 14px cards, 16px windows, pill chips. **Eleva
 - **Dark theme:** cards and pop-up windows get a soft purple glow: `0 0 0 1px` Amethyst at ~33%, plus `0 8px 36px -8px` Amethyst at ~42%. An attention card (needs a person) gets the same recipe in Lantern Gold; an urgent card in Óxido.
 - **Light theme: no glow** (it looked dirty on bone). Windows and pop-ups get a 1px Aubergine Ink hairline (~22%); inner cards get a 1px Deep Amethyst outline (~32%). Urgent cards: 1px Óxido hairline.
 
+## Glass and ambient background (LOCKED 2026-10-04, amends Shape and elevation)
+
+Cards, windows, the nav pill and the conversation panels are **frosted glass** (the webapp's `GlassPanel` idea, redrawn in our palette). Reference mockups: `landing/_preview/webapp-mockup.html` and `bg-lab.html`.
+
+- **Recipe, dark:** 135deg white tint 15% to 4% (strong variant 23% to 10%), `backdrop-filter: blur(24px) saturate(160%)`, a 1px **rim light** drawn as a gradient border at 45deg (white 80% at the top-right and bottom-left corners, 7% along the edges between), inner top highlight white 22%, frosted grain (SVG fractal noise) at 10% soft-light over the panel, shadow `0 26px 56px -26px rgba(0,0,0,.7)`.
+- **Recipe, light:** white tint 62% to 30% (strong 76% to 50%), blur 26px saturate 175%, rim white 95% at the two corners and Deep Amethyst 20% between, shadow tinted purple `0 26px 52px -24px rgba(98,53,175,.5)` (a tinted shadow for depth, not a glow).
+- **Hand-off glass cards** keep the same recipe with a Lantern Gold rim (95% to 24%) and the gold glow. Alfred's chat bubbles are solid brand colour, host bubbles solid, guest bubbles frosted.
+- **Ambient background (CSS only, never baked into images), with frosted grain over it (SVG noise, 30% overlay), soft light shapes and no hard circles:**
+  - *Dark, "resplandor suave" (D3):* Amethyst glow top-left (50%), Lantern Gold glow bottom-right (32%), Deep Amethyst glow bottom-centre (70%), blur 44px on Aubergine.
+  - *Light, "alba lila" (L1):* warm peach (Lantern Gold at 34%) top-left, a lilac band (Amethyst to Deep Amethyst, rotated -8deg) across the middle, Deep Amethyst bottom-right (62%) on Bone. The purple ambient exists only behind glass.
+- **Brillo (intensity):** *suave* is the default everywhere, app included. *Intenso* is reserved for landing shots that need to catch attention: dark gets a large warm door-light glow from the right (D2) and a stronger Deep Amethyst, light gets stronger lilac and amethyst. Same colours, only the intensity changes.
+- Contrast on glass over the ambient must be measured in the real build (muted text on light glass is the risk).
+
+## Alfred, the pixel mascot (LOCKED 2026-10-04)
+
+Alfred is a small **pixel-art butler** (a drawn character, not a robot or an AI icon; the "no faces" rule covers photography). Drawn on a 28x34 grid in palette colours only (the sprite uses Aubergine Ink, Plum Glass, Dusk Violet, Deep Amethyst, Amethyst, Lilac, Lilac Mist, Pearl, Celadon, Lantern Gold, plus the Óxido pair for emergencies). Source and live reference: `landing/_preview/alfred-states.html` (earlier rounds: `sprite-study.html`, `alfred-light-study.html`). The face and hands get a polish pass before shipping.
+
+- **Look (candidate A, "El mayordomo"):** white hair, white moustache, lilac-grey face, Deep Amethyst tailcoat, Amethyst bow tie, a napkin over the arm, a lapel pin. **Candidate C, "La puerta"** (the same butler seen from behind in the lit arch) is the hero moment where he manifests; B (the lantern with a face) is not a separate character, only the lantern A carries.
+- **Manifest:** pixel-in by ordered dither, with an Amethyst leading edge that settles into the real colours. It can be scrubbed by scroll. Nothing sparkles.
+- **States (the lantern colour is the message):** *Autopilot* = Celadon lapel pin, lantern down, no light. *Needs you* = he raises a Lantern Gold lantern and the light spreads. *Emergency* = same pose, Óxido lantern and red light, used only for urgent or failed states and never without an icon and a label ("Urgente"). Gold keeps meaning "a person is needed".
+- **Light levels:** *Lit room* is the product level (pixel halo, light pool on the floor, soft bloom). *Intenso* is the landing level (white-hot core, wider halo, slowly pulsing bloom) and identifies an escalation best at small sizes, so it stays a candidate for the product's small escalation icon (undecided). The pixels carry the glow edge; the bloom is CSS on top. Pulses: gold 2.2 s, emergency 1.3 s, both stop under reduced motion.
+
 ## Components
 
 - **Primary button:** Lantern Gold fill, ink text, `{rounded.sm}`. One per view. **Urgent button:** Óxido fill, `{colors.on-danger}` text.
@@ -288,4 +310,4 @@ Photography: cinematic night shots of Mexican architecture lit by one pale-golde
 ## Do and don't
 
 - Do keep gold meaning "a person is needed" (or the doorway light); do pair Óxido with an icon and label; do keep the purple glow dark-only; do write plain Spanish.
-- Don't use a letter or M monogram, a purple arch, ochre or brass in the light theme, a lilac wash on bone, teal/coral/blue SaaS styling, robot or sparkle icons, "24/7" or "AI-powered" copy, or any hex outside `palette.md`.
+- Don't use a letter or M monogram, a purple arch, ochre or brass in the light theme, a lilac wash on bone as a card or surface fill (a purple ambient behind frosted glass is fine), teal/coral/blue SaaS styling, robot or sparkle icons, "24/7" or "AI-powered" copy, or any hex outside `palette.md`.
