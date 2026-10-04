@@ -1,0 +1,10 @@
+{"file": "heroes/casita-costa-noche.png", "prompt": "prompts/02-casita-costa-noche.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:23:20"}
+{"file": "heroes/loft-cdmx-noche.png", "prompt": "prompts/03-loft-cdmx-noche.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:23:49"}
+{"file": "action/llave-en-puerta.png", "prompt": "prompts/04-llave-en-puerta.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:24:20"}
+{"file": "action/telefono-boca-abajo.png", "prompt": "prompts/05-telefono-boca-abajo.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:24:52"}
+{"file": "detail/llave-laton-lino.png", "prompt": "prompts/06-llave-laton-lino.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:25:21"}
+{"file": "detail/farol-pared.png", "prompt": "prompts/07-farol-pared.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:25:51"}
+{"file": "lifestyle/huesped-llega.png", "prompt": "prompts/08-huesped-llega.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:26:22"}
+{"file": "extras/tarjeta-puerta-oro.png", "prompt": "prompts/10-tarjeta-puerta-oro.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:27:01"}
+{"file": "lifestyle/anfitrion-terraza.png", "prompt": "prompts/09-anfitrion-terraza.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:28:28"}
+{"file": "detail/llave-laton-lino.png", "prompt": "prompts/06-llave-laton-lino.txt", "model": "gemini-3-pro-image (Vertex, global)", "size": "2K 16:9", "est_cost_usd": 0.134, "ts": "2026-10-02T21:29:26"}

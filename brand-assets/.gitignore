@@ -1,0 +1,17 @@
+# Local-only: regenerate from prompts/ or keep a backup elsewhere (see manifest.md)
+_review/
+_design-test/
+_rejected/
+
+# PNG masters of generated photos (~70 MB); the committed web versions are in web/*.webp
+banner/*.png
+heroes/*.png
+action/*.png
+detail/*.png
+lifestyle/*.png
+extras/*.png
+
+# Draft boards and contact sheets (each ~5-7 MB); prompts are saved next to them
+concept/refs/anchor-approved.png
+concept/board-v*.png
+concept/contact-sheet-*.png

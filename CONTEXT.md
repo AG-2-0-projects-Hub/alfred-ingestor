@@ -10,9 +10,8 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🟢 **Email-alert confirmation gate SHIPPED to prod 2026-10-02** (PR #11 `203fba6`; migration applied first;
-  founder-verified on staging + prod; prod's one enabled host reset to re-confirm). Not yet watched live: the
-  hero-image *fallback* branch. Email domain auth: `ROADMAP.md` M2 (mails may land in spam until then).
+- 🟣 **Mayordommo brand protocol CLOSED 2026-10-04** (name, logo P2, palette incl. Óxido red, 10-photo pack, `DESIGN.md`; `IDENTITY.md` + `brand-assets/`). NEXT: founder wants to reconsider the typeface (not keen on Cormorant Garamond), then `PREMIUM_LANDING_PAGE.md` (style interview, ONE taste skill, hero preview + scroll video, waitlist via Plan Mode + FIX_VERIFY); resume `_Context/CONTINUATION_PROMPT_landing_2026-10-04.md`; trademark attorney check still owed before launch.
+- 🟢 Email-alert confirmation gate SHIPPED to prod 2026-10-02 (PR #11 `203fba6`, founder-verified); not yet watched live: the hero-image *fallback* branch; email domain auth = `ROADMAP.md` M2 (mails may land in spam until then).
 - 🔴 **NEXT: the two items left from `_Context/CONTINUATION_PROMPT_2026-10-02.md`** — (B) auth gaps on
   merge/resolve/add-knowledge/query-knowledge/ingest + resume/retry-scrape ownership (reproduced 2026-10-02:
   anonymous `add-knowledge` stores text in `master_json`; anonymous `/api/ingest` on an existing property UUID
@@ -33,7 +32,16 @@ the refresh rule that keeps `## Pending` from re-bloating.*
   reach the DropZone (an `.exe` drop got the red inline rejection) — the earlier "not working"
   conclusion may have been stale coordinates, so a supported-file drop is worth one more try.
 
-**Last Session:** 2026-10-02 later (**Built the email-alert confirmation gate (double opt-in) with FIX_VERIFY,
+**Last Session:** 2026-10-02→04 (**Ran `BRAND_IDENTITY_PROTOCOL.md` v1.1 end to end as a low-spend proof of concept for the public brand "Mayordommo" (Alfred stays the in-product butler); the brand protocol is CLOSED and `PREMIUM_LANDING_PAGE.md` is the next one.**
+  - **Name:** "Always Alfred" collided with Alfred Hospitality AI (same category, found late) → pivot to **Mayordommo**. RDAP, USPTO and IMPI screening done (all `mayordommo.*` domains free; IMPI treats it as similar to MAYORDOMO, crowded in classes 29/30/43, nothing in 9/38/42/45). Trademark attorney check **deferred but owed** before launch, filing or scaled paid assets; founder registers domains himself.
+  - **Identity (5 artifact rounds, founder-led, all locked):** logo P2 (lit doorway over its reflection; arch = text colour, never purple; gold door), palette = Violet Hour 75% / Dusk Plum 25% (dark Aubergine/Plum Glass/Pearl, light Bone/Aubergine Ink, Lantern Gold only for "a person is needed", purple glow dark-only, no brass in light), strategy text approved, wordmark/tagline Cormorant Garamond 700 + Manrope. **Emergency red Óxido `#DB6D63`/`#A6382E` added 2026-10-03** after the founder noticed it was missing (3 rounds: rose was "watermelon" → earthy terracotta → C0).
+  - **Assets (Vertex ADC, Nano Banana Pro `gemini-3-pro-image`):** concept board approved; 10-photo pack (courtyard hero anchor, Cycladic-arch beach house, CDMX door, key/lock, phone+lamp, key on linen, lantern, guest, host terrace, gold-foil door hanger) in `brand-assets/{banner,heroes,action,detail,lifestyle,extras}`, WebP in `brand-assets/web/`, `manifest.md`, `embed-guide.md`, prompts in `brand-assets/prompts/`. Cost: pack $1.47 (cap was $1.75), ~$2.01 with drafts. PNG masters stay local (gitignored), regenerate from prompts.
+  - **Tokens/handoff:** `brand-assets/DESIGN.md` (validated: parses, refs resolve, hexes match `tokens.json`), `claude-design-brief.md`. DesignSync deliberately not used (restricted to the user-started `/design-sync` skill); brief pasted by hand.
+  - **Side test, Stitch vs Claude Design (same brief):** Claude Design faithful but thin; Stitch richer (best chat-demo flow) but invented claims (24/7, 40 s training, PMS integration) and demoted the hero photo → layout references only, copy and claims always ours. Founder prefers Stitch's structure.
+  - **Lessons (7, project + 4 promoted global):** name clearance first; lock semantic colours + both themes up front; image models can't control type weight/hex text (set type in code, single-asset prompts, sample colours); Vertex ADC recipe + 1K=2K price + 429 backoff; OpenRouter Qwen reasoning; PowerShell `;` split; design tools invent claims.
+  - **Not done / next:** founder wants to **reconsider the typeface** (not keen on Cormorant Garamond) before the landing; style interview + ONE taste skill (recommended `taste-skill`); hero preview with scroll-video prototype (Veo 3.1 untested, price at cost gate); waitlist = Plan Mode + FIX_VERIFY (ask whether Supabase is needed); native Spanish copy; reconcile `ROADMAP.md` §2 naming (belongs to another session's uncommitted edit, untouched); republish the reference artifact (`brand-preview.html` has the red swatch locally); protocol tweaks approved and applied 2026-10-04 (root repo, uncommitted: brand protocol v1.2, landing protocol v1.8). Resume: `_Context/CONTINUATION_PROMPT_landing_2026-10-04.md`.)
+
+**Prior Session:** 2026-10-02 later (**Built the email-alert confirmation gate (double opt-in) with FIX_VERIFY,
 verified it on staging and with a real mailbox, shipped it to prod (PR #11 `203fba6`), founder-verified on prod.**
 Feature commit `19e5a5f`.
   - **Step 0 — reproduced twice on staging with throwaway data:** (1) a logged-in host can PATCH

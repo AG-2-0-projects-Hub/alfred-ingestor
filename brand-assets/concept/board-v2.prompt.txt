@@ -1,0 +1,13 @@
+The first attached image is the approved brand-kit board for "mayordommo" (3x3 grid). Produce a revised version of this exact board: same canvas, same grid, same gutters, same panel order, same palette, same style. Keep panels 2, 5, 7 and 8 essentially unchanged (the construction drawing, the colour swatches with their names and hex codes, the bone door-hanger with the embossed arch and gold-foil door on dark wood, and the cinematic Mexican courtyard arch at dusk). Make ONLY these changes:
+
+Panel 1 (logo cover): make the lowercase wordmark "mayordommo" clearly BOLDER: Cormorant Garamond Bold (weight 700) style, larger, brighter pearl white (#F4EFF8), with crisp edges so it never gets lost in the glow. Move the wordmark lower, into clear dark aubergine space, with a visible gap between the logo's faded reflection and the letters: the reflection and the gold glow must fade out completely before reaching the text, nothing glowing behind or through the letters. Keep the logo mark exactly as in the attached logo reference images (pearl arch, gold door with glow, floor line, faded reflection).
+
+Panel 3 (digital application): keep the phone and soft message rows, but the solid lantern-gold pill at the bottom must be wordless (no text inside it at all).
+
+Panel 4 (brand essence): the tagline "Regálate tiempo." set in Cormorant Garamond Bold (weight 700), larger and bolder, pearl white, centred on empty aubergine. REMOVE the gold dot completely. Nothing else in the panel, no decoration.
+
+Panel 6 (typography, bone panel): left "Aa" in Cormorant Garamond Bold, a refined high-contrast calligraphic serif (clearly not Times New Roman: sharper contrast, elegant small x-height, delicate hairline serifs); right "Aa" in Manrope semibold, a clean humanist geometric sans. Aubergine ink (#1B102C) on bone. Thin ink hairline beneath, no glow.
+
+Panel 9 (system detail): replace the ambiguous half-moon shape with a clear component strip, left to right: a celadon status dot beside a short celadon bar; a solid lantern-gold rounded pill (wordless); a small rounded plum-glass card (#25153C) with a soft amethyst-purple glow around its edge; a rounded input field with an amethyst focus ring. All shapes clean, evenly spaced, no text.
+
+Everything else must stay as in the first image. Palette stays strict: aubergine #160C24, plum glass #25153C, pearl #F4EFF8, lilac mist #BCA9D5, amethyst #AB81F2 (glow, dark panels only), lantern gold #F4B64C (only for the door light and "a person is needed", never decoration), celadon #90CEA8, bone #F4ECE0, aubergine ink #1B102C. Visible text stays limited to the "mayordommo" wordmark, the tagline "Regálate tiempo.", and the existing swatch names with hex codes. No robots, no sparkles, no other logos.

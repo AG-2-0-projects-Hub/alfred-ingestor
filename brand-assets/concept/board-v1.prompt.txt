@@ -1,0 +1,22 @@
+Create a premium brand-kit overview board for "mayordommo" (a Spanish-first AI concierge for short-term-rental hosts; the in-product butler is called Alfred).
+
+The two attached images are the LOCKED logo mark (dark-theme version on aubergine, light-theme version on bone). Reproduce this mark exactly wherever the logo appears: a pearl-white open arch (stroke, never purple), a solid lantern-gold arched door inside it with a soft gold glow, a thin floor line, and a faded mirror reflection below. Do not redraw, restyle, add letters, or turn it into a monogram. It is NOT an "M" or "A".
+
+Brand strategy: category = AI guest concierge for vacation-rental hosts; audience = non-technical solo owners and small property managers in Mexico; personality = the discreet butler, calm, warm, plain-spoken, a lamp left on at night; core metaphor = the threshold: someone is home and the light is on.
+
+Layout: a 3x3 grid on a dark charcoal-aubergine presentation canvas, strong even gutters, rounded panel corners, generous negative space, very sparse typography. Panels have rhythm: quiet, functional, emotional, technical, atmospheric. Most panels are dark; exactly two panels are on a bone (warm off-white) ground to show the light theme.
+
+Panels (left to right, top to bottom):
+1. Logo cover (dark): the attached mark large and centred, with the lowercase wordmark "mayordommo" below in a high-contrast refined serif (Cormorant Garamond semibold style), pearl white, generous letter spacing.
+2. Logo construction (dark): the same arch and door drawn as thin construction geometry: circle guides, a grid, measured hairlines, the floor line; the gold door is the only coloured element.
+3. Digital application (dark): a phone screen crop showing a calm guest chat with soft rounded message rows (no readable text, abstract bars): guest rows in plum glass, the butler's rows with a soft amethyst-purple glow, one solid lantern-gold pill at the bottom meaning "a person is needed". No chat-bubble icons, no robot, no sparkle.
+4. Brand essence (dark): only the large tagline "Regálate tiempo." set in the same refined serif, pearl white, lots of empty aubergine space, one small gold dot.
+5. Color system (dark): nine clean swatches as soft rounded cards or discs, no text: Aubergine #160C24, Plum Glass #25153C, Pearl #F4EFF8, Lilac Mist #BCA9D5, Lantern Gold #F4B64C, Amethyst #AB81F2, Celadon #90CEA8, plus Bone #F4ECE0 and Aubergine Ink #1B102C.
+6. Typography (bone panel, light theme): a large "Aa" specimen in the refined high-contrast serif next to a clean humanist sans (Manrope style) "Aa", aubergine-ink text on bone. No glow in this panel; thin ink hairline only.
+7. Physical application (bone panel, light theme): a premium bone-coloured welcome card or door-hanger lying on a dark wood or stone surface, the logo mark embossed in aubergine ink with a small gold foil door. Soft natural shadow, no glow.
+8. Image direction (dark): a cinematic night photograph of a warm courtyard arch of a Mexican colonial home at dusk, one lit doorway glowing lantern gold, deep violet-aubergine shadows, no people, subtle film grain, quiet and welcoming.
+9. System detail (dark): a small component strip: a celadon status dot with a bar, a solid lantern-gold chip, a purple-glow card edge, a focus ring in amethyst. No readable text.
+
+Palette discipline (strict): aubergine #160C24 / plum glass #25153C / pearl #F4EFF8 / lilac mist #BCA9D5 / amethyst #AB81F2 (purple glow and presence, dark panels only) / lantern gold #F4B64C (the ONLY warm colour, used only for the door light and "a person is needed") / celadon #90CEA8 (status) / bone #F4ECE0 and aubergine ink #1B102C for the light panels. No other hues. No teal, blue, coral, orange, neon.
+
+Style: premium identity-studio presentation, sparse, cinematic, intentional, polished, no clutter, a lamp left on at night. Visible text is limited to the "mayordommo" wordmark and the single tagline "Regálate tiempo." — everything else is abstract shapes with no readable text, no lorem ipsum, no tiny labels. No other logos, no real-world brands, no robots, no sparkles, no generic AI glow, no purple-blue gradients.

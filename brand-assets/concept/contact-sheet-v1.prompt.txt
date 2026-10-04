@@ -1,0 +1,20 @@
+Create ONE contact sheet: a 3x3 grid of nine separate cinematic photographs for the brand "mayordommo" (an AI concierge for vacation-rental hosts in Mexico), as a quick look-development overview. Each panel is its own 16:9 photograph. Panels are separated by thin even gutters in deep aubergine (#160C24), small rounded corners, no captions, no numbers, no labels, no text anywhere.
+
+The attached image is the approved look of the brand's night photography (a Mexican courtyard arch at dusk with one lit doorway). Match its mood, colour grade, light and material language in every panel. All nine panels must look like frames from one shoot.
+
+Panels (left to right, top to bottom):
+1. A Mexican colonial courtyard arch at dusk with one lit doorway glowing lantern gold, the arch placed in the right third, calm dark empty space across the left two thirds.
+2. A whitewashed coastal casita in the Mexican Caribbean at night, a single lit wooden doorway glowing lantern gold, palm silhouettes, violet dusk sky.
+3. A tall old wooden street door of a Mexico City building at night, a single warm lantern-gold light spilling from the open doorway onto the cobbles, a violet-toned street.
+4. Close-up of a hand turning a brass key in a door lock, a thin line of lantern-gold light along the door gap.
+5. A hand setting a phone face-down (screen not visible) on a wooden table beside a lit lamp, evening, calm.
+6. Macro of a brass key resting on bone-coloured linen, warm side light, shallow depth of field.
+7. A wrought-iron lantern on a rough plaster wall, lantern-gold glow, deep violet shadow.
+8. A guest seen from behind pulling a suitcase toward a lit doorway at dusk, no face visible.
+9. A host's hands holding a cup on a terrace at dusk, phone lying face-down nearby, no face visible, calm and unhurried.
+
+Style DNA (applies to every panel): cinematic night photography lit by one warm lantern-gold practical light (#F4B64C) visible in or near the frame, spilling softly onto plaster, stone and aged wood; all other areas fall into deep aubergine-violet dusk shadow (#160C24, #25153C), no fill, no rim light. Matte materials with visible grain: stucco, terracotta, linen, brass. 35mm lens, shallow depth of field, eye level. Warm gold highlights, violet shadows, low saturation outside the light, slightly lifted blacks, fine film grain. Real Mexican architecture; people only as hands or from behind.
+
+Palette limited to: Aubergine #160C24, Plum Glass #25153C, Pearl #F4EFF8, Lilac Mist #BCA9D5, Amethyst #AB81F2 (only as faint dusk-sky tint), Lantern Gold #F4B64C (the only warm light), Bone #F4ECE0 (linen only).
+
+Exclusions: no readable text, no signs, no logos or brand marks, no watermarks, no faces, no stock-photo people, no neon, no lens flare, no robots or sparkles, no extra warm colours (no orange, red or teal casts), no purple-blue AI glow.

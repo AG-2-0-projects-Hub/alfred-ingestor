@@ -1130,3 +1130,59 @@ needs WSL's own SSH identity — worth stating explicitly rather than leaving "g
 WSL-only tool, since that overstates the restriction and undersells why push specifically fails.
 
 ---
+
+## 2026-10-02 — The public name collided with a same-category product only after much direction work; name clearance must be the first gate
+**Context:** Mayordommo brand + landing proof of concept (first run of `BRAND_IDENTITY_PROTOCOL.md`). The working name "Always Alfred" was already driving the first palette and logo ideas.
+**Discovery:** A Firecrawl name check, run only at the smoke-test stage, found Alfred Hospitality AI (alfredco.host / alfredhospitalityai.com): same category, same function. The public brand pivoted (Alfred stays the in-product butler persona; public name Mayordommo). Domain (RDAP), USPTO (Justia) and IMPI (MARCia, automatable with Playwright) checks then took minutes.
+**Impact:** Protocol v1.1 now has a name-clearance gate before any logo or image spend. A trademark attorney check is still deferred and is required before launch, filing or scaled paid assets.
+**Global Candidate:** Yes — already encoded in `BRAND_IDENTITY_PROTOCOL.md` v1.1 (Initialization item 5).
+
+---
+
+## 2026-10-02 — The palette lock forgot semantic states (emergency red) and needs a separate light-theme treatment
+**Context:** Five artifact rounds locked the palette and logo; after the lock the founder noticed there was no colour for urgent or failed states.
+**Discovery:** A Step 3 lock that lists only brand colours misses success/warning/danger/info. The red then took three rounds (rose/scarlet/garnet read "watermelon"; earthy terracotta variants; Óxido `#DB6D63` / `#A6382E` chosen). Light-theme lessons from the same rounds: gold fails contrast as text on bone (use a gold chip with dark text, never brass or ochre text); a purple glow looks dirty on light surfaces (use hairline outlines); the logo arch follows the text colour, not the brand purple.
+**Impact:** In the full run, lock semantic states and both themes up front, contrast-checked, with a one-line meaning for every colour in `palette.md`.
+**Global Candidate:** Yes — proposed Step 3 checklist tweak for `BRAND_IDENTITY_PROTOCOL.md`.
+
+---
+
+## 2026-10-02 — Image models do not control type weight, hex text or multi-change edits; fix those outside the model
+**Context:** Brand concept board (Nano Banana Pro) and a v2 edit pass that attached the v1 board as a reference.
+**Discovery:** v2 ignored "make the wordmark bolder" and "leave a gap under the reflection", regressed the panel the founder loved (the embossed arch lost its ink), and mistyped a swatch hex (#BCABD5 instead of #BCA9D5). Single-asset prompts follow exclusions and composition far better than a sheet edit; a locked logo passed as a reference PNG was reproduced faithfully; palette adherence has to be checked by sampling pixels, not by eye.
+**Impact:** Wordmark, tagline and any hex or label text are real type in code (previewed in a free local type study); fixes go through single-asset prompts; QA samples colours (median tone, light-source hue, share of red pixels).
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-02 — Vertex ADC image generation facts (Nano Banana Pro) and the cost shape
+**Context:** First paid image generation for the project; the root `.env` Gemini key returned 429 on generation although listing models worked.
+**Discovery:** (1) Use Vertex ADC (`genai.Client(vertexai=True, project=<proj>, location="global")`, model `gemini-3-pro-image`; the `-preview` alias 404s on Vertex); gcloud's default project here is `reflip-mvp`, so pass the Alfred project and `x-goog-user-project` on REST calls. (2) Smoke tests must really generate, not just list models: two API keys had different quota. (3) 1K and 2K cost the same ($0.134 per image, 4K $0.24, per the Google Cloud pricing page), so a low-resolution draft pass saves nothing; for look development generate ONE contact sheet of all shots (about $0.13). (4) A burst of 8-9 sequential 2K generations hit `429 RESOURCE_EXHAUSTED`; retrying after 1-2 minutes worked and the failed calls produced no image.
+**Impact:** Full run: Vertex ADC engine, contact-sheet draft first, sequential generation with backoff, the approved anchor image attached as a reference to every asset.
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-02 — OpenRouter Qwen/GLM flash models burn their whole token budget on hidden reasoning unless it is disabled
+**Context:** Cheap-model bake-off ($0.007 total) for copy drafts and screenshot critique.
+**Discovery:** Qwen flash models returned empty content at normal token limits until `reasoning:{enabled:false}`; GLM-5.3-flash rejects that parameter (HTTP 400). Best by task: `openai/gpt-6-luna` for copy and strategy drafts, `qwen/qwen3.8-flash` for screenshot critique, `qwen/qwen3.7-flash` as the cheapest first pass.
+**Impact:** Pass `reasoning:{enabled:false}` for Qwen, skip GLM for text, premium work stays on the Claude account, and Claude always judges the delegated output.
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-02 — PowerShell `wsl bash -lc '...;...'` splits on semicolons
+**Context:** Running multi-command shell snippets from the PowerShell tool.
+**Discovery:** PowerShell splits the command at `;` before WSL sees it, so the second half runs in the wrong shell. Writing the commands to a script file and running `wsl bash -l /mnt/c/.../script.sh` is reliable (files made with the Write tool are not executable, so call them with `bash`).
+**Impact:** All multi-step WSL work in this session used script files in the scratchpad.
+**Global Candidate:** Yes.
+
+---
+
+## 2026-10-04 — AI design tools (Stitch, Claude Design) are layout references only: they invent claims and demote assets
+**Context:** Side test of Google Stitch and Claude Design with the same Spanish landing brief, `DESIGN.md` and photos.
+**Discovery:** Stitch gave the richer structure and the best chat-demo flow but invented marketing claims ("24/7", "training in under 40 s", "native PMS integration", "active in 14 haciendas", a fake property card) that break our voice rules, and demoted the hero photo to a gradient. Claude Design stayed faithful (exact copy, our photo full-bleed) but thin. DesignSync is restricted to the user-started `/design-sync` skill, so the brief is pasted by hand. Flows: Claude Design "Create here" takes assets (no .md upload; paste the text into the notes box); Stitch "Empieza usando tu diseño" builds a design system first and the page prompt comes second.
+**Impact:** Use them for section structure and component ideas only; all copy and claims come from us; check any export for invented claims before borrowing anything.
+**Global Candidate:** Yes — belongs in `PREMIUM_LANDING_PAGE.md` Step 3.5.
+
+---

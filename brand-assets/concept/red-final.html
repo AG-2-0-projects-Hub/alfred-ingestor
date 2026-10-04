@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Manrope:wght@500;600;700&display=swap">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d0716;font-family:Manrope,sans-serif;padding:26px;width:1500px;color:#BCA9D5}
+h2{margin:0 0 10px;font:700 22px 'Cormorant Garamond',serif;color:#F4EFF8}
+.strip{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:26px}
+.ground{border-radius:18px;padding:18px}
+.dk{background:#160C24;color:#F4EFF8}.lt{background:#F4ECE0;color:#1B102C}
+.blocks{display:grid;grid-template-columns:repeat(3,1fr);gap:0;height:150px;border-radius:12px;overflow:hidden}
+.blocks div{display:flex;align-items:flex-end;padding:10px;font:700 12px Manrope}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.panel{border-radius:18px;padding:18px;margin-bottom:14px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{font:600 12px Manrope;padding:6px 10px;border-radius:99px;display:inline-flex;gap:6px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%}
+.card{border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.dk .card{background:#25153C}.lt .card{background:#FCF8F1}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.msg{font:500 14px/1.35 Manrope}
+.btn{font:700 13px Manrope;padding:9px 14px;border-radius:10px;border:0}
+.mut{font:500 12px Manrope;opacity:.75}
+.band{margin-top:12px;border-radius:12px;padding:12px 14px;font:700 14px Manrope;display:flex;justify-content:space-between}
+</style></head><body>
+<div class="strip">
+  <div class="ground dk"><h2>Dark theme · side by side</h2>
+    <div class="blocks"><div style="background:#DB6D63;color:#160C24">C0 · #DB6D63</div><div style="background:#D86E62;color:#160C24">mid · #D86E62</div><div style="background:#D67060;color:#160C24">C3 · #D67060</div></div></div>
+  <div class="ground lt"><h2 style="color:#1B102C">Light theme · side by side</h2>
+    <div class="blocks"><div style="background:#A6382E;color:#FCF8F1">C0 · #A6382E</div><div style="background:#A43A2E;color:#FCF8F1">mid · #A43A2E</div><div style="background:#A13C2D;color:#FCF8F1">C3 · #A13C2D</div></div></div>
+</div>
+<div class="cols" id="cols"></div>
+<script>
+const C=[{n:'C0 · Óxido',d:'#DB6D63',l:'#A6382E'},{n:'C3 · Cálido',d:'#D67060',l:'#A13C2D'}];
+const cols=document.getElementById('cols');
+for(const c of C){
+ const col=document.createElement('div');
+ const panel=(theme)=>{
+  const dk=theme==='dk';const red=dk?c.d:c.l;const gold='#F4B64C',cel=dk?'#90CEA8':'#2E6A4C';const onred=dk?'#160C24':'#FCF8F1';
+  const glow=dk?`box-shadow:0 0 0 1px ${red}88,0 8px 32px -8px ${red}66`:`box-shadow:0 0 0 1px ${red}66`;
+  return `<div class="panel ${theme}">
+   <div class="chips">
+    <span class="chip" style="background:${gold};color:#160C24">Te necesitan</span>
+    <span class="chip" style="border:1px solid ${cel};color:${cel}"><span class="dot" style="background:${cel}"></span>Autopiloto</span>
+    <span class="chip" style="background:${red};color:${onred}">Urgente</span>
+    <span class="chip" style="color:${red};border:1px solid ${red}"><span class="dot" style="background:${red}"></span>No se envió</span>
+   </div>
+   <div class="card" style="${glow}">
+    <div class="row"><span class="msg" style="font-weight:700">Un huésped reporta una fuga de agua</span><span class="chip" style="background:${red};color:${onred}">Urgente</span></div>
+    <div class="mut">Alfred no puede resolverlo solo.</div>
+    <div class="row"><button class="btn" style="background:${red};color:${onred}">Llamar ahora</button><span class="msg" style="color:${red};font-weight:600">Ver conversación</span></div>
+   </div>
+   <div class="band" style="background:${red};color:${onred}"><span>Urgente · acción necesaria</span><span>${red}</span></div>
+  </div>`};
+ col.innerHTML=`<h2>${c.n}</h2>${panel('dk')}${panel('lt')}`;
+ cols.appendChild(col);
+}
+</script></body></html>

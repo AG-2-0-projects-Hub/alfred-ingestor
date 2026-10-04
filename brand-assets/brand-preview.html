@@ -1,0 +1,154 @@
+<title>Mayordommo Brand Lock</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* Layout concept: a reference sheet, not a pitch. Locked logo, locked palette, then four plain screens in dark and light so anyone building against the brand can see the rules applied. Source of truth for values: palette.md and tokens.json next to this file. */
+:root {
+  --bg: #F5F4F1; --fg: #1B1B1F; --muted: #62626B; --line: #DAD8D2; --card: #FFFFFF;
+  --serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #111113; --fg: #EDEBE6; --muted: #9C9AA3; --line: #2A2A2F; --card: #18181B; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #111113; --fg: #EDEBE6; --muted: #9C9AA3; --line: #2A2A2F; --card: #18181B; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); padding-inline: clamp(16px, 4vw, 48px); padding-block: 28px 72px; margin: 0; }
+.wrap { max-width: 1120px; margin-inline: auto; display: grid; gap: 52px; }
+h1 { font: 600 clamp(30px, 5vw, 44px)/1.05 var(--serif); margin: 0 0 10px; text-wrap: balance; }
+h2 { font: 700 13px/1.2 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.lede, .sub { max-width: 66ch; color: var(--muted); margin: 0; }
+.sub { font-size: 14px; margin-bottom: 18px; }
+.cap { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+
+/* locked tokens (25% toward Dusk Plum). Mirror of tokens.json. */
+.dk { --canvas: #160C24; --surface: #25153C; --text: #F4EFF8; --muted2: #BCA9D5; --hand: #F4B64C; --onhand: #160C24; --handtx: #F4B64C; --brand: #AB81F2; --brandtx: #BA96F6; --status: #90CEA8; --danger: #DB6D63; --ondanger: #160C24; --acc: #F4B64C; --arch: #F4EFF8; --glow: 42%; }
+.lt { --canvas: #F4ECE0; --surface: #FCF8F1; --text: #1B102C; --muted2: #5E4D75; --hand: #F4B64C; --onhand: #1B102C; --handtx: #87570A; --brand: #6235AF; --brandtx: #6235AF; --status: #2E6A4C; --danger: #A6382E; --ondanger: #FCF8F1; --acc: #F4B64C; --arch: #1B102C; --link: #6235AF; --glow: 30%; }
+.dk, .lt { --hair: color-mix(in srgb, var(--text) 14%, transparent); --pglow: 0 0 0 1px color-mix(in srgb, var(--brand) 32%, transparent), 0 8px 36px -8px color-mix(in srgb, var(--brand) var(--glow), transparent); }
+
+.lt { --pglow: 0 0 0 1px color-mix(in srgb, var(--brand) 32%, transparent); } /* light theme: no glow; inner cards keep a faint purple outline */
+.ui.win.lt, .lt .modal { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 22%, transparent); } /* light theme: windows get an aubergine hairline */
+.lock { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.lockcard { border-radius: 16px; padding: clamp(18px, 4vw, 30px); display: grid; gap: 14px; background: var(--canvas); color: var(--text); border: 1px solid var(--hair); min-width: 0; }
+.lockrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.lockrow svg.big { width: clamp(80px, 13vw, 110px); height: clamp(80px, 13vw, 110px); flex: none; color: var(--arch); }
+.lockrow .wm { font: 600 clamp(32px, 5.5vw, 48px)/1 var(--serif); }
+.flatrow { display: flex; align-items: flex-end; gap: 14px; color: var(--arch); }
+.pal { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sw { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.sw div { border-radius: 10px; padding: 10px; min-height: 78px; display: grid; align-content: end; gap: 1px; border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); min-width: 0; }
+.sw b { font-size: 12px; } .sw code { font: 500 11px/1.2 ui-monospace, Menlo, monospace; } .sw small { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; opacity: .75; }
+@media (max-width: 760px) { .lock, .pal, .mkrow { grid-template-columns: 1fr !important; } }
+
+.mk { margin: 0 0 28px; display: grid; gap: 10px; }
+.mkrow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ui { background: var(--canvas); color: var(--text); border-radius: 14px; padding: 16px; display: grid; gap: 12px; align-content: start; font-size: 13.5px; border: 1px solid var(--hair); min-width: 0; }
+.ui.win { box-shadow: var(--pglow); }
+.ui h3 { font: 500 clamp(32px, 5vw, 42px)/1 var(--serif); margin: 4px 0 0; text-wrap: balance; }
+.ui h4 { font: 600 22px/1.1 var(--serif); margin: 0; }
+.ui p { margin: 0; }
+.mut { color: var(--muted2); }
+.nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nav svg { width: 28px; height: 28px; color: var(--arch); }
+.nav .wm { font: 600 19px/1 var(--serif); }
+.nav .links { margin-left: auto; color: var(--link, var(--muted2)); font-size: 12.5px; font-weight: 600; }
+.btn { font: 700 13.5px/1 var(--sans); background: var(--hand); color: var(--onhand); border: 0; border-radius: 999px; padding: 12px 18px; cursor: default; justify-self: start; }
+.btn.sm { padding: 8px 12px; font-size: 12px; }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--hair); }
+.chans { display: flex; flex-wrap: wrap; gap: 6px; }
+.chans span { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--hair); }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); white-space: nowrap; }
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.p-ok { color: var(--status); } .p-brand { color: var(--brandtx); }
+.p-hand { color: var(--handtx); box-shadow: 0 0 14px color-mix(in srgb, var(--hand) 45%, transparent); }
+.lt .p-hand { background: var(--hand); color: var(--onhand); border-color: transparent; }
+.lt .p-hand i { box-shadow: none; }
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.prop { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: center; background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 11px 12px; box-shadow: var(--pglow); }
+.prop b { font-weight: 700; }
+.prop small { grid-column: 1 / -1; color: var(--muted2); font-size: 12.5px; }
+.prop.attn { border-color: color-mix(in srgb, var(--hand) 60%, transparent); box-shadow: 0 0 22px color-mix(in srgb, var(--hand) 24%, transparent); }
+.chat { display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 12px; box-shadow: var(--pglow); }
+.b { padding: 8px 11px; border-radius: 12px; max-width: 86%; }
+.b.guest { background: color-mix(in srgb, var(--text) 9%, transparent); justify-self: start; }
+.b.alf { background: color-mix(in srgb, var(--brand) 22%, var(--surface)); justify-self: end; }
+.band { border: 1px solid color-mix(in srgb, var(--hand) 55%, transparent); background: color-mix(in srgb, var(--hand) 13%, var(--surface)); border-radius: 12px; padding: 12px; display: grid; gap: 10px; box-shadow: 0 0 24px color-mix(in srgb, var(--hand) 26%, transparent); }
+.band b { color: var(--handtx); }
+.lt .band b { color: var(--text); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.scrim { background: color-mix(in srgb, var(--canvas) 45%, #000); border-radius: 12px; padding: 22px 14px; display: grid; place-items: center; }
+.modal { width: min(100%, 360px); background: var(--canvas); color: var(--text); border: 1px solid var(--hair); border-radius: 14px; padding: 16px; display: grid; gap: 10px; box-shadow: var(--pglow); }
+.field { display: grid; gap: 6px; } .field label { font-weight: 700; font-size: 12.5px; }
+.input { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 10px 12px; color: var(--muted2); }
+.drop { border: 1.5px dashed color-mix(in srgb, var(--text) 30%, transparent); border-radius: 12px; padding: 14px; text-align: center; background: var(--surface); }
+.drop small { display: block; color: var(--muted2); margin-top: 2px; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 24px; }
+.notes p { margin: 0; font-size: 13.5px; color: var(--muted); } .notes b { color: var(--fg); }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <filter id="b1" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation=".8"/></filter>
+    <filter id="b2" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b7" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="7"/></filter>
+    <linearGradient id="rfg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#000"/></linearGradient>
+    <mask id="rf" maskUnits="userSpaceOnUse" x="0" y="42" width="64" height="22"><rect x="0" y="42" width="64" height="22" fill="url(#rfg)"/></mask>
+    <symbol id="P2" viewBox="0 0 64 64"><circle cx="32" cy="26" r="21" style="fill:var(--acc)" opacity=".5" filter="url(#b7)"/><path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" style="fill:var(--acc)" filter="url(#b2)"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" style="fill:var(--acc)"/><path d="M10 42h44" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".4"/><g mask="url(#rf)"><g transform="translate(0 84) scale(1 -1)" filter="url(#b1)"><path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" style="fill:var(--acc)"/></g></g></symbol>
+    <symbol id="P2F" viewBox="0 0 64 64"><path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" style="fill:var(--acc)"/><path d="M10 42h44" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<main class="wrap">
+  <header>
+    <h1>Mayordommo: brand lock, 2 Oct 2026</h1>
+    <p class="lede">Locked: the P2 doorway logo (pearl arch in dark, ink arch in light, never purple), the 25% Dusk Plum blend palette, gold only for hand-offs, a soft purple glow on cards and pop-up windows in the dark theme (no glow in the light theme: an aubergine hairline on windows, a faint purple outline on inner cards), and a light theme with no ochre. Spanish copy is placeholder.</p>
+  </header>
+
+  <section>
+    <h2>Logo</h2>
+    <p class="sub">Full mark at 40px and above; flat version below that and as the favicon.</p>
+    <div class="lock" id="lock"></div>
+  </section>
+
+  <section>
+    <h2>Palette</h2>
+    <p class="sub">Exact values live in palette.md and tokens.json.</p>
+    <div class="pal" id="pal"></div>
+  </section>
+
+  <section>
+    <h2>Screens</h2>
+    <p class="sub">Dark: purple glow on cards and windows. Light: no glow; an aubergine hairline on windows and a faint purple outline on inner cards. Gold glow only on the "needs your attention" state.</p>
+    <div id="screens"></div>
+  </section>
+
+  <section class="notes">
+    <p><b>Contrast.</b> Every text pair clears 4.5:1 in both themes (lowest 5.5:1, light theme). The gold door and gold chip rely on the dark arch and dark chip text.</p>
+    <p><b>Not in the brand.</b> Letter or monogram marks, a purple arch, ochre or brass in the light theme, a lilac wash on light surfaces, the old aurora-gradient identity, the HostWhisperer wordmark.</p>
+  </section>
+</main>
+
+<script>
+const use = (id, px) => `<svg width="${px}" height="${px}" viewBox="0 0 64 64" aria-hidden="true"><use href="#${id}"/></svg>`;
+document.getElementById('lock').innerHTML = ['dk', 'lt'].map(t => `<div class="lockcard ${t}"><div class="lockrow"><svg class="big" viewBox="0 0 64 64" aria-hidden="true"><use href="#P2"/></svg><span class="wm">mayordommo</span></div><div class="flatrow">${use('P2F', 64)}${use('P2F', 32)}${use('P2F', 16)}</div></div>`).join('');
+
+const DK = [['Aubergine', '#160C24', 'canvas'], ['Plum Glass', '#25153C', 'surface'], ['Pearl', '#F4EFF8', 'text · logo arch'], ['Lilac Mist', '#BCA9D5', 'muted'], ['Lantern Gold', '#F4B64C', 'hand-off · button · door'], ['Amethyst', '#AB81F2', 'brand · glow'], ['Lilac', '#BA96F6', 'purple text'], ['Celadon', '#90CEA8', 'status'], ['Óxido', '#DB6D63', 'urgent · failed only']];
+const LT = [['Bone', '#F4ECE0', 'canvas'], ['Bone Light', '#FCF8F1', 'surface'], ['Aubergine Ink', '#1B102C', 'text · logo arch'], ['Dusk Violet', '#5E4D75', 'muted'], ['Lantern Gold', '#F4B64C', 'hand-off · button · door'], ['Deep Amethyst', '#6235AF', 'brand · glow · links'], ['Deep Celadon', '#2E6A4C', 'status'], ['Óxido', '#A6382E', 'urgent · failed only']];
+const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16) / 255).map(x => x <= .03928 ? x / 12.92 : Math.pow((x + .055) / 1.055, 2.4)); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const sw = L => `<div class="sw">${L.map(([n, h, r]) => `<div style="background:${h};color:${lum(h) > .35 ? '#111' : '#fff'}"><small>${r}</small><b>${n}</b><code>${h}</code></div>`).join('')}</div>`;
+document.getElementById('pal').innerHTML = `<div><div class="cap">Dark theme</div>${sw(DK)}</div><div><div class="cap">Light theme</div>${sw(LT)}</div>`;
+
+const hero = c => `<div class="ui ${c}"><div class="nav">${use('P2F', 28)}<span class="wm">mayordommo</span><span class="links">Cómo funciona · Preguntas</span><button class="btn sm" type="button" tabindex="-1">Lista de espera</button></div>
+  <h3>Regálate tiempo.</h3><p class="mut">Muéstrale tu propiedad a Alfred una vez. Él atiende a tus huéspedes y te llama solo cuando importa.</p>
+  <button class="btn" type="button" tabindex="-1">Unirme a la lista de espera</button><div class="chans"><span>WhatsApp</span><span>Telegram</span><span>Chat web</span></div></div>`;
+const props = c => `<div class="ui win ${c}"><div class="top"><h4>Tus propiedades</h4><span class="mut">3 propiedades</span></div>
+  <div class="prop"><b>Casa Mako</b><span class="pill p-ok"><i></i>Piloto automático</span><small>Laura: ¿Hay estacionamiento? · Alfred respondió hace 5 min</small></div>
+  <div class="prop attn"><b>Depto Roma Norte</b><span class="pill p-hand"><i></i>Necesita tu atención</span><small>Marcos: ¿Aceptan perros grandes? · hace 2 min</small></div>
+  <div class="prop"><b>Cabaña Valle</b><span class="pill p-brand"><i></i>Entrenando…</span><small>Leyendo tus documentos · quedan unos 2 min</small></div></div>`;
+const stepin = c => `<div class="ui win ${c}"><div class="top"><h4>Depto Roma Norte</h4><span class="mut">Marcos · WhatsApp</span></div>
+  <div class="chat"><div class="b guest">¿Aceptan perros grandes?</div><div class="b alf">Déjame confirmarlo contigo para darte una respuesta segura.</div></div>
+  <div class="band"><div><b>Alfred necesita tu respuesta</b><p class="mut">No encontré la política de mascotas en tus notas.</p></div><div class="btns"><button class="btn" type="button" tabindex="-1">Tomar el control</button><button class="btn ghost" type="button" tabindex="-1">Dejar a Alfred</button></div></div></div>`;
+const train = c => `<div class="ui ${c}"><div class="scrim"><div class="modal"><h4>Enséñale tu propiedad a Alfred</h4>
+  <div class="field"><label>1. Pega el enlace de tu anuncio</label><div class="input">airbnb.mx/rooms/…</div></div>
+  <div class="field"><label>2. Suma tus notas o documentos</label><div class="drop">Arrastra tus archivos aquí<small>Reglas de la casa, guía de llegada, WiFi…</small></div></div>
+  <button class="btn" type="button" tabindex="-1">Entrenar ahora</button><p class="mut">Tarda unos minutos. Puedes cerrar esta ventana.</p></div></div></div>`;
+document.getElementById('screens').innerHTML = [['Landing hero', hero], ['Your properties', props], ['Step in', stepin], ['Train now (pop-up window)', train]].map(([n, f]) => `<div class="mk"><div class="cap">${n}</div><div class="mkrow"><div>${f('dk')}</div><div>${f('lt')}</div></div></div>`).join('');
+</script>

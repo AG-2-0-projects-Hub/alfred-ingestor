@@ -1,0 +1,15 @@
+The first attached image is the approved contact sheet of nine cinematic night photographs for the brand "mayordommo" (3x3 grid, thin aubergine gutters, no text). The second attached image is the approved look of the brand's hero courtyard (a nested stone arch with a hanging lantern and a corridor of warm light).
+
+Produce a revised version of the same sheet: same 3x3 layout, same gutters, same style, same nine shots in the same positions. Keep panels 4, 5, 6, 7 and 9 essentially unchanged. Make ONLY these changes:
+
+Panel 1 (top-left): make it far more magical, like the second attached image: a deep Mexican colonial courtyard seen straight on at dusk, a grand stone arch framing a second smaller arch and a corridor beyond, a wrought-iron lantern hanging in the entrance, potted plants and flowering vines in the dusk shadows, warm lantern-gold light spilling out across the cobblestones in front, the arch placed in the right third with calm dark empty space across the left two thirds. Rich, inviting, a place that welcomes you home.
+
+Panel 2 (top-middle): replace the casita with a Mediterranean-island-style whitewashed beach house with a clear rounded ARCH entrance (Greek-island / Cycladic feel: smooth white plaster, soft rounded edges, a wooden door inside the arch, one warm lit doorway glowing lantern gold), but keep the Mexican Caribbean beach charm: palm trees, pale sand in front, a glimpse of calm sea and a violet dusk sky. The arch is the hero of the frame.
+
+Panel 3 and panel 8: remove any red or terracotta-red stripe or wainscot from the walls; keep walls in plaster, stone and aubergine-violet shadow only.
+
+All panels: the warm light must be a golden lantern-gold (#F4B64C), slightly less orange and less saturated than the first sheet. No orange or red casts anywhere.
+
+Palette limited to: Aubergine #160C24, Plum Glass #25153C, Pearl #F4EFF8, Lilac Mist #BCA9D5, Amethyst #AB81F2 (only as faint dusk-sky tint), Lantern Gold #F4B64C (the only warm light), Bone #F4ECE0 (linen only).
+
+Exclusions: no readable text, no signs, no logos, no watermarks, no faces, no stock-photo people, no neon, no lens flare, no robots or sparkles, no purple-blue AI glow.
