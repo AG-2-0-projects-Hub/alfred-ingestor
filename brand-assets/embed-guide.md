@@ -1,6 +1,6 @@
 # Mayordommo embed guide
 
-Copy `web/*.webp` and `logo/*.svg` into the landing folder and reference them relatively. Tokens (colours) come from `tokens.json` / `DESIGN.md`; never hardcode a hex that is not in `palette.md`. Text (wordmark, tagline, headlines) is real type: Cormorant Garamond 700 (display) + Manrope (UI), never baked into images.
+Copy `web/*.webp` and `logo/*.svg` into the landing folder and reference them relatively. Tokens (colours) come from `tokens.json` / `DESIGN.md`; never hardcode a hex that is not in `palette.md`. Text (wordmark, tagline, headlines) is real type: Marcellus 400 (display, no bold or italic: set `font-synthesis: none`) + Manrope (UI), never baked into images. Self-host both with `@font-face` and `font-display: swap`; do not link Google Fonts in production.
 
 ## Hero (night section)
 ```html

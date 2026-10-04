@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Fraunces:opsz,wght,SOFT@9..144,300..800,0..100&family=Young+Serif&family=Gloock&family=Instrument+Serif&family=Bodoni+Moda:opsz,wght@6..96,500..800&family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Marcellus&family=Manrope:wght@500;600&display=swap">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d0716;font-family:Manrope,sans-serif;padding:24px;width:1500px;color:#BCA9D5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{border-radius:18px;overflow:hidden;background:#160C24}
+.top{background:#160C24;color:#F4EFF8;padding:22px 26px 18px}
+.bot{background:#F4ECE0;color:#1B102C;padding:18px 26px 22px}
+.lab{font:700 12px Manrope;letter-spacing:.06em;text-transform:uppercase;color:#BCA9D5;margin-bottom:12px;display:flex;justify-content:space-between}
+.lab span:last-child{opacity:.7;text-transform:none;letter-spacing:0;font-weight:500}
+.wm{display:flex;align-items:center;gap:14px;line-height:1}
+.wm svg{width:62px;height:62px;overflow:visible;flex:none}
+.wm b{font-weight:inherit;font-size:60px}
+.tag{margin-top:10px;font-size:34px;line-height:1.1;opacity:.95}
+.h{font-size:28px;line-height:1.12;margin:0 0 8px}
+.p{font:500 14px/1.5 Manrope;margin:0;color:#5E4D75;max-width:520px}
+</style></head><body>
+<div class="grid" id="g"></div>
+<script>
+const mark=`<defs><filter id="m2" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="2"/></filter><filter id="m7" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="7"/></filter></defs><circle cx="32" cy="26" r="21" fill="#F4B64C" opacity=".5" filter="url(#m7)"/><path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="#F4EFF8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" fill="#F4B64C" filter="url(#m2)"/><path d="M24 42V26a8 8 0 0 1 16 0v16z" fill="#F4B64C"/><path d="M10 42h44" fill="none" stroke="#F4EFF8" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>`;
+const F=[
+ {n:'A · Cormorant Garamond 700',note:'current: elegant, but the most common "luxury serif"',css:"font-family:'Cormorant Garamond';font-weight:700"},
+ {n:'B · Fraunces (soft)',note:'warm, rounded terminals that echo the arch',css:"font-family:Fraunces;font-weight:600;font-variation-settings:'SOFT' 100,'opsz' 96"},
+ {n:'C · Young Serif',note:'sturdy, friendly, old-style warmth',css:"font-family:'Young Serif';font-weight:400"},
+ {n:'D · Gloock',note:'high-contrast display with real presence',css:"font-family:Gloock;font-weight:400"},
+ {n:'E · Instrument Serif',note:'slim, modern editorial; 400 only',css:"font-family:'Instrument Serif';font-weight:400"},
+ {n:'F · Bodoni Moda',note:'hotel / fashion didone, formal and sharp',css:"font-family:'Bodoni Moda';font-weight:600"},
+ {n:'G · Bricolage Grotesque',note:'characterful sans, friendly quirks',css:"font-family:'Bricolage Grotesque';font-weight:700;font-variation-settings:'opsz' 48"},
+ {n:'H · Marcellus',note:'Roman inscription feel, hospitality gravitas; 400 only',css:"font-family:Marcellus;font-weight:400"}];
+const g=document.getElementById('g');
+for(const f of F){
+ g.insertAdjacentHTML('beforeend',`<div class="card">
+  <div class="top"><div class="lab"><span>${f.n}</span><span>${f.note}</span></div>
+   <div class="wm" style="${f.css}"><svg viewBox="0 0 64 58">${mark.replace(/id="m(2|7)"/g,(m,a)=>`id="m${a}${f.n[0]}"`).replace(/url\(#m(2|7)\)/g,(m,a)=>`url(#m${a}${f.n[0]})`)}</svg><b>mayordommo</b></div>
+   <div class="tag" style="${f.css}">Regálate tiempo.</div></div>
+  <div class="bot"><div class="h" style="${f.css}">Enséñale tu casa a Alfred una sola vez.</div>
+   <p class="p">Él atiende a tus huéspedes por WhatsApp, Telegram o la web, y te llama solo cuando realmente importa.</p></div></div>`);
+}
+</script></body></html>

@@ -39,8 +39,8 @@ Teal/blue/coral SaaS styling, robot/sparkle/chat-bubble icons, "24/7 instant rep
 ## 10. Hero features (user-facing)
 1. Show Alfred your place (paste the listing link, add notes/documents). 2. **Train now.** 3. Leave it on **autopilot** (WhatsApp, Telegram, web chat). 4. **Step in** only when it matters. Landing goal: **waitlist**. Landing is **Spanish first**, standalone folder inside this project.
 
-## 11. Typography (wordmark/tagline weight LOCKED 2026-10-02)
-Cormorant Garamond **700** for the wordmark and the tagline (founder chose 700 over 600 so the letters don't get lost in the glow; set as real type, never baked into generated images; the logo's reflection fades out above the letters, no overlap). Manrope (UI/body). Pairing confirmed in the Design Token Export step.
+## 11. Typography (LOCKED 2026-10-04, brand amendment)
+**Marcellus** (a single regular weight, 400) for the wordmark, tagline and display headlines; **Manrope** (500-700) for body copy and every UI element (buttons, chips, forms, chat messages, captions). Replaces Cormorant Garamond 700 (locked 2026-10-02; the founder found it too generic: it is the most common "luxury serif", and Fraunces, the runner-up, is a face the taste skill bans as an AI favourite). Marcellus has no bold or italic: never synthesize them (`font-synthesis: none`); hierarchy comes from size, case and spacing, and Manrope carries bold UI text. Set as real type, never baked into generated images; the logo's reflection fades out above the letters, no overlap. Study: `brand-assets/concept/type-study-v2.png`.
 
 ## 12. Open items
 trademark attorney / IMPI (deferred: first mockup only; required before launch, filing or scaled paid assets) · native Spanish copy · formal font pairing · reconcile `ROADMAP.md` §2 naming · concept board (Protocol Step 4), asset pack (Step 5), `brand-assets/DESIGN.md` (Step 6), Claude Design handoff (Step 7).

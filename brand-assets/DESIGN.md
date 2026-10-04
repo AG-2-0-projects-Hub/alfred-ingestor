@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Mayordommo-lit-doorway
-description: "A calm, night-shift hospitality system for an AI guest concierge: deep aubergine canvas (#160C24) lifted by plum glass cards, pearl text, and a single warm light, Lantern Gold (#F4B64C), that only ever means 'a person is needed' or 'someone is home'. Amethyst purple is Alfred's presence (glow, bubbles, focus). Pages open as a dark night hero and hand over to warm bone (#F4ECE0) sections; the light theme keeps the same logic with ink hairlines instead of glow. Display type is Cormorant Garamond Bold (700), UI and body are Manrope. One red, Óxido, is reserved for urgent or failed states. Photography is cinematic Mexican architecture at dusk with one lit doorway."
+description: "A calm, night-shift hospitality system for an AI guest concierge: deep aubergine canvas (#160C24) lifted by plum glass cards, pearl text, and a single warm light, Lantern Gold (#F4B64C), that only ever means 'a person is needed' or 'someone is home'. Amethyst purple is Alfred's presence (glow, bubbles, focus). Pages open as a dark night hero and hand over to warm bone (#F4ECE0) sections; the light theme keeps the same logic with ink hairlines instead of glow. Display type is Marcellus (a single regular weight), UI and body are Manrope. One red, Óxido, is reserved for urgent or failed states. Photography is cinematic Mexican architecture at dusk with one lit doorway."
 
 colors:
   # Dark theme (default, night hero)
@@ -30,37 +30,37 @@ colors:
   light-on-danger: "#FCF8F1"
   light-hand-text: "#87570A"
 
-# Typography: the pairing (Cormorant Garamond 700 + Manrope) is a locked decision.
+# Typography: the pairing (Marcellus 400 + Manrope) is a locked decision (2026-10-04).
 # The size scale below is a working default, not a brand decision; tune it in the landing build.
 typography:
   display-xl:
-    fontFamily: Cormorant Garamond
+    fontFamily: Marcellus
     fontSize: 88px
-    fontWeight: 700
+    fontWeight: 400
     lineHeight: 1.02
-    letterSpacing: -1.5px
-  display-lg:
-    fontFamily: Cormorant Garamond
-    fontSize: 60px
-    fontWeight: 700
-    lineHeight: 1.06
-    letterSpacing: -1.0px
-  display-md:
-    fontFamily: Cormorant Garamond
-    fontSize: 42px
-    fontWeight: 700
-    lineHeight: 1.10
     letterSpacing: -0.5px
+  display-lg:
+    fontFamily: Marcellus
+    fontSize: 60px
+    fontWeight: 400
+    lineHeight: 1.06
+    letterSpacing: -0.3px
+  display-md:
+    fontFamily: Marcellus
+    fontSize: 42px
+    fontWeight: 400
+    lineHeight: 1.10
+    letterSpacing: 0
   headline:
-    fontFamily: Cormorant Garamond
+    fontFamily: Marcellus
     fontSize: 30px
-    fontWeight: 700
+    fontWeight: 400
     lineHeight: 1.15
     letterSpacing: 0
   wordmark:
-    fontFamily: Cormorant Garamond
+    fontFamily: Marcellus
     fontSize: 56px
-    fontWeight: 700
+    fontWeight: 400
     lineHeight: 1.0
     letterSpacing: 0.01em
   card-title:
@@ -227,7 +227,7 @@ Pages follow one structure: a **night hero** (`{colors.canvas}`) with the lit-do
 - One warm light only: Lantern Gold `{colors.hand}`. It means "a person is needed", the primary action, and the doorway light. Never decoration.
 - Purple is Alfred's presence: glow around cards and pop-ups (dark only), his chat bubbles, status dots, focus, and purple links.
 - One red, Óxido (`{colors.danger}` / `{colors.light-danger}`), only for urgent or failed states, always with an icon and a label.
-- Display type is Cormorant Garamond Bold (700); UI and body type is Manrope. The wordmark is lowercase `mayordommo` in Cormorant Garamond 700.
+- Display type is Marcellus (400 only, no bold or italic); UI and body type is Manrope. The wordmark is lowercase `mayordommo` in Marcellus.
 - Spanish first (Mexico), written natively in tú; the product words are plain ("Train now", "autopilot", "step in"), never ingest, scrape or merge.
 
 ## Colors
@@ -251,15 +251,15 @@ All text pairs meet WCAG AA (lowest 5.1:1, see `palette.md`).
 
 ## Typography
 
-Cormorant Garamond 700 for the wordmark, tagline and display headlines; Manrope for everything the user reads or taps. Text is real type in the design layer, never baked into images (so it can be edited, translated and made accessible). The sizes in the front matter are working defaults to tune in the landing build; the pairing and weights are decisions.
+Marcellus (one weight, 400) for the wordmark, tagline and display headlines; Manrope for everything the user reads or taps. Marcellus has no bold or italic: never synthesize them (`font-synthesis: none`); hierarchy comes from size, case and spacing, and Manrope carries bold UI text. Text is real type in the design layer, never baked into images (so it can be edited, translated and made accessible). The sizes in the front matter are working defaults to tune in the landing build; the pairing and weights are decisions.
 
 | Token | Size | Weight | Use |
 |---|---|---|---|
-| `{typography.display-xl}` | 88px | 700 | Hero headline ("Regálate tiempo." is the working line) |
-| `{typography.display-lg}` | 60px | 700 | Section openers |
-| `{typography.display-md}` | 42px | 700 | Sub-sections |
-| `{typography.headline}` | 30px | 700 | Card and banner headings |
-| `{typography.wordmark}` | 56px | 700 | The wordmark lockup |
+| `{typography.display-xl}` | 88px | 400 | Hero headline ("Regálate tiempo." is the working line) |
+| `{typography.display-lg}` | 60px | 400 | Section openers |
+| `{typography.display-md}` | 42px | 400 | Sub-sections |
+| `{typography.headline}` | 30px | 400 | Card and banner headings |
+| `{typography.wordmark}` | 56px | 400 | The wordmark lockup |
 | `{typography.body-lg}` / `{typography.body}` | 18 / 16px | 500 | Body copy |
 | `{typography.button}` / `{typography.caption}` / `{typography.eyebrow}` | 14 / 12 / 12px | 700 / 600 / 600 | Buttons, chips, eyebrows |
 

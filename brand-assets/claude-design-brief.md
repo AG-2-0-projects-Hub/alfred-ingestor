@@ -10,7 +10,7 @@
 - Dark (default): Aubergine `#160C24` canvas · Plum Glass `#25153C` surface · Pearl `#F4EFF8` text and logo arch · Lilac Mist `#BCA9D5` muted · Lantern Gold `#F4B64C` hand-off, primary button, door light · Amethyst `#AB81F2` brand, glow · Lilac `#BA96F6` purple text · Celadon `#90CEA8` status · Óxido `#DB6D63` urgent or failed only.
 - Light (bone sections): Bone `#F4ECE0` canvas · Bone Light `#FCF8F1` surface · Aubergine Ink `#1B102C` text and logo arch · Dusk Violet `#5E4D75` muted · Deep Amethyst `#6235AF` brand and links · Deep Celadon `#2E6A4C` status · Óxido `#A6382E` urgent or failed only · Lantern Gold `#F4B64C` as a chip or button fill only.
 
-**Fonts:** Cormorant Garamond Bold (700) for the wordmark and display headlines · Manrope for UI and body.
+**Fonts:** Marcellus (single weight, 400, no bold or italic) for the wordmark and display headlines · Manrope for UI and body.
 
 **Tone:** calm, quiet, warm, plain-spoken, discreet. Natural Mexican Spanish (tú). Plain words ("Train now", "autopilot", "step in"); never ingest, scrape, merge, "24/7" or "AI-powered".
 

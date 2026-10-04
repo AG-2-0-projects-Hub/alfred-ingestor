@@ -10,7 +10,7 @@ the refresh rule that keeps `## Pending` from re-bloating.*
 
 ## Pending
 **Feature/bug backlog lives in `QUEUE.md`** — not duplicated here. Session-continuity state only.
-- 🟣 **Mayordommo brand protocol CLOSED 2026-10-04** (name, logo P2, palette incl. Óxido red, 10-photo pack, `DESIGN.md`; `IDENTITY.md` + `brand-assets/`). NEXT: founder wants to reconsider the typeface (not keen on Cormorant Garamond), then `PREMIUM_LANDING_PAGE.md` (style interview, ONE taste skill, hero preview + scroll video, waitlist via Plan Mode + FIX_VERIFY); resume `_Context/CONTINUATION_PROMPT_landing_2026-10-04.md`; trademark attorney check still owed before launch.
+- 🟣 **Mayordommo brand protocol CLOSED 2026-10-04** (name, logo P2, palette incl. Óxido red, 10-photo pack, `DESIGN.md`; `IDENTITY.md` + `brand-assets/`). Typeface amended 2026-10-04 to Marcellus (display, 400 only) + Manrope (body/UI), replacing Cormorant Garamond ("too generic"). NEXT: `PREMIUM_LANDING_PAGE.md` (style interview, ONE taste skill, hero preview + scroll video, waitlist via Plan Mode + FIX_VERIFY); resume `_Context/CONTINUATION_PROMPT_landing_2026-10-04.md`; trademark attorney check still owed before launch.
 - 🟢 Email-alert confirmation gate SHIPPED to prod 2026-10-02 (PR #11 `203fba6`, founder-verified); not yet watched live: the hero-image *fallback* branch; email domain auth = `ROADMAP.md` M2 (mails may land in spam until then).
 - 🔴 **NEXT: the two items left from `_Context/CONTINUATION_PROMPT_2026-10-02.md`** — (B) auth gaps on
   merge/resolve/add-knowledge/query-knowledge/ingest + resume/retry-scrape ownership (reproduced 2026-10-02:

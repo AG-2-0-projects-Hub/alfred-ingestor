@@ -2,7 +2,7 @@
 
 Engine: Vertex ADC, `gemini-3-pro-image`, location `global`, project `alfred-prod-502215` (script `brand-assets/tools/vertex_image.py`). Price source: Google Cloud Agent Platform pricing page, checked 2026-10-02: **$0.134 per 1K/2K output image** ($0.24 at 4K, not used), ~$0.001 per input reference image. Everything is generated at 2K 16:9 (2752x1536, the same price as 1K), exported to WebP for the web.
 
-Not generated, on purpose (saves money, rule 7 "no text baked in"): the logo (locked SVGs already exist), wordmark and tagline (real Cormorant Garamond 700 type), textures/glow overlays (CSS/SVG noise in code), swatch/typography boards (live in `DESIGN.md`/brand-preview).
+Not generated, on purpose (saves money, rule 7 "no text baked in"): the logo (locked SVGs already exist), wordmark and tagline (real Marcellus type), textures/glow overlays (CSS/SVG noise in code), swatch/typography boards (live in `DESIGN.md`/brand-preview).
 
 ## Style DNA (fixed for the whole run, appended verbatim to every prompt)
 Cinematic night photography lit by one warm lantern-gold practical light (#F4B64C) visible in or near the frame, spilling softly onto plaster, stone and aged wood; all other areas fall into deep aubergine-violet dusk shadow (#160C24, #25153C), no fill, no rim light. Matte materials with visible grain: stucco, terracotta, linen, brass. 35mm lens, shallow depth of field, eye level, subject off-centre on a third. Warm gold highlights, violet shadows, low saturation outside the light, slightly lifted blacks, fine film grain. Real Mexican architecture; people only as hands or from behind.
