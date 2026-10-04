@@ -1186,3 +1186,11 @@ WSL-only tool, since that overstates the restriction and undersells why push spe
 **Global Candidate:** Yes — belongs in `PREMIUM_LANDING_PAGE.md` Step 3.5.
 
 ---
+
+## 2026-10-04 — Screen typeface candidates against the intended taste skill's banned and overused fonts before the type study
+**Context:** Brand amendment after the brand protocol closed; the founder found the locked serif (Cormorant Garamond) too generic, so a type study of eight faces was built.
+**Discovery:** `taste-skill` (the planned primary skill for the landing build) bans Fraunces and Instrument Serif by name as AI-favourite display serifs, lists Cormorant Garamond in its "rotate" pool, and discourages serifs by default unless the brand is genuinely luxury/heritage and the choice can be justified. Two of my eight candidates were already ruled out, and the founder's favourite (Fraunces) had to be argued against after the fact. Marcellus (single weight, no bold or italic) won; it needs `font-synthesis: none` and hierarchy from size, case and spacing.
+**Impact:** Build the candidate list after reading the taste skill's typography rules, and note single-weight faces in the study. The brand protocol's typography step could say this explicitly (suggested, not applied).
+**Global Candidate:** Yes — suggested one-line addition to `BRAND_IDENTITY_PROTOCOL.md` Step 3.4.
+
+---
