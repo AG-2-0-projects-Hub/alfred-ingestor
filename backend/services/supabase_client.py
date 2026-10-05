@@ -1700,3 +1700,94 @@ def upload_hero_image(property_id: str, image_url: str) -> None:
         resp.content,
         file_options={"content-type": content_type, "upsert": "true"},
     )
+
+
+# ── Waitlist (Mayordommo landing; routers/waitlist.py) ────────────────────────
+# Table waitlist_signups has RLS on and no policy for the public key: this
+# service-role path is the only way in (migrations/2026-10-05_waitlist_*.sql).
+
+def waitlist_get(email: str) -> dict | None:
+    """The signup row for this (already lower-cased) address, or None."""
+    result = (
+        get_client().table("waitlist_signups")
+        .select("*")
+        .eq("email", email)
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or None) if result else None
+
+
+def waitlist_insert(row: dict) -> None:
+    get_client().table("waitlist_signups").insert(row).execute()
+
+
+def waitlist_update(email: str, fields: dict) -> None:
+    get_client().table("waitlist_signups").update(fields).eq("email", email).execute()
+
+
+def waitlist_count_since(column: str, since_iso: str) -> int:
+    """How many signups have `column` (created_at / confirm_sent_at) after
+    `since_iso`: the minute cap on new signups and the daily cap on emails."""
+    result = (
+        get_client().table("waitlist_signups")
+        .select("id", count="exact")
+        .gt(column, since_iso)
+        .limit(1)
+        .execute()
+    )
+    return int(result.count or 0)
+
+
+def waitlist_pending_email(token_hash: str) -> str | None:
+    """Address awaiting confirmation for this token hash, or None if the link
+    is unknown, already used, or past its expiry. Read-only."""
+    result = (
+        get_client().table("waitlist_signups")
+        .select("email")
+        .eq("confirm_hash", token_hash)
+        .gt("confirm_expires_at", _now())
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("email") if result else None
+
+
+def waitlist_confirm(token_hash: str) -> str | None:
+    """Atomically turn a still-valid pending confirmation into a confirmed
+    signup (one UPDATE, so a double click or a race cannot confirm twice).
+    Returns the confirmed address, or None if the link is unknown/used/expired."""
+    result = (
+        get_client().table("waitlist_signups")
+        .update({"confirmed_at": _now(), "confirm_hash": None, "confirm_expires_at": None})
+        .eq("confirm_hash", token_hash)
+        .gt("confirm_expires_at", _now())
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0].get("email") if rows else None
+
+
+def waitlist_email_by_unsub_token(token: str) -> str | None:
+    result = (
+        get_client().table("waitlist_signups")
+        .select("email")
+        .eq("unsub_token", token)
+        .maybe_single()
+        .execute()
+    )
+    return (result.data or {}).get("email") if result else None
+
+
+def waitlist_unsubscribe(token: str) -> str | None:
+    """Mark the signup unsubscribed (the row stays so we never e-mail them
+    again) and cancel any pending confirmation. Returns the address, or None
+    if the token matches nothing. Idempotent."""
+    result = (
+        get_client().table("waitlist_signups")
+        .update({"unsubscribed_at": _now(), "confirm_hash": None, "confirm_expires_at": None})
+        .eq("unsub_token", token)
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0].get("email") if rows else None

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512">
+  <defs>
+    <filter id="b1" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation=".8"/></filter>
+    <filter id="b2" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b7" filterUnits="userSpaceOnUse" x="-14" y="-14" width="92" height="92"><feGaussianBlur stdDeviation="7"/></filter>
+    <linearGradient id="rfg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#000"/></linearGradient>
+    <mask id="rf" maskUnits="userSpaceOnUse" x="0" y="42" width="64" height="22"><rect x="0" y="42" width="64" height="22" fill="url(#rfg)"/></mask>
+  </defs>
+  <circle cx="32" cy="26" r="21" fill="#F4B64C" opacity=".5" filter="url(#b7)"/>
+  <path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="#F4EFF8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 42V26a8 8 0 0 1 16 0v16z" fill="#F4B64C" filter="url(#b2)"/>
+  <path d="M24 42V26a8 8 0 0 1 16 0v16z" fill="#F4B64C"/>
+  <path d="M10 42h44" fill="none" stroke="#F4EFF8" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+  <g mask="url(#rf)"><g transform="translate(0 84) scale(1 -1)" filter="url(#b1)">
+    <path d="M16 42V24a16 16 0 0 1 32 0v18" fill="none" stroke="#F4EFF8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M24 42V26a8 8 0 0 1 16 0v16z" fill="#F4B64C"/></g></g>
+</svg>

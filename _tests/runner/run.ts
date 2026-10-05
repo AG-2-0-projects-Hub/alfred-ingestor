@@ -22,6 +22,7 @@ import { runP8 } from './scenarios/p8.ts';
 import { runP9 } from './scenarios/p9.ts';
 import { runP10 } from './scenarios/p10.ts';
 import { runQ1 } from './scenarios/q1.ts';
+import { runL1 } from './scenarios/l1.ts';
 
 export type ScenarioResult = {
   id: string;
@@ -87,6 +88,10 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
   if (mode === 'smoke') {
     return [runC6, runG2, runA2];
   }
+  // landing: just the Mayordommo landing waitlist scenario (`npm run ... landing`)
+  if (mode === 'landing') {
+    return [runL1];
+  }
   // full: all implemented scenarios — Layer 1 first, then Layer 2 auth suite,
   // then Layer 2 ingest error scenarios.
   return [
@@ -117,6 +122,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runP10,
     // Layer 2 — first-login onboarding
     runQ1,
+    // Layer 2 — landing waitlist form (static page + Supabase function, staging)
+    runL1,
   ];
 }
 

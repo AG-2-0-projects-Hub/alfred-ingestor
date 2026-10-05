@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from routers import (
-    ingest, ingest_worker, merge_resolve, messages, guest_auth, properties, telegram, whatsapp,
+    ingest, ingest_worker, merge_resolve, messages, guest_auth, properties, telegram, waitlist, whatsapp,
 )
 
 load_dotenv()
@@ -41,6 +41,7 @@ app.include_router(messages.router, prefix="/api")
 app.include_router(guest_auth.router, prefix="/api")
 app.include_router(properties.router, prefix="/api")
 app.include_router(telegram.router, prefix="/api")
+app.include_router(waitlist.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
 
 

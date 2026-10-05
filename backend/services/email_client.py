@@ -38,17 +38,22 @@ def _from_address() -> str:
     return sender
 
 
-async def send_email(to: str, subject: str, html: str) -> bool:
+async def send_email(to: str, subject: str, html: str, from_name: str | None = None) -> bool:
     """Send one HTML email. Returns True on success, False on any failure
-    (missing config, network error, non-2xx) — never raises."""
+    (missing config, network error, non-2xx) — never raises. from_name is an
+    optional display name next to the verified sender address (e.g. the
+    waitlist mail shows "Mayordommo")."""
     try:
+        sender = {"email": _from_address()}
+        if from_name:
+            sender["name"] = from_name
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 _API,
                 headers={"Authorization": f"Bearer {_token()}"},
                 json={
                     "personalizations": [{"to": [{"email": to}]}],
-                    "from": {"email": _from_address()},
+                    "from": sender,
                     "subject": subject,
                     "content": [{"type": "text/html", "value": html}],
                 },

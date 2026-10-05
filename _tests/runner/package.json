@@ -7,6 +7,7 @@
   "scripts": {
     "smoke": "tsx run.ts smoke",
     "full": "tsx run.ts full",
+    "landing": "tsx run.ts landing",
     "install-browsers": "playwright install chromium"
   },
   "engines": {
