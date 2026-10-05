@@ -3,6 +3,34 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-05 — A Cloud Run service template can still carry a deliberately broken test env var from an earlier zero-traffic revision; a plain `gcloud run deploy` would have shipped it
+
+**Context:** Deploying the waitlist backend to staging (`alfred-backend-staging`).
+**Discovery:** The 2026-10-02 failure test (broken `SENDGRID_API_KEY` on tagged revision `00048-yis`, traffic left pinned to `00047-7rc`) left the SERVICE TEMPLATE with a 20-char key that does not start with `SG.`. `gcloud run deploy --source` copies the template, so the new revision would have inherited the broken key and every email (host alerts and the new confirmation) would have failed with 502. Also: with traffic pinned to a named revision the new revision serves 0% until moved by hand, and `status.latestReadyRevisionName` still named the broken `00048` revision, so `--to-latest` would have been wrong.
+**Impact:** Before a staging deploy: diff the live revision's env against the service template (names, and shape checks like length/prefix, never print values); pass the real value from the live revision in-process via `--update-env-vars` (script file, not nested quotes); tag the new revision and test it on its own URL; move traffic with `--to-revisions=<new>=100`; remove the tag; re-check key shape on the new revision. Scripts: `gc_deploy.sh`, `gc_traffic.sh`, `gc_shift.sh` in that session's scratchpad (recipe is in the continuation file).
+**Global Candidate:** Yes — any Cloud Run project that tests failure paths with tagged zero-traffic revisions.
+
+## 2026-10-05 — The scroll "glitches" (arch still, key-door still flashing, pixel/sharp pumping) were deterministic layering bugs, not video-seek blanks; the answer came from stepping the pinned timeline, not from theorising about the browser
+
+**Context:** Landing v4.1/v4.2 (pacing retime); three rounds of "fixes" (canvas frame buffer, 1080p re-encode) did nothing and I twice claimed a fix without measuring.
+**Discovery:** Setting the pinned GSAP timeline directly in small steps (`ScrollTrigger.getAll().find(s=>s.pin).animation.time(u,false)`), grabbing small screenshots and flagging A-B-A excursions (cream flare/flood excluded) reproduced exactly the founder's two flashes on v4.2 (u 2.48-2.54 and 16.60-16.64) and 0 on v4. Causes: `.story.is-scrub .shot{isolation:auto}` (to put cards above the clip) made shots stop being stacking contexts while two shots were visible for 0.25 screens, and a 0.2-screen gap showed the sharp still between two soft clips. Fix: no gap, the next clip fades in OVER the previous (which stays opaque), exactly one shot visible at a time: 0 real events at 1280x720, 1440x900, 1920x1080.
+**Impact:** For scroll-scrubbed pages build a deterministic detector first and claim a fix only at measured zero; reproduce with the page's own state before blaming browser behaviour. Detector recipe is in the continuation file (`exc.js`, `audit.js`, `at.js` in the scratchpad).
+**Global Candidate:** Yes — GSAP/ScrollTrigger pinned timelines with layered media.
+
+## 2026-10-05 — A 12 fps AVIF frame sequence passed every headless metric (3.6 MB, zero blank frames, identical seams, 99% exact frames under CPU throttle) and the founder still rejected it by eye as stop-motion and blurry
+
+**Context:** Exploring "video to stills on a canvas" as the fix for the scrub glitches and the 18 MB weight.
+**Discovery:** AVIF 1280x720 crf38-40 at 12 fps with blended frames measured great (total 3.2-3.6 MB, decode 4-6 ms, SSIM about 0.95-0.97), yet in the founder's browser it looked low-res and like stop motion. The committed 720p `-g 8` mp4 set (about 5 MB) looked better and stays.
+**Impact:** For media-quality decisions put the real thing in the founder's hands early (an artifact link) before building the integration; metrics do not predict taste. Do not propose frame sequences again unless at higher fps/resolution inside a weight budget he accepts.
+**Global Candidate:** No — a taste decision for this brand (the process point is generic but already in memory).
+
+## 2026-10-05 — A standalone page needs its own doctype, charset and viewport (artifact previews got them from the publisher), and a naive local server hides or creates bugs (no charset header, no HTTP Range for video)
+
+**Context:** First real-browser test of `landing/site` by the founder served by `python3 -m http.server`.
+**Discovery:** Accents rendered as "sesiÃ³n"/"Â¿CuÃ¡ntas": the page has no `<!doctype html>`, no `<meta charset>`, no viewport meta; my Playwright scenario's own server sent `charset=utf-8`, so every headless check passed. The scroll video also did not play there, likely because that server does not support HTTP Range (`<video>` cannot seek). The success card also left the "Pide tu lugar / Déjanos tu correo" intro above it.
+**Impact:** Assert document basics (doctype, charset, viewport) in the scenario; test through the host a visitor gets (Vercel or a Range-capable server); do a real-browser look before calling a page done. Logged as one red item in `QUEUE.md`.
+**Global Candidate:** Yes — any static page developed first as an artifact preview.
+
 ## 2026-10-02 — RLS is row-level only: a consent/gate column enforced just in the backend is bypassable with a free account
 
 **Context:** Adding a confirmation step (double opt-in) before host escalation alerts go to an e-mail address. The obvious design was "backend endpoint stores the address as pending; the confirm link flips the flag".

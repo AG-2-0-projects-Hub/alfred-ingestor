@@ -36,6 +36,50 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       The 2026-09-14 attempt that added `ClipPath`+`BackdropFilter`+`CustomPaint` re-triggered the
       yellow-underline text bug — screenshot-check against it before shipping anything here.
       touches: `frontend/lib/widgets/glass_panel.dart`, `frontend/lib/widgets/walkthrough_tip_panel.dart`
+- [ ] 🔴 **Landing `site/` is NOT shippable yet: defects found in the founder's first real test (2026-10-05)**
+      The waitlist itself works end to end (real mailbox: signup -> email delivered -> confirm; row confirmed).
+      Everything else on the page was only checked by headless tests and a visual pass at the wrong layer.
+      To fix, one by one, each with a before/after screenshot in a REAL browser (not only headless):
+      (1) **Garbled accents** ("sesiÃ³n", "Â¿CuÃ¡ntas", "DÃ©janos"): the standalone page has no `<!doctype html>`,
+      no `<meta charset="utf-8">`, no viewport meta (the artifact previews got these from the publisher), and a
+      naive server sends no charset; add the proper document head, check it renders in standards mode, and make
+      scenario L1 assert the markup declares charset/doctype/viewport (its own server sent utf-8, which hid this).
+      (2) **After submitting, the page still shows "Pide tu lugar. / Déjanos tu correo..." above "Revisa tu correo."**
+      so it looks like it asks again; only the form swaps to the success card. Hide or replace the heading and lead
+      on success.
+      (3) **Scroll-through video not playing, only the stills**: likely (UNCONFIRMED) because my local test server
+      (`python3 -m http.server`) has no HTTP Range support, so the `<video>` cannot seek; verify on the Vercel
+      deployment or a Range-capable server, and also check the missing-doctype quirks mode as a cause.
+      (4) **Copy reads as translated, not native Mexican Spanish** (page, success and error lines, confirmation email,
+      confirm/unsubscribe pages): the planned native copy pass (draft with a second model, Claude judges), then
+      the founder reads it aloud.
+      (5) Don't push the `staging` branch or link Vercel for contacts until 1-4 are fixed.
+      touches: `landing/site/index.html`, `backend/routers/waitlist.py`, `_tests/runner/scenarios/l1.ts`
+- [ ] 🔴 **Aviso de privacidad page for Mayordommo** (queued 2026-10-05, founder) — a BLOCKER for the live
+      waitlist: the form must not collect real e-mails from the public until the notice exists and is linked
+      (the 2025 LFPDPPP builds consent on the notice being available at collection; the confirmation e-mail
+      proves the mailbox owner agreed, the notice proves what they agreed to). Close contacts only until then.
+      What it must say, in Spanish (Mexico, tú): who is responsible (name/address/contact once the entity and
+      domain exist), what we collect (e-mail, optional number of homes, date/time, the text shown, source page),
+      the purpose (only "avisarte de tu lugar"; marketing needs separate explicit consent), who processes it
+      (SendGrid for email, Supabase for storage), how long we keep it, how to exercise ARCO rights and how to
+      unsubscribe (link in every email), and cookies/analytics (none yet). Then: link it from the form's fine print
+      and the footer, add the version tag to `waitlist_signups.notice_version` on every new signup (backend sets it
+      from one constant), have the attorney review it together with the trademark check, and reuse for the app's
+      own privacy page (`tos-draft.md` exists; ROADMAP M1 needs ToS + Privacy).
+      touches: `landing/site/index.html`, `backend/routers/waitlist.py`, `tos-draft.md`, `ROADMAP.md`
+- [ ] 🟡 **Webapp: Mayordommo brand restyle + full UX/UI audit** — one mini-project, starts after the landing
+      ships (queued 2026-10-05, founder). Apply the brand ID (Marcellus + Manrope, Aubergine/Plum/Pearl/
+      Amethyst/Celadon, Lit-room light, Alfred pixel states; `brand-assets/DESIGN.md`, `IDENTITY.md`) to the
+      Flutter app and audit UX/UI, which is "still not perfect". Suggested order: (1) Playwright baseline
+      screenshots of every screen and state at desktop + mobile (the before-image and the regression guard);
+      (2) audit FIRST (`impeccable` audit + a founder click-through) -> findings ranked P0-P3, so the restyle
+      does not polish flows that are known to be broken; (3) token layer: brand tokens into one Flutter theme
+      (`app_theme.dart`) and fix `GlassPanel`'s tint at the root before touching screens, since it is used in 13
+      places (see the walkthrough-bubble item above); (4) restyle screen by screen, each its own small commit
+      with before/after screenshots, founder checks on staging; (5) re-audit, then refresh guide.html
+      screenshots. Plan Mode + FMEA per slice; known traps: GlassPanel gradient-over-color, the yellow-underline
+      text bug. touches: `frontend/lib/theme/app_theme.dart`, `frontend/lib/widgets/glass_panel.dart`, `frontend/lib/screens/dashboard_screen.dart`, `brand-assets/DESIGN.md`
 - [ ] 🟡 guide.html screenshot rework (carried over from the 2026-09-21 handoff, parked 2026-10-01
       as not merge-connected): highlight boxes off-target/cutting into fields, no glow, one
       lightbox opens the wrong image, Step 2 shot inside the wrong callout, Knowledge tab should be
