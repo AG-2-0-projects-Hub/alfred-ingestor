@@ -42,6 +42,10 @@ _MAX_EMAILS_PER_DAY = 40
 # the response instead (lets QA play the mailbox owner). Harmless anywhere.
 _TEST_ONLY_ADDRESS_SUFFIX = "@example.invalid"
 _CORS = {"Access-Control-Allow-Origin": "*"}
+# Version of landing/site/aviso-de-privacidad.html that was linked at the form when the
+# signup (or re-signup) happened; stored in waitlist_signups.notice_version as consent
+# evidence. Bump it in the same change that edits the notice text.
+NOTICE_VERSION = "2026-10-12-draft"
 
 
 def _hash_token(token: str) -> str:
@@ -171,7 +175,7 @@ async def join_waitlist(request: Request):
         unsub_token = secrets.token_urlsafe(24)
         await asyncio.to_thread(supabase_client.waitlist_insert, {
             "email": email, "homes": homes, "source": source, "consent_text": consent_text,
-            "unsub_token": unsub_token, **pending,
+            "notice_version": NOTICE_VERSION, "unsub_token": unsub_token, **pending,
         })
     else:
         unsub_token = existing.get("unsub_token") or secrets.token_urlsafe(24)
@@ -181,7 +185,8 @@ async def join_waitlist(request: Request):
         if unsubscribed:
             # they left and now ask again: that is a new consent, to be confirmed again
             fields.update({"unsubscribed_at": None, "confirmed_at": None,
-                           "source": source, "consent_text": consent_text})
+                           "source": source, "consent_text": consent_text,
+                           "notice_version": NOTICE_VERSION})
         await asyncio.to_thread(supabase_client.waitlist_update, email, fields)
 
     backend_url = os.environ.get("BACKEND_URL", "").strip().rstrip("/")

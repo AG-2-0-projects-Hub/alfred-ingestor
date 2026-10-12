@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mayordommo</title>
 <meta name="robots" content="noindex,nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -258,6 +263,8 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
 .foot .brand img{width:28px;height:28px}
 .foot .wm{font-size:22px}
 .foot small{font:500 13px/1.4 var(--font-ui);color:var(--muted-l)}
+.foot-link,.fine a{font-weight:600;color:var(--muted-l);text-underline-offset:3px}
+.foot-link{font-size:13px;line-height:1.4}
 
 /* short desktop windows (laptops, 720p): tighter type and spacing so the copy and card clear the nav and the rail */
 @media (min-width:768px) and (max-height:800px){
@@ -299,6 +306,8 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
 @media (max-width:420px){.wm{font-size:19px}.nav-r{gap:6px}.nav .btn-sm{padding:9px 10px}}
 @media (prefers-reduced-motion:reduce){.btn,.nav{transition:none}.caret,.alfred-big .b1{animation:none}}
 </style>
+</head>
+<body>
 
 <header class="nav glass" id="nav">
   <a class="brand" href="#top" aria-label="Mayordommo, inicio">
@@ -330,7 +339,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
       </div>
       <div class="h-copy">
         <h1 class="display-xl">Regálate tiempo.</h1>
-        <p class="lead"><strong>Mayordommo pone un mayordomo en tu casa de renta vacacional: Alfred.</strong> Le enseñas tu casa una vez y él contesta a tus huéspedes por WhatsApp, Telegram o chat web. Si hace falta una persona, te avisa.</p>
+        <p class="lead"><strong>Mayordommo pone a Alfred, un mayordomo, al pendiente de tu renta vacacional.</strong> Le enseñas tu casa una vez y él contesta a tus huéspedes por WhatsApp, Telegram o chat web. Si hace falta una persona, te avisa.</p>
         <a class="btn btn-hand" href="#lista">Unirme a la lista</a>
       </div>
     </section>
@@ -386,7 +395,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
     </section>
 
     <!-- Shot 3: autopilot -->
-    <section class="shot sh" id="s3" aria-label="Autopiloto">
+    <section class="shot sh" id="s3" aria-label="Piloto automático">
       <div class="bg"><div class="zoom"><picture><source media="(max-width:700px)" srcset="web/huesped-llega-1280.webp"><img src="web/huesped-llega.webp" alt="Un huésped visto de espaldas llega con su maleta a un arco iluminado por un farol" loading="lazy"></picture></div></div>
       <div class="veil"></div>
       <div class="inner">
@@ -399,12 +408,12 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
             <div class="chat-head">
               <div class="avt"><canvas id="av-chat" aria-hidden="true"></canvas></div>
               <div class="chat-id"><span class="c-title">Alfred</span><span class="cap">Casa Jacaranda · WhatsApp</span></div>
-              <span class="chip chip-status">Autopiloto</span>
+              <span class="chip chip-status">En automático</span>
             </div>
             <div class="msg guest m3">Hola, ¿a qué hora podemos llegar? Nuestro vuelo aterriza a la 1.</div>
             <div class="msg alfred m3">¡Hola, Marina! 😊 El check-in es a partir de las 3 de la tarde. Si llegan antes, platícame y le pregunto a Santiago si la casa ya está lista.</div>
             <div class="msg guest m3">¿Podemos usar la alberca después de las 10 de la noche?</div>
-            <div class="msg alfred m3">Déjame confirmarlo con Santiago. Me pongo en contacto con él de inmediato y te aviso en cuanto me responda.</div>
+            <div class="msg alfred m3">Déjame confirmarlo con Santiago. Le pregunto ahora y te aviso en cuanto me responda.</div>
           </div>
         </div>
       </div>
@@ -417,14 +426,14 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
       <div class="inner">
         <div class="copy">
           <h2 class="display-lg sh-h">Entra cuando importe.</h2>
-          <p class="lead sh-p">Si hace falta una persona, Alfred te avisa. Tú ves toda la conversación y puedes tomarla en cualquier momento. Lo que le contestas, Alfred lo aprende para la próxima vez.</p>
+          <p class="lead sh-p">Si hace falta una persona, Alfred te avisa. Tú ves toda la conversación y puedes tomarla en cualquier momento. Si tu respuesta puede servir otra vez, Alfred te propone guardarla. Tú decides.</p>
         </div>
         <div class="panel">
           <div class="card glass hand alert" id="c4" aria-label="Ejemplo: aviso de Alfred">
             <span class="chip chip-hand">Te necesitan</span>
             <span class="place">Casa Jacaranda</span>
             <p>Marina pregunta si pueden usar la alberca después de las 10 de la noche.</p>
-            <div class="row"><button class="btn btn-hand btn-sm" type="button">Responder tú</button><span class="fine">Alfred aprende de lo que respondes.</span></div>
+            <div class="row"><button class="btn btn-hand btn-sm" type="button">Responder tú</button><span class="fine">Alfred puede proponerte guardar tu respuesta.</span></div>
           </div>
           <div class="alfred-big" aria-hidden="true"><div class="bloom b2"></div><div class="bloom b1"></div><canvas id="av-step"></canvas></div>
         </div>
@@ -443,7 +452,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
           <ol class="steps ov-i" aria-label="Cómo funciona">
             <li><span class="mi" aria-hidden="true">upload_file</span><div><b>Enseña</b><small>Tu anuncio y tus notas</small></div></li>
             <li><span class="mi" aria-hidden="true">model_training</span><div><b>Entrena</b><small>Alfred aprende tu casa</small></div></li>
-            <li><span class="mi" aria-hidden="true">chat</span><div><b>Autopiloto</b><small>Contesta a tus huéspedes</small></div></li>
+            <li><span class="mi" aria-hidden="true">chat</span><div><b>Piloto automático</b><small>Contesta a tus huéspedes</small></div></li>
             <li class="gold"><span class="mi" aria-hidden="true">notifications_active</span><div><b>Entra</b><small>Cuando hace falta una persona</small></div></li>
           </ol>
           <div class="dash glass ov-i" aria-label="Ejemplo: tus casas">
@@ -451,12 +460,12 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
             <div class="d-stats">
               <div class="d-stat"><b>47</b><span>Respuestas de Alfred</span></div>
               <div class="d-stat"><b>6.2 h</b><span>Horas ahorradas</span></div>
-              <div class="d-stat"><b>81%</b><span>En autopiloto</span></div>
+              <div class="d-stat"><b>81%</b><span>En automático</span></div>
             </div>
             <div class="d-cards">
               <article class="pc hand"><div class="ph" style="background-image:url(web/hero-courtyard-dusk-1280.webp);background-position:75% 50%"><span class="chip chip-hand">Te necesitan</span></div><div class="pb"><h3>Casa Jacaranda</h3><p>Marina pregunta por la alberca de noche.</p></div></article>
-              <article class="pc"><div class="ph" style="background-image:url(web/casita-costa-noche-1280.webp)"><span class="chip chip-status">Autopiloto</span></div><div class="pb"><h3>Casita Costa</h3><p>Todo en orden.</p></div></article>
-              <article class="pc"><div class="ph" style="background-image:url(web/loft-cdmx-noche-1280.webp)"><span class="chip chip-status">Autopiloto</span></div><div class="pb"><h3>Loft Roma Norte</h3><p>Todo en orden.</p></div></article>
+              <article class="pc"><div class="ph" style="background-image:url(web/casita-costa-noche-1280.webp)"><span class="chip chip-status">En automático</span></div><div class="pb"><h3>Casita Costa</h3><p>Todo en orden.</p></div></article>
+              <article class="pc"><div class="ph" style="background-image:url(web/loft-cdmx-noche-1280.webp)"><span class="chip chip-status">En automático</span></div><div class="pb"><h3>Loft Roma Norte</h3><p>Todo en orden.</p></div></article>
             </div>
           </div>
         </div>
@@ -476,7 +485,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
       <span class="lb" data-i="0" style="top:0%">Inicio</span>
       <span class="lb" data-i="1" style="top:20%">Enseña</span>
       <span class="lb" data-i="2" style="top:40%">Entrena</span>
-      <span class="lb" data-i="3" style="top:60%">Autopiloto</span>
+      <span class="lb" data-i="3" style="top:60%">Piloto automático</span>
       <span class="lb gold" data-i="4" style="top:80%">Entra</span>
       <span class="lb" data-i="5" style="top:100%">Resumen</span>
       <span class="tr"><i id="railfill"></i></span>
@@ -493,8 +502,8 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
     <section class="sec" id="lista">
       <div class="wrap wait-grid">
         <div class="wait-card glass rv">
-          <h2 class="display-lg">Pide tu lugar.</h2>
-          <p class="lead-l">Déjanos tu correo y te avisamos cuando Mayordommo esté listo para tu casa.</p>
+          <h2 class="display-lg" id="wl-head">Pide tu lugar.</h2>
+          <p class="lead-l" id="wl-lead">Déjanos tu correo y te avisamos cuando Mayordommo esté listo para tu casa.</p>
           <form id="wl" novalidate>
             <div class="field">
               <label for="email">Tu correo</label>
@@ -512,7 +521,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
             <div class="hp" aria-hidden="true"><label for="company">Empresa</label><input id="company" name="company" type="text" tabindex="-1" autocomplete="off"></div>
             <div class="err" id="wl-err" role="alert" hidden><i aria-hidden="true">!</i><span id="wl-err-t">No pudimos enviar el correo. Intenta de nuevo en un momento.</span></div>
             <button class="btn btn-hand" id="wl-btn" type="submit">Unirme a la lista</button>
-            <p class="fine">Solo usamos tu correo para avisarte de tu lugar.</p>
+            <p class="fine">Solo usamos tu correo para avisarte de tu lugar. Más en el <a href="aviso-de-privacidad.html">aviso de privacidad</a>.</p>
           </form>
           <div class="ok" id="wl-ok" role="status" hidden>
             <h3>Revisa tu correo.</h3>
@@ -532,6 +541,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
           <span class="wm">mayordommo</span>
         </a>
         <small>© 2026 Mayordommo</small>
+        <a class="foot-link" href="aviso-de-privacidad.html">Aviso de privacidad</a>
         <a class="login-f" data-app href="#" rel="noopener">Iniciar sesión</a>
       </div>
     </footer>
@@ -556,7 +566,8 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
   var form=$('#wl'), email=$('#email'), err=$('#email-err'), werr=$('#wl-err'), werrT=$('#wl-err-t'), ok=$('#wl-ok'), btn=$('#wl-btn'), hp=$('#company'), t0=Date.now(), busy=false;
   var CONSENT=($('.fine',form).textContent||'').trim(), ERR_DEFAULT=werrT.textContent;
   function reset(){busy=false;btn.disabled=false;btn.textContent='Unirme a la lista';}
-  function done(v){busy=false;form.hidden=true;$('#wl-ok-msg').textContent='Te mandamos un correo a '+v+'. Ábrelo y confirma tu lugar. Si no lo ves, revisa tu carpeta de spam.';ok.hidden=false;}
+  function intro(show){$('#wl-head').hidden=!show;$('#wl-lead').hidden=!show;}
+  function done(v){busy=false;form.hidden=true;intro(false);$('#wl-ok-msg').textContent='Te mandamos un correo a '+v+'. Ábrelo y confirma tu lugar. Si no lo ves, revisa tu carpeta de spam.';ok.hidden=false;}
   function badEmail(){reset();err.hidden=false;email.setAttribute('aria-invalid','true');email.focus();}
   function failed(msg){reset();werrT.textContent=msg||ERR_DEFAULT;werr.hidden=false;}
   form.addEventListener('submit',function(e){
@@ -584,7 +595,7 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
     .catch(function(){clearTimeout(to);failed();});
   });
   email.addEventListener('input',function(){err.hidden=true;werr.hidden=true;email.removeAttribute('aria-invalid');});
-  $('#wl-again').addEventListener('click',function(){ok.hidden=true;form.hidden=false;form.reset();werr.hidden=true;reset();});
+  $('#wl-again').addEventListener('click',function(){ok.hidden=true;intro(true);form.hidden=false;form.reset();werr.hidden=true;reset();});
 
   /* ---------- Alfred, the pixel butler (palette colours only; see brand-assets/DESIGN.md) ---------- */
   var PAL={k:'#1B102C',p:'#25153C',d:'#5E4D75',A:'#6235AF',m:'#AB81F2',l:'#BA96F6',s:'#BCA9D5',w:'#F4EFF8',g:'#F4B64C',c:'#90CEA8'};
@@ -958,3 +969,5 @@ fieldset{border:0;min-width:0;display:flex;flex-direction:column;gap:10px}
   addEventListener('resize',function(){placeHero();});
 })();
 </script>
+</body>
+</html>

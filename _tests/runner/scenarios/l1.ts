@@ -27,7 +27,7 @@ import type { ScenarioResult } from '../run.ts';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE = resolve(__dirname, '../../../landing/site');
 const TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp',
+  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp',
   '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm', '.jpg': 'image/jpeg', '.png': 'image/png',
 };
 
@@ -105,6 +105,27 @@ export async function runL1(): Promise<ScenarioResult> {
     check((await page.locator('#login').getAttribute('href')) === appUrl && appUrl.startsWith('https://'), `A: log-in pill points at ${await page.locator('#login').getAttribute('href')}, expected ${appUrl}`);
     check(/noindex/.test((await page.locator('meta[name=robots]').getAttribute('content')) ?? ''), 'A: page is not noindex');
     check(/X-Robots-Tag/.test(await readFile(join(SITE, 'vercel.json'), 'utf8')), 'A: vercel.json does not send X-Robots-Tag');
+    // the test server sends no charset header on purpose (like a naive static server): the page must declare its own
+    check(/^\s*<!doctype html>/i.test(html), 'A: page has no <!doctype html> (quirks mode)');
+    check(/<meta\s+charset=["']?utf-8/i.test(html), 'A: page has no <meta charset="utf-8"> (accents garble)');
+    check(/<meta\s+name=["']viewport["']/i.test(html), 'A: page has no viewport meta');
+    const docFacts = await page.evaluate(() => ({ mode: document.compatMode, cs: document.characterSet }));
+    check(docFacts.mode === 'CSS1Compat' && docFacts.cs === 'UTF-8', `A: rendered in ${docFacts.mode} / ${docFacts.cs}, expected CSS1Compat / UTF-8`);
+    // privacy notice: linked from the form's fine print and the footer, the page serves, carries the sections the
+    // queue item lists, and its version equals the backend's NOTICE_VERSION (the value stored as consent evidence)
+    check((await page.locator('.fine a[href="aviso-de-privacidad.html"]').count()) === 1, 'A: the form fine print does not link the aviso de privacidad');
+    check((await page.locator('footer a[href="aviso-de-privacidad.html"]').count()) === 1, 'A: the footer does not link the aviso de privacidad');
+    check((await page.context().cookies()).length === 0, 'A: the page set cookies, but the notice says it uses none');
+    const noticeRes = await fetch(server.url + 'aviso-de-privacidad.html');
+    const notice = await noticeRes.text();
+    check(noticeRes.status === 200 && /^\s*<!doctype html>/i.test(notice) && /<meta\s+charset=["']?utf-8/i.test(notice), `A: the aviso page did not serve as a proper document (${noticeRes.status})`);
+    for (const h of ['Quién es responsable', 'Qué datos recabamos', 'Para qué los usamos', 'Quién más los maneja', 'Cuánto tiempo', 'Tus derechos', 'Cookies', 'Cambios a este aviso']) {
+      check(notice.includes(h), `A: the aviso page lacks the section "${h}"`);
+    }
+    const backendSrc = await readFile(resolve(__dirname, '../../../backend/routers/waitlist.py'), 'utf8');
+    const noticeVersion = /NOTICE_VERSION\s*=\s*"([^"]+)"/.exec(backendSrc)?.[1] ?? '';
+    check(noticeVersion !== '' && notice.includes(`id="notice-version">${noticeVersion}<`), `A: the aviso page version does not match NOTICE_VERSION (${noticeVersion})`);
+    notes.push(`aviso placeholders still open: ${(notice.match(/\[POR DEFINIR/g) ?? []).length} (launch gate: must be 0)`);
 
     // B) invalid email: inline error, nothing sent
     await submit('nope');

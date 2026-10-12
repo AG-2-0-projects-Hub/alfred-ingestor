@@ -55,7 +55,9 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       the founder reads it aloud.
       (5) Don't push the `staging` branch or link Vercel for contacts until 1-4 are fixed.
       touches: `landing/site/index.html`, `backend/routers/waitlist.py`, `_tests/runner/scenarios/l1.ts`
-- [ ] 🔴 **Aviso de privacidad page for Mayordommo** (queued 2026-10-05, founder) — a BLOCKER for the live
+- [ ] 🔴 **Aviso de privacidad page for Mayordommo** (queued 2026-10-05, founder; **FIRST DRAFT BUILT 2026-10-12**:
+      `landing/site/aviso-de-privacidad.html`, linked from the form + footer, `NOTICE_VERSION` in `waitlist.py`, L1 checks;
+      open placeholders, attorney review and the launch gate are tracked in `ROADMAP.md` Track 5 "GATE") — a BLOCKER for the live
       waitlist: the form must not collect real e-mails from the public until the notice exists and is linked
       (the 2025 LFPDPPP builds consent on the notice being available at collection; the confirmation e-mail
       proves the mailbox owner agreed, the notice proves what they agreed to). Close contacts only until then.

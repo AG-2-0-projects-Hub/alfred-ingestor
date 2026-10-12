@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aviso de privacidad | Mayordommo</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Marcellus&display=swap">
+<style>
+/* Same locked palette and type as index.html (brand-assets/DESIGN.md). Static page: no GSAP, no scripts.
+   The Google fonts link is the same preview shortcut as the landing (production self-hosts). */
+:root{
+  --bone:#F4ECE0; --bone-light:#FCF8F1; --ink-l:#1B102C; --muted-l:#5E4D75; --brand-l:#6235AF; --hand:#F4B64C; --on-hand:#160C24;
+  --hair-l:rgba(27,16,44,.22);
+  --font-display:'Marcellus',Georgia,'Times New Roman',serif;
+  --font-ui:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bone);color:var(--ink-l);font:500 17px/1.65 var(--font-ui);-webkit-font-smoothing:antialiased}
+a{color:var(--brand-l);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--brand-l);outline-offset:3px;border-radius:4px}
+.top{max-width:720px;margin:0 auto;padding:28px 20px 0;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink-l)}
+.brand img{display:block}
+.wm{font:400 22px/1 var(--font-display)}
+.back{font:600 14px/1.4 var(--font-ui)}
+main{max-width:720px;margin:0 auto;padding:36px 20px 72px}
+.draft{background:var(--bone-light);border:1px solid var(--hair-l);border-left:4px solid var(--hand);border-radius:12px;padding:14px 16px;font-size:15px;line-height:1.5;color:var(--muted-l);margin:0 0 32px}
+h1,h2{font-family:var(--font-display);font-weight:400;text-wrap:balance}
+h1{font-size:clamp(34px,6vw,48px);line-height:1.1;margin:0 0 8px}
+h2{font-size:26px;line-height:1.2;margin:40px 0 8px}
+p,ul{margin:0 0 14px}
+ul{padding-left:22px}
+li{margin:0 0 6px}
+.meta{color:var(--muted-l);font-size:15px;margin:0 0 8px}
+mark{background:rgba(244,182,76,.38);color:inherit;border-radius:4px;padding:0 4px}
+table{width:100%;border-collapse:collapse;font-size:15px;line-height:1.45;margin:0 0 14px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px 10px 0;border-bottom:1px solid var(--hair-l)}
+th{font-weight:700}
+.foot{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted-l);font-size:14px}
+@media (max-width:560px){body{font-size:16px}table,thead,tbody,tr,th,td{display:block}thead{display:none}td{border:0;padding:0 0 2px}tr{border-bottom:1px solid var(--hair-l);padding:10px 0}td:first-child{font-weight:700}}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./" aria-label="Mayordommo, inicio">
+    <img src="logo/mayordommo-flat-light.svg" alt="" width="28" height="28">
+    <span class="wm">mayordommo</span>
+  </a>
+  <a class="back" href="./#lista">Volver a la lista de espera</a>
+</header>
+<main id="aviso">
+  <p class="draft"><strong>Versión de trabajo.</strong> Este aviso está en revisión legal antes del lanzamiento. Los datos marcados con <mark>[POR DEFINIR]</mark> se completan antes de abrir la lista al público.</p>
+  <h1>Aviso de privacidad</h1>
+  <p class="meta">Lista de espera de Mayordommo · Versión <span id="notice-version">2026-10-12-draft</span></p>
+
+  <h2>1. Quién es responsable de tus datos</h2>
+  <p><mark>[POR DEFINIR: nombre o razón social del responsable]</mark>, con domicilio en <mark>[POR DEFINIR: domicilio]</mark>, es responsable del tratamiento de tus datos personales. Para cualquier duda o solicitud sobre ellos escribe a <mark>[POR DEFINIR: correo de contacto]</mark>.</p>
+
+  <h2>2. Qué datos recabamos</h2>
+  <p>Cuando te unes a la lista de espera recabamos:</p>
+  <ul>
+    <li>Tu correo electrónico.</li>
+    <li>Cuántas casas administras (1, 2 a 5, o 6 o más), solo si decides contestarlo.</li>
+    <li>La fecha y hora en que lo pediste y la fecha en que confirmaste tu correo.</li>
+    <li>El texto que viste junto al botón, la versión de este aviso y la página desde la que te uniste. Los guardamos para poder demostrar qué aceptaste.</li>
+  </ul>
+  <p>No recabamos datos personales sensibles. Los proveedores que alojan el sitio y el servidor pueden registrar datos técnicos de la conexión, como la dirección IP, en sus bitácoras de funcionamiento y seguridad.</p>
+
+  <h2>3. Para qué los usamos</h2>
+  <p>Solo para esto:</p>
+  <ul>
+    <li>Mandarte un correo para que confirmes que el correo es tuyo.</li>
+    <li>Avisarte de tu lugar en la lista y cuando Mayordommo esté listo para tu casa.</li>
+  </ul>
+  <p>No usamos tus datos para publicidad ni los vendemos. Si algún día quisiéramos usarlos para otra cosa, te lo pediríamos aparte y podrás decir que no.</p>
+
+  <h2>4. Quién más los maneja</h2>
+  <p>Para operar la lista usamos proveedores que tratan tus datos por nuestra cuenta y solo para esto:</p>
+  <table>
+    <thead><tr><th>Proveedor</th><th>Para qué</th><th>Dónde</th></tr></thead>
+    <tbody>
+      <tr><td>Twilio SendGrid</td><td>Enviar el correo de confirmación</td><td>Estados Unidos</td></tr>
+      <tr><td>Supabase</td><td>Guardar la lista</td><td>Frankfurt, Alemania (<mark>[POR DEFINIR: confirmar región del proyecto de producción]</mark>)</td></tr>
+      <tr><td>Google Cloud</td><td>Servidor que recibe tu solicitud y envía el correo</td><td>Frankfurt, Alemania</td></tr>
+      <tr><td>Vercel</td><td>Alojar este sitio</td><td>Red global de servidores</td></tr>
+    </tbody>
+  </table>
+  <p>No compartimos tus datos con nadie más.</p>
+
+  <h2>5. Cuánto tiempo los guardamos</h2>
+  <p><mark>[POR DEFINIR: propuesta, a confirmar]</mark> Guardamos tu correo hasta que pidas salir de la lista, o hasta 12 meses después del lanzamiento si para entonces no hemos tenido contacto contigo. Si te das de baja, dejamos de escribirte y conservamos tu correo marcado como baja solo para no volver a escribirte, hasta que pidas borrarlo.</p>
+
+  <h2>6. Tus derechos</h2>
+  <p>Puedes pedir en cualquier momento acceder a tus datos, corregirlos, cancelarlos u oponerte a que los usemos (derechos ARCO), y retirar tu consentimiento. Escríbenos a <mark>[POR DEFINIR: correo de contacto]</mark> desde el correo con el que te uniste, cuéntanos qué quieres hacer y te contestamos dentro de los plazos que marca la ley.</p>
+  <p>Para salir de la lista no necesitas escribirnos: cada correo que mandamos trae un enlace para darte de baja.</p>
+
+  <h2>7. Cookies</h2>
+  <p>Este sitio no usa cookies de análisis ni de publicidad.</p>
+
+  <h2>8. Cambios a este aviso</h2>
+  <p>Si cambia, publicaremos aquí la versión nueva con su fecha. Cada solicitud a la lista guarda la versión que viste.</p>
+</main>
+<div class="foot">© 2026 Mayordommo</div>
+</body>
+</html>
