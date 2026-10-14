@@ -85,6 +85,13 @@ def _generate_with_retry(client, **kwargs):
             time.sleep(backoff)
 
 
+def _log_timing(phase: str, t0: float, **extra) -> None:
+    """One greppable line per phase ("TIMING <phase>: 12.3s k=v") so a slow
+    /scrape can be attributed from Cloud Run logs instead of guessed at."""
+    detail = " ".join(f"{k}={v}" for k, v in extra.items())
+    print(f"TIMING {phase}: {time.perf_counter() - t0:.1f}s {detail}".rstrip())
+
+
 class ScrapeRequest(BaseModel):
     url: str
 
@@ -470,6 +477,7 @@ async def _run_photo_triage_phase1(client, candidates: list[dict], property_cont
     outrunning /scrape's own timeout on large listings, for a task (coarse
     room/property classification) that doesn't need full resolution anyway."""
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+    t0 = time.perf_counter()
     async with httpx.AsyncClient() as http_client:
         downloads = await asyncio.gather(*[
             _download_image_async(
@@ -477,6 +485,10 @@ async def _run_photo_triage_phase1(client, candidates: list[dict], property_cont
             )
             for c in candidates
         ])
+    _log_timing(
+        "p1_download", t0, requested=len(candidates), ok=sum(d is not None for d in downloads),
+        mb=round(sum(len(d[0]) for d in downloads if d) / 1e6, 2),
+    )
 
     parts = [genai.types.Part(text=_PHASE1_INTRO.format(property_context=property_context))]
     by_index: dict[int, dict] = {}
@@ -495,6 +507,7 @@ async def _run_photo_triage_phase1(client, candidates: list[dict], property_cont
         return []
 
     parts.append(genai.types.Part(text=_PHASE1_OUTPUT_INSTRUCTIONS))
+    t0 = time.perf_counter()
     response = _generate_with_retry(
         client,
         model="gemini-3.6-flash",
@@ -503,6 +516,7 @@ async def _run_photo_triage_phase1(client, candidates: list[dict], property_cont
             temperature=0.0, response_mime_type="application/json"
         ),
     )
+    _log_timing("p1_gemini", t0, photos=len(by_index))
     results = _parse_json_array(response.text)
 
     out = []
@@ -601,21 +615,29 @@ def _run_photo_triage_phase2(
     """Full-resolution, careful pass on the curated subset only."""
     parts = [genai.types.Part(text=_PHASE2_INTRO.format(property_context=property_context))]
     by_index: dict[int, dict] = {}
+    t0 = time.perf_counter()
+    total_bytes = 0
     for i, r in enumerate(selected, start=1):
         downloaded = _download_image(r["url"])  # full resolution — no width override
         if downloaded is None:
             continue
         data, mime = downloaded
+        total_bytes += len(data)
         caption_note = f' — caption: "{r["caption"]}"' if r.get("caption") else ""
         rough_note = f' — rough category from an earlier pass: "{r["room"]}"'
         parts.append(genai.types.Part(text=f"\nPhoto #{i}{caption_note}{rough_note}:"))
         parts.append(genai.types.Part.from_bytes(data=data, mime_type=mime))
         by_index[i] = r
 
+    _log_timing(
+        "p2_download_serial", t0, requested=len(selected), ok=len(by_index),
+        mb=round(total_bytes / 1e6, 2),
+    )
     if not by_index:
         return [], []
 
     parts.append(genai.types.Part(text=_PHASE2_OUTPUT_INSTRUCTIONS))
+    t0 = time.perf_counter()
     response = _generate_with_retry(
         client,
         model="gemini-3.6-flash",
@@ -624,6 +646,7 @@ def _run_photo_triage_phase2(
             temperature=0.0, response_mime_type="application/json"
         ),
     )
+    _log_timing("p2_gemini", t0, photos=len(by_index))
     results = _parse_json_array(response.text)
 
     curated, rejected = [], []
@@ -689,11 +712,14 @@ def _fetch_and_structure(client, url: str) -> tuple[str, str]:
     `structured_output` is now a JSON string (SCRAPER_STRUCTURED_SCHEMA),
     not markdown prose — see that schema's comment for why."""
     fc = get_firecrawl_client()
+    t0 = time.perf_counter()
     scrape_result = fc.scrape(url, formats=["markdown"], max_age=0)
     extracted_markdown = getattr(scrape_result, "markdown", "")
+    _log_timing("firecrawl_fetch", t0, md_chars=len(extracted_markdown))
     if not extracted_markdown:
         raise RuntimeError("Firecrawl returned empty markdown content")
 
+    t0 = time.perf_counter()
     response = _generate_with_retry(
         client,
         model="gemini-3.6-flash",
@@ -705,6 +731,7 @@ def _fetch_and_structure(client, url: str) -> tuple[str, str]:
             temperature=0.0,
         ),
     )
+    _log_timing("gemini_structure", t0)
     return extracted_markdown, response.text
 
 
@@ -723,6 +750,7 @@ async def scrape_airbnb(req: ScrapeRequest):
     """
     url = req.url
     print(f"Starting scrape for URL: {url}")
+    t_scrape = time.perf_counter()
 
     try:
         client = get_gemini_client()
@@ -758,7 +786,10 @@ async def scrape_airbnb(req: ScrapeRequest):
         raise HTTPException(status_code=500, detail=f"Scrape failed: {last_error}")
 
     # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
+    t0 = time.perf_counter()
     curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
+    _log_timing("photo_triage_total", t0)
+    _log_timing("scrape_total", t_scrape)
 
     # 3. Return to caller (the backend persists everything by property_id)
     return {
