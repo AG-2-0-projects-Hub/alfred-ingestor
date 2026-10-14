@@ -36,25 +36,17 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       The 2026-09-14 attempt that added `ClipPath`+`BackdropFilter`+`CustomPaint` re-triggered the
       yellow-underline text bug — screenshot-check against it before shipping anything here.
       touches: `frontend/lib/widgets/glass_panel.dart`, `frontend/lib/widgets/walkthrough_tip_panel.dart`
-- [ ] 🔴 **Landing `site/` is NOT shippable yet: defects found in the founder's first real test (2026-10-05)**
-      The waitlist itself works end to end (real mailbox: signup -> email delivered -> confirm; row confirmed).
-      Everything else on the page was only checked by headless tests and a visual pass at the wrong layer.
-      To fix, one by one, each with a before/after screenshot in a REAL browser (not only headless):
-      (1) **Garbled accents** ("sesiÃ³n", "Â¿CuÃ¡ntas", "DÃ©janos"): the standalone page has no `<!doctype html>`,
-      no `<meta charset="utf-8">`, no viewport meta (the artifact previews got these from the publisher), and a
-      naive server sends no charset; add the proper document head, check it renders in standards mode, and make
-      scenario L1 assert the markup declares charset/doctype/viewport (its own server sent utf-8, which hid this).
-      (2) **After submitting, the page still shows "Pide tu lugar. / Déjanos tu correo..." above "Revisa tu correo."**
-      so it looks like it asks again; only the form swaps to the success card. Hide or replace the heading and lead
-      on success.
-      (3) **Scroll-through video not playing, only the stills**: likely (UNCONFIRMED) because my local test server
-      (`python3 -m http.server`) has no HTTP Range support, so the `<video>` cannot seek; verify on the Vercel
-      deployment or a Range-capable server, and also check the missing-doctype quirks mode as a cause.
-      (4) **Copy reads as translated, not native Mexican Spanish** (page, success and error lines, confirmation email,
-      confirm/unsubscribe pages): the planned native copy pass (draft with a second model, Claude judges), then
-      the founder reads it aloud.
-      (5) Don't push the `staging` branch or link Vercel for contacts until 1-4 are fixed.
-      touches: `landing/site/index.html`, `backend/routers/waitlist.py`, `_tests/runner/scenarios/l1.ts`
+- [x] 🔴 **Landing `site/` defects from the founder's first real test (2026-10-05): FIXED 2026-10-12, live as a staging draft**
+      Doctype/charset/viewport added (L1 asserts them with a charset-less server), success card hides the intro, scroll
+      video confirmed to be the local server's missing Range (Vercel serves 206, 5/5 clips scrub), copy pass done
+      (founder still reads it aloud as part of the ROADMAP Track 5 GATE). Live: https://mayordommo-landing.vercel.app.
+- [ ] 🟡 **Landing: two unconfirmed observations to measure before touching (2026-10-14)**
+      (a) The glitch detector (`landing/_tools/exc.js`) flagged 1 REAL dark frame (brightness 69) at u about 9.3 at 1280x720 on one
+      run of `landing/site`; 3 reruns (1280x720, 1366x768, original page) gave 0. Looks like a seek-timing flake: rerun it a few
+      times on the deployed URL at 1280x720 before deciding anything. (b) At a late scroll position (u 13) the rail label still read
+      "Piloto automático" while the "Entra" shot was showing: probably the existing checkpoint threshold (`cpU[4]` is the c5 midpoint,
+      `act` uses `u >= x - .4`); verify, then adjust only if it looks wrong to a visitor.
+      touches: `landing/site/index.html`, `landing/_tools/exc.js`
 - [ ] 🔴 **Aviso de privacidad page for Mayordommo** (queued 2026-10-05, founder; **FIRST DRAFT BUILT 2026-10-12**:
       `landing/site/aviso-de-privacidad.html`, linked from the form + footer, `NOTICE_VERSION` in `waitlist.py`, L1 checks;
       open placeholders, attorney review and the launch gate are tracked in `ROADMAP.md` Track 5 "GATE") — a BLOCKER for the live
