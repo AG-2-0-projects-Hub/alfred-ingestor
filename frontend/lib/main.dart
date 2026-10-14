@@ -274,10 +274,16 @@ class _IngestorAppState extends State<IngestorApp> {
       return _app(ChatScreen(bookingId: params['booking']!), wrapInactivity: false);
     }
     if (path == '/chat-live' && params.containsKey('booking')) {
-      return _app(ChatLiveScreen(
+      final live = ChatLiveScreen(
         bookingId: params['booking']!,
         propertyId: params['property'] ?? '',
-      ));
+      );
+      // The escalation alert links here. Not signed in -> sign in first and come
+      // straight back to this conversation (not the dashboard).
+      if (Supabase.instance.client.auth.currentSession == null) {
+        return _app(AuthScreen(returnTo: live), wrapInactivity: false);
+      }
+      return _app(live);
     }
 
     if (path == '/host-panel' && params.containsKey('property')) {

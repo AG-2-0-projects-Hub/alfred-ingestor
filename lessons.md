@@ -3,6 +3,13 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-14 — An RLS-backed screen cannot tell "empty" from "not yours": zero rows rendered the empty Autopilot defaults for a live emergency; probe with a row that always exists for the owner
+
+**Context:** FIX_VERIFY of QUEUE item D, the escalation alert's "Open full conversation" link (`/chat-live`).
+**Discovery:** Reproduced twice on staging: owner sees the thread, a logged-out viewer sees "No messages yet / Autopilot / Alfred is handling this conversation" because the owner-scoped policies on `guests`/`conversations`/`messages` return 200 with `[]` (no error). The screen had no state for "I could not read this", so defaults looked like facts. The guest row is the right access probe: it exists for every real booking and only the owner can read it, so `maybeSingle() == null` means "not yours or not there" (a guest who hasn't written yet still has the row, plus Alfred's welcome message, so the legit quiet case is not mistaken for no-access). Distinguish a thrown/timed-out read ("couldn't load, retry") from a null row ("no access"); a spinner covers the in-flight gap. A logged-out deep link needs the sign-in screen to land back on the link: `AuthScreen.returnTo` (a widget) replaces the hard `pushReplacement(Dashboard)`; `/host-panel` still has the old behaviour (queued, not fixed). Also: `create_guest` inserts an Alfred welcome message, so no real guest link is ever "No messages yet".
+**Impact:** Any screen fed by RLS-filtered reads needs an explicit access/loading/error state before it renders defaults, especially behind a link sent during an emergency. Test it with the three viewers (owner, logged out, other signed-in host) plus a forced read failure (`page.route` abort once), and check the new scenario FAILS on the old build.
+**Global Candidate:** Yes — the "zero rows is not an error" trap applies to any Supabase/RLS client UI.
+
 ## 2026-10-14 — Vercel's GitHub import only shows the default branch, so a folder that exists only on `staging` cannot be picked; the CLI deploys it without touching the repo
 
 **Context:** Putting `landing/site` (exists only on `staging`) on Vercel as a new project; the founder wanted no change to `main`, the default branch or the two existing projects.

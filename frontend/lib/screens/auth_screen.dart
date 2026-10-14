@@ -15,10 +15,16 @@ class AuthScreen extends StatefulWidget {
   /// establish a recovery session). Shows a banner offering to send a new one.
   final bool recoveryLinkExpired;
 
+  /// Where to land after a successful sign-in instead of the dashboard (the
+  /// escalation alert's conversation link). Also shows the "sign in to open
+  /// this conversation" notice.
+  final Widget? returnTo;
+
   const AuthScreen({
     super.key,
     this.justConfirmed = false,
     this.recoveryLinkExpired = false,
+    this.returnTo,
   });
 
   @override
@@ -157,7 +163,8 @@ class _AuthScreenState extends State<AuthScreen> {
       }
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(
+              builder: (_) => widget.returnTo ?? const DashboardScreen()),
         );
       }
     } on AuthException catch (e) {
@@ -727,6 +734,30 @@ class _AuthScreenState extends State<AuthScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (widget.returnTo != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.palette.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lock_outline,
+                    size: 18, color: context.palette.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Sign in to open this conversation.',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, color: context.palette.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
         if (widget.justConfirmed) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

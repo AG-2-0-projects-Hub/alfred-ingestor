@@ -21,6 +21,7 @@ import { runP1 } from './scenarios/p1.ts';
 import { runP8 } from './scenarios/p8.ts';
 import { runP9 } from './scenarios/p9.ts';
 import { runP10 } from './scenarios/p10.ts';
+import { runP11 } from './scenarios/p11.ts';
 import { runQ1 } from './scenarios/q1.ts';
 import { runL1 } from './scenarios/l1.ts';
 
@@ -120,6 +121,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     // Layer 2 + 3 — host escalation email fallback (double opt-in: UI, then backend gate)
     runP9,
     runP10,
+    // Layer 2 — the alert email's conversation link (owner / logged out / other host / load failure)
+    runP11,
     // Layer 2 — first-login onboarding
     runQ1,
     // Layer 2 — landing waitlist form (static page + Supabase function, staging)

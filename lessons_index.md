@@ -8,6 +8,7 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-10-14 | RLS screens can't tell "empty" from "not yours": zero rows rendered the empty Autopilot defaults for a live emergency on the alert link; probe with the guest row (always there for the owner), separate load-error from no-access, sign-in must return to the deep link | rls, auth, deep-link, chat-live, escalation, empty-state, flutter, global-candidate |
 | 2026-10-14 | Vercel GitHub import only lists the default branch (a folder only on `staging` is invisible): deploy it with the Vercel CLI (login by device code, `link` + `deploy`), ignore `.vercel`/`.env.local`, `--prod` is blocked by auto-mode; offer the CLI before dashboard steps | vercel, cli, deploy, landing, branch, auto-mode, global-candidate |
 | 2026-10-14 | Asked "summary first, before executing" I kept executing; and I cited an app label without grepping (the app UI has no Spanish): stop at the checkpoint, grep before using a claim as a reason | process, checkpoint, verify-before-stating, copy, glossary, recurrence |
 | 2026-10-05 | A Cloud Run service template can carry a broken test env var from an old zero-traffic revision: diff live revision vs template (shape only), pass the real value in-process, tag-test the new revision, move traffic with `--to-revisions`, not `--to-latest` | cloud-run, deploy, env-vars, sendgrid, tagged-revision, staging, global-candidate |

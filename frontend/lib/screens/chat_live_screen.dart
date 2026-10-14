@@ -32,6 +32,9 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   String? _guestChatUrl;
   String _guestName = 'the guest';
   bool _copiedLink = false;
+  bool _loading = true;
+  bool _noAccess = false;
+  bool _loadFailed = false;
   List<Map<String, dynamic>> _messages = [];
   String _mode = 'autopilot';
   String? _escalationReason;
@@ -58,23 +61,96 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
   }
 
   Future<void> _loadConversation() async {
-    // Guest row: chat URL + name. Host name isn't loaded — host system
-    // messages are rendered with the guest's name; the host already knows
-    // who they are.
-    final guest = await Supabase.instance.client
-        .from('guests')
-        .select('guest_chat_url, name')
-        .eq('booking_id', widget.bookingId)
-        .maybeSingle();
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
+    try {
+      // Guest row: chat URL + name. Host name isn't loaded — host system
+      // messages are rendered with the guest's name; the host already knows
+      // who they are. RLS only returns this row to the property's owner, so a
+      // null here means "not yours (or doesn't exist)" — never render the
+      // empty Autopilot defaults for that: the alert email links here during
+      // real emergencies.
+      final guest = await Supabase.instance.client
+          .from('guests')
+          .select('guest_chat_url, name')
+          .eq('booking_id', widget.bookingId)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 15));
 
-    if (mounted) {
+      if (!mounted) return;
       setState(() {
+        _loading = false;
+        _noAccess = guest == null;
         _guestChatUrl = guest?['guest_chat_url'] as String?;
         final gn = guest?['name'] as String?;
         if (gn != null && gn.isNotEmpty) _guestName = gn;
       });
-      _watchConversation();
+      if (guest != null) _watchConversation();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadFailed = true;
+        });
+      }
     }
+  }
+
+  // Shown instead of the live-chat layout while loading, when the viewer can't
+  // read this booking, or when the load itself failed.
+  Widget _buildBlocked() {
+    final p = context.palette;
+    final Widget content;
+    if (_loading) {
+      content = const CircularProgressIndicator();
+    } else {
+      final failed = _loadFailed;
+      content = ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(failed ? Icons.cloud_off_rounded : Icons.lock_outline_rounded,
+                size: 40, color: p.textMuted),
+            const SizedBox(height: 16),
+            Text(
+              failed
+                  ? "Couldn't load this conversation."
+                  : "You don't have access to this conversation.",
+              textAlign: TextAlign.center,
+              style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w600, fontSize: 16, color: p.textPrimary),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              failed
+                  ? 'Check your connection and try again.'
+                  : "Are you signed in as this property's host?",
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(fontSize: 13, color: p.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            if (failed)
+              ElevatedButton(
+                onPressed: _loadConversation,
+                child: const Text('Try again'),
+              )
+            else
+              ElevatedButton(
+                onPressed: () => Navigator.of(context)
+                    .pushNamedAndRemoveUntil('/dashboard', (_) => false),
+                child: const Text('Back to dashboard'),
+              ),
+          ],
+        ),
+      );
+    }
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: AuroraBackground(intensity: 0.45, child: Center(child: content)),
+    );
   }
 
   void _watchConversation() {
@@ -278,6 +354,7 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading || _noAccess || _loadFailed) return _buildBlocked();
     return Scaffold(
       backgroundColor: Colors.transparent,
       extendBodyBehindAppBar: true,

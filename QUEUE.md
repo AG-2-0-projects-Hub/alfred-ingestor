@@ -14,7 +14,11 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
 
 ## Open
 
-- [ ] 🔴 The alert's "Open full conversation" link shows a **blank, misleading page** to anyone who isn't
+- [ ] 🟡 `/host-panel?property=...` has the same gap D just closed for `/chat-live`: logged out it shows the
+      sign-in screen but after signing in lands on the dashboard, not the panel (found 2026-10-14, read from
+      code, not reproduced). Fix is the same `AuthScreen(returnTo: ...)` pattern in `main.dart`.
+      touches: `frontend/lib/main.dart`
+- [x] ~~🔴 The alert's "Open full conversation" link shows a **blank, misleading page** to anyone who isn't
       signed in as the property's owner (found 2026-10-02 while verifying the email-alert gate — the
       founder opened the escalation email's link and saw "No messages yet" + Autopilot + "Alfred is
       handling this conversation" for a conversation that is really in `intervene` with a live
@@ -26,7 +30,10 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       FIX_VERIFY): logged out → send to the sign-in screen and return to the same link afterwards;
       signed in but the conversation is unreadable → say "You don't have access to this conversation —
       are you signed in as this property's host?" instead of the empty Autopilot view.
-      touches: `frontend/lib/screens/chat_live_screen.dart`, `frontend/lib/main.dart` (routing)
+      touches: `frontend/lib/screens/chat_live_screen.dart`, `frontend/lib/main.dart` (routing)~~
+      — **fixed 2026-10-14 (FIX_VERIFY, P11), on staging once pushed**: logged out -> sign-in with a notice, then
+      back to the same conversation; a signed-in non-owner gets "You don't have access to this conversation.";
+      a failed load gets "Couldn't load" + Try again.
 - [ ] 🔴 Walkthrough tip bubbles read as see-through (queued 2026-10-01, founder: **do NOT attempt
       unprompted** — a previous 2-day attempt broke other things and never landed). Known root
       cause: `BoxDecoration` paints `gradient` over `color`, so `GlassPanel`
