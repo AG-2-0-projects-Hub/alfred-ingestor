@@ -18,6 +18,14 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       sign-in screen but after signing in lands on the dashboard, not the panel (found 2026-10-14, read from
       code, not reproduced). Fix is the same `AuthScreen(returnTo: ...)` pattern in `main.dart`.
       touches: `frontend/lib/main.dart`
+- [ ] 🟡 The scraper's structuring call sometimes **drops a safety fact** from the listing (found 2026-10-15
+      during the speed work): on the Bungalow listing, "Pool/hot tub without a gate or lock" is in the raw
+      scrape but missing from the structured result in ~4 of 10 runs, identical with and without the
+      parallel change (so pre-existing, run-to-run variance in the Gemini structuring call, not a bug in
+      the code around it). Guests ask about exactly this kind of thing, and it never reaches the merge.
+      Idea to test first: a short "never drop safety/hazard items" line in the structuring prompt, or a
+      second pass that checks the safety section of the raw text against the output.
+      touches: `scraper/main.py`
 - [x] ~~🔴 The alert's "Open full conversation" link shows a **blank, misleading page** to anyone who isn't
       signed in as the property's owner (found 2026-10-02 while verifying the email-alert gate — the
       founder opened the escalation email's link and saw "No messages yet" + Autopilot + "Alfred is

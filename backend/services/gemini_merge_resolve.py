@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import sentry_sdk
@@ -1235,9 +1236,11 @@ Be conservative: only remove something you are confident has zero support. When 
 unsure, leave it -- false removals (deleting a real fact) are also a failure mode, not just \
 missed hallucinations.
 
-Respond with a single JSON object: {"cleaned_output": <OUTPUT with unsupported specific claims \
-removed/trimmed, valid JSON, same structure otherwise>, "removed_claims": [{"claim": "...", \
-"reason": "..."}]} -- removed_claims is an empty array if nothing was removed.
+OUTPUT is shown as one line per value: `path = value`. Respond with a single JSON object: \
+{"edits": [{"path": "<the exact path of the ONE value that contains an unsupported claim>", \
+"new_value": <that value with ONLY the unsupported fragment removed, as a string; or null if the \
+ENTIRE value is unsupported>, "claim": "...", "reason": "..."}]} -- `edits` is an empty array if \
+nothing is unsupported. Output ONLY the edits, never the rest of OUTPUT.
 """
 
 GROUNDING_CRITIQUE_USER_TEMPLATE = """\
@@ -1248,6 +1251,77 @@ OUTPUT:
 {output}
 """
 
+# Speed-up (2026-10-15, merge_speed_harness exp2, 9 planted runs + 9 clean per variant): the critique
+# used to re-emit the whole output JSON (~4.6k tokens, ~30s); it now returns only edits over a flat
+# `path = value` view and code applies them (~9s at thinking LOW). Same 27/27 planted fabrications
+# removed, 0 collateral damage to real values, 0 invalid paths. Thinking MINIMAL on the *full
+# rewrite* damaged real values (6/787 clean leaves) so the critique stays on LOW.
+
+
+def _flatten_with_keys(obj, keys: tuple = ()):
+    """Yield (key-tuple, leaf) for every non-container leaf; empty containers are skipped."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _flatten_with_keys(v, keys + (k,))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _flatten_with_keys(v, keys + (i,))
+    else:
+        yield keys, obj
+
+
+def _display_path(keys: tuple) -> str:
+    path = ""
+    for k in keys:
+        path += f"[{k}]" if isinstance(k, int) else (f".{k}" if path else str(k))
+    return path
+
+
+def _grounding_view(output: dict) -> tuple[str, dict]:
+    """One `path = value` line per leaf, plus path -> (key-tuple, leaf). A path string that two
+    different leaves would share (a key containing '.' or '[') is mapped to None, so any edit
+    naming it is rejected instead of landing on the wrong value."""
+    index: dict = {}
+    lines = []
+    for keys, leaf in _flatten_with_keys(output):
+        path = _display_path(keys)
+        index[path] = None if path in index else (keys, leaf)
+        lines.append(f"{path} = {json.dumps(leaf, ensure_ascii=False)}")
+    return "\n".join(lines), index
+
+
+def _apply_grounding_edits(output: dict, index: dict, edits: list) -> tuple[dict, int]:
+    """Apply critique edits to a copy of output. An edit is skipped (and counted) unless its path is
+    known and unambiguous and it can only shrink a string (or delete a value) -- the critique may
+    remove an unsupported claim, never write new content."""
+    cleaned = copy.deepcopy(output)
+    skipped = 0
+    deletions: dict = {}
+    for edit in edits:
+        entry = index.get(edit.get("path")) if isinstance(edit, dict) else None
+        if entry is None:
+            skipped += 1
+            continue
+        keys, leaf = entry
+        new_value = edit.get("new_value")
+        if new_value is not None and not (isinstance(new_value, str) and isinstance(leaf, str) and len(new_value) <= len(leaf)):
+            skipped += 1
+            continue
+        parent = cleaned
+        for k in keys[:-1]:
+            parent = parent[k]
+        if new_value is None:
+            deletions.setdefault(id(parent), (parent, []))[1].append(keys[-1])
+        else:
+            parent[keys[-1]] = new_value
+    for parent, doomed in deletions.values():
+        if isinstance(parent, list):
+            parent[:] = [v for i, v in enumerate(parent) if i not in doomed]
+        else:
+            for k in doomed:
+                parent.pop(k, None)
+    return cleaned, skipped
+
 
 async def _ground_freeform_output(output: dict, source_text: str) -> dict:
     """Fails soft: any error here (bad JSON, timeout, etc.) returns the
@@ -1256,10 +1330,11 @@ async def _ground_freeform_output(output: dict, source_text: str) -> dict:
     universal-fields call in run_merger()."""
     try:
         client = _get_client()
+        view, index = _grounding_view(output)
         user_prompt = _fill(
             GROUNDING_CRITIQUE_USER_TEMPLATE,
             source=source_text or "(no data)",
-            output=json.dumps(output, indent=2, ensure_ascii=False),
+            output=view,
         )
         response = await genai_factory.generate_with_retry(
             client,
@@ -1269,13 +1344,14 @@ async def _ground_freeform_output(output: dict, source_text: str) -> dict:
             config=types.GenerateContentConfig(
                 system_instruction=GROUNDING_CRITIQUE_SYSTEM_PROMPT,
                 response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
             ),
         )
-        result = _parse_json_response(response.text)
-        removed = result.get("removed_claims", [])
-        if removed:
-            log.info("grounding critique removed %d unsupported claim(s): %s", len(removed), removed)
-        return result["cleaned_output"]
+        edits = _parse_json_response(response.text).get("edits", [])
+        cleaned, skipped = _apply_grounding_edits(output, index, edits)
+        if edits:
+            log.info("grounding critique: %d edit(s) proposed, %d skipped as invalid: %s", len(edits), skipped, edits)
+        return cleaned
     except Exception as exc:
         log.warning("grounding critique pass failed (non-fatal, keeping un-critiqued output): %s", exc)
         sentry_sdk.capture_exception(exc)
@@ -1316,6 +1392,9 @@ async def _run_freeform_merge(
             config=types.GenerateContentConfig(
                 system_instruction=MERGER_SYSTEM_PROMPT,
                 response_mime_type="application/json",
+                # 2026-10-15 merge_speed_harness exp1 (9 runs/variant, 3 real properties): thinking
+                # MINIMAL 20s vs default 42s, number recall 0.937 vs 0.921; LOW lost recall (0.881).
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
             ),
         )
         try:
@@ -1549,7 +1628,40 @@ async def _GROUNDING_CRITIQUE_TEST() -> None:
         print("_GROUNDING_CRITIQUE_TEST: PASS")
 
 
+def _GROUNDING_EDITS_TEST() -> None:
+    """Offline (no Gemini call) check of how critique edits are applied: fragment trim, whole-value
+    and list-item deletion (several indexes in one list), and rejection of unknown paths,
+    ambiguous paths, and edits that would grow a value."""
+    out = {
+        "a": {"note": "Sink and a shower", "items": ["x", "y", "z", "w"]},
+        "k.1": "dotted", "k": {"1": "ambiguous"},
+        "n": 5,
+    }
+    _, index = _grounding_view(out)
+    edits = [
+        {"path": "a.note", "new_value": "Sink"},
+        {"path": "a.items[1]", "new_value": None},
+        {"path": "a.items[3]", "new_value": None},
+        {"path": "nope", "new_value": None},
+        {"path": "k.1", "new_value": None},
+        {"path": "a.note ", "new_value": "x"},
+        {"path": "n", "new_value": "6"},
+    ]
+    cleaned, skipped = _apply_grounding_edits(out, index, edits)
+    ok = (
+        cleaned["a"] == {"note": "Sink", "items": ["x", "z"]}
+        and cleaned["k.1"] == "dotted" and cleaned["k"] == {"1": "ambiguous"} and cleaned["n"] == 5
+        and skipped == 4
+        and out["a"]["items"] == ["x", "y", "z", "w"]  # input not mutated
+    )
+    if not ok:
+        print(f"_GROUNDING_EDITS_TEST: FAIL (skipped={skipped}) {cleaned}")
+    else:
+        print("_GROUNDING_EDITS_TEST: PASS")
+
+
 if __name__ == "__main__":
+    _GROUNDING_EDITS_TEST()
     asyncio.run(_UNIVERSAL_FIELDS_TEST())
     asyncio.run(_FREEFORM_MERGE_TEST())
     asyncio.run(_CONFLICT_SCOPING_TEST())
