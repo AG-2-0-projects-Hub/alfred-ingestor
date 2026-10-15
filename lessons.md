@@ -3,6 +3,34 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-10-15 — One Secret Manager value was shared by both scrapers (staging and prod) and read as `latest`; a key rotation in another project killed Train Now everywhere with HTTP 401
+
+**Context:** the full QA suite failed B1/D8/D9 after the item-D work; they looked like regressions of my change.
+**Discovery:** Not my change: the root cause was `FIRECRAWL_API_KEY` (secret v1, 2026-07-12) returning 401 from Firecrawl directly (reproduced with the secret value, never printed). Both `alfred-scraper-staging` and `alfred-scraper` read the same secret as `latest`, and the founder had rotated that key while working in another project. Adding v2 is not enough: a Cloud Run revision resolves `latest` at start, so each scraper needed a new revision (`gcloud run services update <svc> --revision-suffix=...`) to pick it up. Keys are entered with a hidden-prompt script (`_scripts/set_scraper_firecrawl_key.sh`: strips whitespace, requires the `fc-` prefix, validates against Firecrawl's credit endpoint, then adds the secret version, printing only the length). Old dead version 1 is still enabled.
+**Impact:** A failing E2E on unrelated work: reproduce the failing dependency directly before suspecting your diff. A third-party key shared across environments (and with a dev MCP) is one revoke away from an outage on prod too; give the scraper its own dedicated key and consider pinning secret versions.
+**Global Candidate:** Yes — shared secrets read as `latest` need a revision roll after rotation, and an E2E red after unrelated work is often an expired dependency.
+
+## 2026-10-15 — Gemini 3.x call time is mostly thinking tokens, and re-emitting a whole JSON is what makes a critique slow: cap thinking per call and make the checker return edits, then gate on a real-data comparison
+
+**Context:** Train Now took ~110 s; stage timing showed the merge step (~61 s) as the bottleneck; scraper phases were measured first with `TIMING` log lines.
+**Discovery:** In the freeform merge 5.8-7.7k thinking tokens vs 3.6-5.5k output tokens; the grounding critique re-emitted the full ~4.6k-token output (22-30 s). Measured per variant on 3 real properties (9 runs each): freeform at thinking MINIMAL 20 s vs 42 s default with number recall 0.937 vs 0.921 (LOW lost recall, 0.881); critique as edits-only at LOW 9 s vs 30 s, 27/27 planted fabrications removed, 0 collateral. The same MINIMAL on the full-rewrite critique damaged 6/787 real values, so the variant has to be judged per call, not per model. Final check on the real `run_merger`, old module (`git show HEAD:...`) against the new one: median 82 s -> 22 s, recall equal within noise, one low-value detail lost (2/3 old vs 0/3 new). Scraper: structuring and photo phase 1 are independent, running them in parallel cut 45 -> ~25 s; Flash-Lite for photos (~5 s) and for structuring (dropped facts) were rejected for quality. Applying LLM edits safely: map shown paths to key tuples in code, reject unknown or ambiguous paths (a key containing `.`), allow only shrinking a string or deleting a value.
+**Impact:** For slow Gemini steps, first time each call, then lower thinking and shrink the output; keep every shipped variant behind a planted-error and recall comparison on real data. Per-run variance is large (a vision call spiked to 50 s), so use medians over several runs.
+**Global Candidate:** Yes — thinking-token budget and edit-style outputs apply to any Gemini 3.x pipeline.
+
+## 2026-10-15 — I scored model output against ambiguous listing text and wrongly blamed Flash-Lite for a "bedroom numbering" error; the founder's own ground truth showed it was right
+
+**Context:** comparing scrape variants on the Bungalow listing.
+**Discovery:** I assumed `bedroom_1` for the two-single-beds room from ambiguous text; the founder said the second room is `bedroom_2`. I had retracted a claim and a queue idea because of it. Related find, same session: the unchanged structuring call drops "Pool/hot tub without a gate or lock" in ~4 of 10 runs (queued).
+**Impact:** Ask the founder for the real facts of a test property before scoring against them (memory `feedback_ask_founder_ground_truth`).
+**Global Candidate:** No — project-specific habit, already a memory.
+
+## 2026-10-15 — Tooling traps in this environment: `Start-Sleep` chains are blocked, WSL needs script files, no `jq`, no Windows Python
+
+**Context:** long background experiments and many WSL calls.
+**Discovery:** A foreground `Start-Sleep` chain is rejected; use a background command plus an `until`/`for ... sleep` loop inside Bash. Inline `wsl bash -lc '...'` breaks on `$()`, `;` and quotes when issued from PowerShell: write a `.sh` file and run `wsl bash -l <path>` (Bash tool cannot see `/tmp`; keep scripts under the project). Do not override `PATH` in those scripts (node tools break); for Flutter use `PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin` and `XDG_RUNTIME_DIR=$HOME/.cache/xdg-runtime`. No `jq` in WSL and no Python on Windows: use WSL `python3` or `backend/venv/bin/python`. Running a module inside `backend/services/` directly needs `PYTHONPATH=backend`. `gcloud logging read` ignores `--freshness` when mixed with `--order=asc` in some cases: pin `timestamp>="..."` in the filter. A `cd` in Git Bash changes the tool's working directory.
+**Impact:** Saves several failed calls per session; recipes also live in `_Context/CONTINUATION_PROMPT_2026-10-15.md`.
+**Global Candidate:** No — environment specifics of this machine.
+
 ## 2026-10-14 — An RLS-backed screen cannot tell "empty" from "not yours": zero rows rendered the empty Autopilot defaults for a live emergency; probe with a row that always exists for the owner
 
 **Context:** FIX_VERIFY of QUEUE item D, the escalation alert's "Open full conversation" link (`/chat-live`).
