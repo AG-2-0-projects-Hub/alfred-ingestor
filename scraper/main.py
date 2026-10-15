@@ -367,7 +367,7 @@ into an unrelated field.
 # per-photo work scales with what's actually kept, not with how many photos
 # the listing happens to have.
 #
-# Entirely non-fatal by design — see _triage_photos. A classification problem
+# Entirely non-fatal by design — see _triage_phase1 / _triage_finish. A classification problem
 # must never block the scrape itself.
 
 _MUSCACHE_IMG_RE = re.compile(r'!\[([^\]]*)\]\((https://a0\.muscache\.com/[^\s\)]+)\)')
@@ -671,14 +671,27 @@ def _run_photo_triage_phase2(
     return curated, rejected
 
 
-async def _triage_photos(client, raw_markdown: str, property_context: str) -> tuple[list[dict], list[dict]]:
-    """Full two-phase triage. Never raises — a triage failure must never block
-    the scrape itself, so any error here just yields no curation at all."""
+async def _triage_phase1(client, raw_markdown: str) -> list[dict]:
+    """Phase 1 over the page's photos. Runs at the same time as the structuring
+    call (see _fetch_and_structure), so its PROPERTY CONTEXT is the raw page text,
+    not the structured JSON (2026-10-14 speed harness: same photo yes/no and
+    selected photos; the whole page beat a 3000-char excerpt on room labels).
+    Never raises — a triage failure must never block the scrape itself, so any
+    error here just yields no curation at all."""
     try:
         candidates = _extract_candidate_photos(raw_markdown)
         if not candidates:
-            return [], []
-        phase1 = await _run_photo_triage_phase1(client, candidates, property_context)
+            return []
+        return await _run_photo_triage_phase1(client, candidates, raw_markdown)
+    except Exception as e:
+        print(f"Photo triage phase 1 failed (non-fatal, scrape continues): {e}")
+        sentry_sdk.capture_exception(e)
+        return []
+
+
+def _triage_finish(client, phase1: list[dict], property_context: str) -> tuple[list[dict], list[dict]]:
+    """Selection + phase 2 on phase 1's output. Same never-raises contract."""
+    try:
         selected, rejected1 = _select_phase2_candidates(phase1)
         if selected:
             curated, rejected2 = _run_photo_triage_phase2(client, selected, property_context)
@@ -699,9 +712,29 @@ def _extract_completeness(structured_output: str) -> str | None:
     return value.strip().title() if value else None
 
 
-def _fetch_and_structure(client, url: str) -> tuple[str, str]:
-    """One full Firecrawl-fetch + Gemini-structure pass. Returns
-    (extracted_markdown, structured_output); raises on a hard failure.
+def _structure(client, extracted_markdown: str) -> str:
+    t0 = time.perf_counter()
+    response = _generate_with_retry(
+        client,
+        model="gemini-3.6-flash",
+        contents=f"INPUT DATA (raw scrape):\n{extracted_markdown}",
+        config=genai.types.GenerateContentConfig(
+            system_instruction=SCRAPER_STRUCTURED_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=SCRAPER_STRUCTURED_SCHEMA,
+            temperature=0.0,
+        ),
+    )
+    _log_timing("gemini_structure", t0)
+    return response.text
+
+
+async def _fetch_and_structure(client, url: str) -> tuple[str, str, list[dict]]:
+    """One full Firecrawl-fetch pass, then the Gemini structuring call and photo
+    triage phase 1 TOGETHER (they only depended on each other through phase 1's
+    context text; running them one after the other cost ~15-20 s per scrape).
+    Returns (extracted_markdown, structured_output, phase1_results); raises on a
+    hard failure of the fetch or the structuring call (phase 1 never raises).
     `max_age=0` forces a live fetch on every call — 2026-09-17 incident:
     Firecrawl cached an incomplete pre-hydration snapshot of an Airbnb
     listing (only nav chrome, no real content) and kept serving that same
@@ -719,20 +752,14 @@ def _fetch_and_structure(client, url: str) -> tuple[str, str]:
     if not extracted_markdown:
         raise RuntimeError("Firecrawl returned empty markdown content")
 
+    # The structuring call is sync (runs in a thread); phase 1's own Gemini call is
+    # sync too and blocks this loop, which is fine — the thread keeps running.
     t0 = time.perf_counter()
-    response = _generate_with_retry(
-        client,
-        model="gemini-3.6-flash",
-        contents=f"INPUT DATA (raw scrape):\n{extracted_markdown}",
-        config=genai.types.GenerateContentConfig(
-            system_instruction=SCRAPER_STRUCTURED_SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=SCRAPER_STRUCTURED_SCHEMA,
-            temperature=0.0,
-        ),
-    )
-    _log_timing("gemini_structure", t0)
-    return extracted_markdown, response.text
+    structure_task = asyncio.create_task(asyncio.to_thread(_structure, client, extracted_markdown))
+    phase1 = await _triage_phase1(client, extracted_markdown)
+    structured_output = await structure_task
+    _log_timing("structure_and_phase1_wall", t0)
+    return extracted_markdown, structured_output, phase1
 
 
 @app.post("/scrape")
@@ -760,11 +787,12 @@ async def scrape_airbnb(req: ScrapeRequest):
 
     extracted_markdown = ""
     structured_output = ""
+    phase1: list[dict] = []
     completeness: str | None = None
     last_error: Exception | None = None
     for attempt in range(2):
         try:
-            extracted_markdown, structured_output = _fetch_and_structure(client, url)
+            extracted_markdown, structured_output, phase1 = await _fetch_and_structure(client, url)
         except Exception as e:
             # Surface the actual error in Cloud Run logs (HTTPException details
             # don't end up in stdout — they only go in the response body).
@@ -785,10 +813,10 @@ async def scrape_airbnb(req: ScrapeRequest):
     if last_error is not None and not structured_output:
         raise HTTPException(status_code=500, detail=f"Scrape failed: {last_error}")
 
-    # 2.5. Photo triage — non-fatal, never blocks the scrape (see _triage_photos)
+    # 2.5. Photo triage finish (selection + phase 2) — non-fatal, never blocks the scrape
     t0 = time.perf_counter()
-    curated_photos, rejected_photos = await _triage_photos(client, extracted_markdown, structured_output)
-    _log_timing("photo_triage_total", t0)
+    curated_photos, rejected_photos = _triage_finish(client, phase1, structured_output)
+    _log_timing("photo_triage_finish", t0)
     _log_timing("scrape_total", t_scrape)
 
     # 3. Return to caller (the backend persists everything by property_id)
