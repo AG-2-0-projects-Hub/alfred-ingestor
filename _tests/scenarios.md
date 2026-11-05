@@ -64,9 +64,9 @@ on a fixed schedule — a scenario written against old mechanics can go stale th
 | C3 | Emergency trigger escalates — safety-critical | No |
 | G2 | A guest can't read another guest's messages | Yes — `_tests/runner/scenarios/g2.ts` |
 | G4 | 🔴 Client bundle never ships a privileged key — already happened once in prod (2026-07-13) | No |
-| G5 | Host endpoints require real auth + ownership | No |
+| G5 | Host endpoints require real auth + ownership | Yes — `_tests/runner/scenarios/g5.ts` (backend API on deployed staging, 59 probes) |
 
-**6 of 9 still need real automation** (A1, B12, C1, C3, G4, G5 — B1 was automated 2026-10-01; C1, C3, G4 and G5 were each re-verified 2026-10-01 by one-off live probes against deployed staging — API/DB legs only, scripts not yet saved into the runner) — real, separate
+**5 of 9 still need real automation** (A1, B12, C1, C3, G4 — B1 was automated 2026-10-01 and G5 2026-10-15; C1, C3 and G4 were each re-verified 2026-10-01 by one-off live probes against deployed staging — API/DB legs only, scripts not yet saved into the runner) — real, separate
 effort, not yet scoped. Until that's done, this set can't run as one command; verify the
 unautomated ones manually before a `staging → main` merge.
 
@@ -790,9 +790,9 @@ unautomated ones manually before a `staging → main` merge.
 
 ### G5. Host endpoints require host auth + ownership
 - **id:** sec-host-endpoints-01
-- **touches:** `backend/routers/messages.py`, `backend/routers/properties.py`, `backend/services/supabase_client.py` (`_require_host*`, `host_owns_*`)
-- **layer:** 2
-- **action:** call each state-changing host endpoint (`/api/messages/host-send`, `/api/conversations/resolve`, `/api/conversations/archive`, `/api/conversations/announce-transition`, `/api/guests`, `/api/host/avatar`, `/api/host/delete-account`)
+- **touches:** `backend/routers/messages.py`, `backend/routers/properties.py`, `backend/routers/ingest.py`, `backend/routers/merge_resolve.py`, `backend/services/supabase_client.py` (`_require_host*`, `_require_property_owner`, `host_owns_*`)
+- **layer:** 2 (backend API — `_tests/runner/scenarios/g5.ts`)
+- **action:** call each state-changing host endpoint (`/api/messages/host-send`, `/api/conversations/resolve`, `/api/conversations/archive`, `/api/conversations/announce-transition`, `/api/guests`, `/api/host/avatar`, `/api/host/delete-account`, plus since 2026-10-15 `/api/ingest`, `/api/ingest/{id}/resume`, `/api/ingest/{id}/retry-scrape`, `/api/ingest/add-knowledge`, `/api/ingest/query-knowledge`, `/api/merge/{id}`, `/api/resolve/{id}`)
 - **expected:**
   1. Missing/invalid bearer token → **401**.
   2. Valid host token, but a conversation/booking/property owned by a **different** host → **403**.
@@ -801,8 +801,8 @@ unautomated ones manually before a `staging → main` merge.
 - **why:** the backend runs as **service role**, which bypasses RLS — so these endpoints must police themselves.
 - **note:** `/api/host/delete-account` needs **no** ownership check: the host being deleted *is* the token subject.
 - **last_tested:** 2026-10-01 — live probe on deployed staging: all 13 host endpoints (the 7 above plus `/host/escalation-email`, `/host/telegram/link-code`, `/property/{id}/soft-delete`, `/property/{id}/cancel-initial-train`, `/ingest/{id}/resume`, `/ingest/{id}/retry-scrape`) return **401** with no token and with a garbage token (26/26); the public `/host/escalation-email/unsubscribe` does nothing on a bad token; a valid QA-host token against another host's conversation/booking/property gets **403** on host-send, resolve, archive, announce-transition and create-guest (probed on an archived conversation of a stale test account, so a failure could not have hurt real data). The valid-token `delete-account` was deliberately never called. (Earlier: 2026-07-14.)
-- **known gaps (pre-existing, also on `main`, not introduced by the 2026-10-01 merge):** `POST /api/merge/{id}`, `/api/resolve/{id}`, `/api/ingest/add-knowledge`, `/api/ingest/query-knowledge` and the `/api/ingest` dispatcher have **no auth gate**, and `/ingest/{id}/resume` + `/retry-scrape` check the token but not ownership. Guarded only by property UUIDs being unguessable. Queued in `QUEUE.md`.
-- **status:** passing for the listed endpoints; gaps above open
+- **closed 2026-10-15 (item B, FIX_VERIFY):** the former known gaps — `merge`, `resolve`, `add-knowledge`, `query-knowledge` and the `/ingest` dispatcher had no auth gate, and `resume`/`retry-scrape` checked the token but not ownership — are now guarded like the rest. Also fixed in the same change: `/ingest` with another host's property id plus the caller's own property name could move that property's uploaded files into the caller's (the ownership check now runs first), and `add-knowledge`'s `storage_path` could read a file from another property's folder (now 422). The strict behaviour: the anonymous `/ingest` path is gone; an id with no row yet is created owned by the caller.
+- **status:** passing — `g5.ts` automates all of the above (no token / garbage token → 401 on 18 routes; a valid token against another host's soft-deleted property or booking → 403 on 15 calls, including `/ingest` with the caller's own property name; the owning host's 8 calls not refused, `storage_path` in another property's folder → 422). Run 2026-10-15 against the zero-traffic tagged revision `alfred-backend-staging-00052-s8q`: PASS (22 s, 59 probes). The anonymous-write reproduction (anonymous `add-knowledge`/`query-knowledge`/`/ingest` on an existing id/`/merge`, and `/resume` on another host's property) succeeded twice against the old revision and now fails with 401/403 on the new one. `delete-account` is still never called with a valid token
 - **promoted from intake:** `14ed3c0`
 
 ### G6. Storage buckets are scoped

@@ -25,11 +25,12 @@ calls this).
 
 import asyncio
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from services import supabase_client
 from services import gemini_merge_resolve
+from routers.messages import _require_property_owner
 
 router = APIRouter()
 
@@ -103,7 +104,8 @@ async def run_merge_and_save(
 
 
 @router.post("/merge/{property_id}")
-async def merge_property(property_id: str):
+async def merge_property(property_id: str, authorization: str | None = Header(default=None)):
+    await _require_property_owner(authorization, property_id)
     prop = await asyncio.to_thread(supabase_client.get_property_for_merge, property_id)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found.")
@@ -149,7 +151,10 @@ async def merge_property(property_id: str):
 
 
 @router.post("/resolve/{property_id}")
-async def resolve_conflicts(property_id: str, req: ResolveRequest):
+async def resolve_conflicts(
+    property_id: str, req: ResolveRequest, authorization: str | None = Header(default=None)
+):
+    await _require_property_owner(authorization, property_id)
     prop = await asyncio.to_thread(supabase_client.get_property_for_resolve, property_id)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found.")

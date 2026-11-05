@@ -1396,6 +1396,19 @@ def get_user_id_from_token(access_token: str) -> str | None:
 # state-changing endpoint must verify ownership itself. Each helper resolves the
 # target down to its owning property and checks properties.owner_id == host uid.
 
+def get_property_owner(property_id: str) -> dict | None:
+    """The property's {owner_id} row, or None if no such property exists."""
+    client = get_client()
+    res = (
+        client.table("properties")
+        .select("owner_id")
+        .eq("id", property_id)
+        .maybe_single()
+        .execute()
+    )
+    return res.data if res else None
+
+
 def host_owns_property(host_id: str, property_id: str) -> bool:
     """True if the property exists and is owned by this host."""
     client = get_client()

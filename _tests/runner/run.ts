@@ -4,6 +4,7 @@ import { generateReport } from './lib/report.ts';
 // Layer 1
 import { runC6 } from './scenarios/c6.ts';
 import { runG2 } from './scenarios/g2.ts';
+import { runG5 } from './scenarios/g5.ts';
 // Layer 2
 import { runA2 } from './scenarios/a2.ts';
 import { runA3 } from './scenarios/a3.ts';
@@ -104,6 +105,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runA2,
     runA3,
     runA4,
+    // Layer 2 — host endpoints require host auth + ownership (backend API, deployed staging)
+    runG5,
     // Layer 3 — core Train Now end-to-end (backend, real deployed staging)
     runB1,
     // Layer 2 — ingest error paths

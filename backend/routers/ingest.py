@@ -33,13 +33,14 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from services import supabase_client, gemini_merge_resolve, task_queue
 import services.gemini_client as gemini_client
 from routers import ingest_worker
+from routers.messages import _require_host, _require_property_owner
 
 router = APIRouter()
 
@@ -50,33 +51,6 @@ class IngestRequest(BaseModel):
     property_id: str
     property_name: str = ""
     airbnb_url: str = ""
-
-
-def _get_owner_id(request: Request) -> str | None:
-    """Extract owner UID from Authorization: Bearer <token> header. Returns None on missing/invalid."""
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        return None
-    token = auth[7:].strip()
-    if not token:
-        return None
-    try:
-        client = supabase_client.get_client()
-        response = client.auth.get_user(token)
-        return response.user.id if response and response.user else None
-    except Exception:
-        return None
-
-
-async def _require_owner_id(request: Request) -> str:
-    """Strict version of _get_owner_id — 401s instead of returning None.
-    Only /resume needs this (a host-initiated recovery action); the main
-    /ingest dispatcher above stays permissive on purpose (anonymous ingests
-    are allowed, matching the existing add-property flow)."""
-    owner_id = await asyncio.to_thread(_get_owner_id, request)
-    if not owner_id:
-        raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
-    return owner_id
 
 
 def _heartbeat_stale(heartbeat_iso: str | None) -> bool:
@@ -90,18 +64,25 @@ def _heartbeat_stale(heartbeat_iso: str | None) -> bool:
 
 
 @router.post("/ingest")
-async def ingest(req: IngestRequest, request: Request):
+async def ingest(req: IngestRequest, authorization: str | None = Header(default=None)):
     airbnb_url = req.airbnb_url.strip()
     temp_id = req.property_id
-    owner_id = await asyncio.to_thread(_get_owner_id, request)
+    owner_id = await _require_host(authorization)
+
+    # A property that already exists at temp_id must be the caller's. Checked
+    # before anything below touches it: the canonical-name branch moves
+    # temp_id's uploaded files into the caller's own property, and
+    # insert_property upserts name/url onto the row. An id with no row yet is
+    # simply created owned by the caller.
+    existing = await asyncio.to_thread(supabase_client.get_property_owner, temp_id)
+    if existing and existing.get("owner_id") != owner_id:
+        raise HTTPException(status_code=403, detail="Not your property")
 
     # Resolve canonical property by nickname, scoped to the current owner so
     # two users naming a property "Bungalowww" get separate rows.
-    # If owner_id is None (unauthenticated), canonical lookup returns None
-    # and the request will create a brand-new row at temp_id.
     property_id = temp_id
     property_name_clean = req.property_name.strip()
-    if property_name_clean and owner_id:
+    if property_name_clean:
         canonical = await asyncio.to_thread(
             supabase_client.get_canonical_property_by_name, property_name_clean, owner_id
         )
@@ -150,7 +131,7 @@ async def ingest(req: IngestRequest, request: Request):
 
 
 @router.post("/ingest/{property_id}/resume")
-async def resume_ingest(property_id: str, request: Request):
+async def resume_ingest(property_id: str, authorization: str | None = Header(default=None)):
     """Host-triggered recovery for a stalled property — the self-service
     version of the by-hand fix used on a real stuck property 2026-09-16
     (a direct /merge call). Idempotent by construction (safe to mash):
@@ -158,10 +139,7 @@ async def resume_ingest(property_id: str, request: Request):
     (exactly that by-hand fix); anything else -> mint a fresh run and
     re-dispatch the remaining work (same path the watchdog uses automatically
     on a stale heartbeat)."""
-    await _require_owner_id(request)  # host-token gate; ownership itself isn't
-    # scoped further since property_id -> owner is already enforced by the
-    # dashboard only ever showing the host their own properties, matching the
-    # existing pattern for /merge and /resolve (also not owner-scoped today).
+    await _require_property_owner(authorization, property_id)
 
     prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
     if prop is None:
@@ -193,7 +171,9 @@ _ALREADY_TRAINED = {"Merged", "Trained", "Fully_Trained", "Conflict_Pending"}
 
 
 @router.post("/ingest/{property_id}/retry-scrape")
-async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Request):
+async def retry_scrape(
+    property_id: str, req: RetryScrapeRequest, authorization: str | None = Header(default=None)
+):
     """Host-triggered manual retry after the scrape-quality failsafe gave up
     (see migrations/2026-09-17_scrape_retry.sql), covering two distinct
     situations that share the same give-up UI (warning icon + fix-link
@@ -208,7 +188,7 @@ async def retry_scrape(property_id: str, req: RetryScrapeRequest, request: Reque
         resume_run recovery instead, which reprocesses files + merge too.
     Optionally updates the URL first (the host fixing a stale/private/
     removed link)."""
-    await _require_owner_id(request)
+    await _require_property_owner(authorization, property_id)
 
     prop = await asyncio.to_thread(supabase_client.get_ingest_run, property_id)
     if prop is None:
@@ -254,7 +234,8 @@ class AddKnowledgeRequest(BaseModel):
 
 
 @router.post("/ingest/add-knowledge")
-async def add_knowledge(req: AddKnowledgeRequest, request: Request):
+async def add_knowledge(req: AddKnowledgeRequest, authorization: str | None = Header(default=None)):
+    await _require_property_owner(authorization, req.property_id)
     if not req.text and not req.storage_path:
         return JSONResponse(status_code=422, content={"detail": "Provide text or storage_path."})
 
@@ -265,6 +246,12 @@ async def add_knowledge(req: AddKnowledgeRequest, request: Request):
         # storage_path format: <property_id>/user_uploads/<filename>
         if len(parts) >= 3:
             prop_id_from_path = parts[0]
+            if prop_id_from_path != req.property_id:
+                # Would otherwise read another property's file into this one.
+                return JSONResponse(
+                    status_code=422,
+                    content={"detail": "storage_path must belong to this property."},
+                )
             filename = parts[-1]
             ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "m4a"
             mime = {"m4a": "audio/m4a", "mp3": "audio/mp3", "wav": "audio/wav",
@@ -299,7 +286,8 @@ class QueryKnowledgeRequest(BaseModel):
 
 
 @router.post("/ingest/query-knowledge")
-async def query_knowledge(req: QueryKnowledgeRequest):
+async def query_knowledge(req: QueryKnowledgeRequest, authorization: str | None = Header(default=None)):
+    await _require_property_owner(authorization, req.property_id)
     prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found.")

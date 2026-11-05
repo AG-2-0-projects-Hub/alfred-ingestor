@@ -38,6 +38,16 @@ async def _require_host(authorization: str | None) -> str:
     return host_id
 
 
+async def _require_property_owner(authorization: str | None, property_id: str) -> str:
+    """_require_host plus 'this property is yours' (403 otherwise — also for an
+    id that doesn't exist). For the property-scoped routes in ingest.py and
+    merge_resolve.py, which run as service-role and so must police themselves."""
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(supabase_client.host_owns_property, host_id, property_id):
+        raise HTTPException(status_code=403, detail="Not your property")
+    return host_id
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
