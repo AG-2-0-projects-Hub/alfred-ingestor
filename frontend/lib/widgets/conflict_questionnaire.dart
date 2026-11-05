@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 
@@ -93,6 +94,7 @@ class _ConflictQuestionnaireWidgetState
       final data = await ApiClient.postJson(
         '/api/resolve/${widget.propertyId}',
         {'resolutions': resolutions},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
         // This call runs a real Gemini pass over the full master_json and can
         // legitimately run past the default 60s on a large property — give it
         // more room rather than showing an error for work that's still

@@ -494,6 +494,7 @@ class _EditPropertyScreenState extends State<EditPropertyScreen> {
       final data = await ApiClient.postJson(
         '/api/merge/$_propertyId',
         const {},
+        bearer: Supabase.instance.client.auth.currentSession?.accessToken,
         // Merge runs Gemini conflict detection over all sources — can take >60s
         // on Render free tier first-hit, especially with multiple uploaded files.
         timeout: const Duration(seconds: 120),

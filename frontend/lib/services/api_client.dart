@@ -144,6 +144,15 @@ class ApiClient {
         retry: retry,
       );
     }
+    // Host-auth failures (backend routes that require the host's session):
+    // say what to do instead of "Request failed (401)".
+    if (r.statusCode == 401) {
+      throw ServerException(
+          401, 'Your session expired. Reload the page and sign in again.');
+    }
+    if (r.statusCode == 403) {
+      throw ServerException(403, "You don't have access to this.");
+    }
     // 4xx other than 404 — usually a client bug, no retry.
     throw ServerException(r.statusCode, 'Request failed (${r.statusCode}).');
   }

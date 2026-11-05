@@ -22,6 +22,7 @@ import { runP8 } from './scenarios/p8.ts';
 import { runP9 } from './scenarios/p9.ts';
 import { runP10 } from './scenarios/p10.ts';
 import { runP11 } from './scenarios/p11.ts';
+import { runP12 } from './scenarios/p12.ts';
 import { runQ1 } from './scenarios/q1.ts';
 import { runL1 } from './scenarios/l1.ts';
 
@@ -123,6 +124,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runP10,
     // Layer 2 — the alert email's conversation link (owner / logged out / other host / load failure)
     runP11,
+    // Layer 2 — Edit Property merge + Submit Resolutions send the host token and still work; a 401 reads clearly
+    runP12,
     // Layer 2 — first-login onboarding
     runQ1,
     // Layer 2 — landing waitlist form (static page + Supabase function, staging)
