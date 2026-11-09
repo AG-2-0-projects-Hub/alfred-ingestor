@@ -43,7 +43,10 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       back to the same conversation; a signed-in non-owner gets "You don't have access to this conversation.";
       a failed load gets "Couldn't load" + Try again.
 - [ ] 🔴 Walkthrough tip bubbles read as see-through (queued 2026-10-01, founder: **do NOT attempt
-      unprompted** — a previous 2-day attempt broke other things and never landed). Known root
+      unprompted** — a previous 2-day attempt broke other things and never landed). **2026-11-09: founder
+      asked for it in the next session, with them present — FIRST show them the visual proposal
+      (before/after screenshots or a mockup of the opaque bubble) and get their approval; build/modify
+      NOTHING in the UI before that.** Known root
       cause: `BoxDecoration` paints `gradient` over `color`, so `GlassPanel`
       (`frontend/lib/widgets/glass_panel.dart`) never renders its tint (only the faint highlight
       gradient shows). It is a shared widget used in 13 places (cards, dialogs, chat), so fixing it
@@ -94,7 +97,9 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       lightbox opens the wrong image, Step 2 shot inside the wrong callout, Knowledge tab should be
       ONE screenshot with 3 highlights, blurry step-1 shot, step 7 crop cuts off the Send box. Full
       detail + the process lessons: `_Context/HANDOFF_guide-screenshots-and-conflict-error_2026-09-21.md`.
-      Must use FIX_VERIFY. touches: `frontend/web/guide.html`
+      Must use FIX_VERIFY. **2026-11-09: founder asked for it in the next session, with them present —
+      show them the visual checks (each new screenshot + highlight placement) for approval BEFORE
+      modifying the page.** touches: `frontend/web/guide.html`
 - [ ] 🟡 Feedback dialog (beta-tester report, 2026-07-12, triaged as FT-WF-001/002, S3): message text
       overlaps the Cancel/Send buttons; category chips unreadable in dark mode; reporter also
       suggests dropping Cancel. Detail: `_Context/feedback_triage/2026-09-28_webapp-feedback.md`.
@@ -119,7 +124,12 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       UTF-8 for txt/json/csv) and the same 15 MB cap enforced server-side. Keep the allow-list in
       one place so the frontend list can't drift from it. Needs FMEA + a scenario (B7's backend twin).
       touches: `backend/services/file_processor.py`, `backend/routers/ingest.py`, `backend/routers/ingest_worker.py`, `frontend/lib/widgets/drop_zone.dart`
-- [ ] 🟡 Auth gaps on property endpoints (found 2026-10-01 while verifying G5; **pre-existing, also on
+- [x] ~~🟡 Auth gaps on property endpoints~~ — **fixed 2026-10-15 (FIX_VERIFY, two commits `b2a02bc` frontend + `5817553` backend, staging only until the founder's merge).**
+      All 7 routes now need the owning host; anonymous `/ingest` dropped; two extra holes closed (files of another host's
+      property could be moved in via `/ingest`; `add-knowledge` `storage_path` could read another property's file).
+      Reproduced twice before, fails after; G5 automated (`g5.ts`, 59 probes) + P12; full suite 23/23 on deployed staging
+      (new frontend + backend rev `00052-s8q`). Original write-up kept below for the record.
+      (found 2026-10-01 while verifying G5; **pre-existing, also on
       `main`**, not introduced by the merge): `POST /api/merge/{id}`, `/api/resolve/{id}`,
       `/api/ingest/add-knowledge`, `/api/ingest/query-knowledge` and the `/api/ingest` dispatcher have
       no auth at all (live-confirmed: an unauthenticated call reaches the handler and gets a 404/422,
@@ -164,10 +174,30 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       forwarded your message directly to the host." and the host gets a Telegram "[EXPIRED] Guest X:
       <message>" via the property's host) — **the native port never carried it over**. ⚠️ Gotcha: every
       existing guest has a synthetic check_out, so enforcing the cutoff blindly would lock real
-      guests out ~5 days after link creation — enforce only for explicitly entered dates (e.g. make the
-      defaults null or add a "dates confirmed" flag). Open: enter at link-creation time or inside the
-      live-chat window (or both)?; expired-reply channels (web/Telegram/WhatsApp) and host alert
-      channel (Telegram/email); time zone of check-out. Likely needs a small `guests` migration.
+      guests out ~5 days after link creation — so existing guests need a backfill first (see Decided).
+      **Decided (founder, 2026-11-09):** (1) dates are entered in BOTH places: the "Generate guest link"
+      dialog and the live-chat window (editable later). (2) Expired reply = saved in the conversation
+      (web chat shows it) AND sent on every channel the guest has linked (Telegram and/or WhatsApp);
+      it goes out ONLY when the guest messages after `check_out + 24 h` — nothing is sent proactively.
+      WhatsApp's free-form window (code 131047) can refuse a send on a channel the guest hasn't written
+      on recently, so verify per channel. (3) Host alert channel = the HOST'S choice: a new per-host
+      setting (Telegram, e-mail, or both; e-mail only to a CONFIRMED address) with its own settings UI —
+      mockup approved by the founder BEFORE building. (4) Existing guests: backfill `check_out`.
+      Founder said "1 week after the guest was created"; prod check 2026-11-09 shows that would expire
+      29 of 34 prod guests the moment the migration runs, 4 of them with a message in the last 14 days
+      (staging: 109 of 111, 0 recently active). **Founder approved instead (2026-11-09):**
+      `greatest(created_at, last_message_at) + 7 days`, so a recently active guest keeps ~8 days.
+      With one uniform backfill every guest has an enforced date, so NO "dates confirmed" flag is needed.
+      **Still open (decide in Plan Mode):** time zone of check-out (does the property carry one? not
+      verified); what a new link without dates gets (default `now + 7 d` vs require dates); dates
+      entered after the guest already chatted. Needs a small `guests` migration (staging first, prod
+      only on the founder's "go" right before their merge); the hourly `auto-archive-conversations` cron
+      stays as is.
+      **Fold in (founder yes, 2026-10-15): guest-link hardening.** `booking_id` = property slug + 6 random chars
+      (~31 bits) is the only credential for `/api/guest-token` and `/api/messages/web-incoming`; nothing rate-limits
+      either (a wrong id gives a distinct 404) and links never expire. The 24 h post-check-out cutoff supplies the
+      expiry; also lengthen the suffix for NEW links (mind Telegram's 64-char `start` limit, so cap the slug, and
+      WhatsApp's parse of the id out of the prefilled text) and rate-limit `guest-token`/`web-incoming` misses.
       touches: `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `backend/routers/messages.py`, `backend/services/gemini_messenger.py`
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the

@@ -3,6 +3,27 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-11-09 — Service-role routes must police ownership themselves: an unguessable id is not auth, and the ownership check runs before any upsert or file move
+
+**Context:** item B (auth gaps on property endpoints), FIX_VERIFY, staging.
+**Discovery:** The backend uses the service-role Supabase client (RLS bypassed), so a route with no check serves anyone. "UUIDs are unguessable" fails because a guest's own RLS-readable `guests`/`conversations` row carries `property_id`. Reproduced twice: anonymous `add-knowledge` wrote and `query-knowledge` read `master_json`, anonymous `/ingest` on an existing id overwrote its name and started a run. Reading the code found two more holes the report missed: `/ingest` reached `move_files_in_storage` (files of another host's property could be moved into the caller's), and `add-knowledge` trusted a client-supplied `storage_path`.
+**Impact:** One shared `_require_property_owner` (token → host → `host_owns_property`, 401/403) on every route; `/ingest` compares the owner BEFORE the canonical-name branch; `storage_path` must start with the property's own folder. Probes for every route (no token, garbage token, other host's property, owner) live in G5 (59 probes).
+**Global Candidate:** Yes — any service-role API: authorize before the first side effect, validate client-supplied storage paths against the resource id, and treat "unguessable id" as no protection when another role can read the id.
+
+## 2026-11-09 — Tightening an API contract: test new frontend × new backend before pushing (local release build against a zero-traffic tagged revision), ship the client first
+
+**Context:** item B makes three frontend calls send a bearer and makes the backend reject calls without one.
+**Discovery:** Order matters: backend first breaks every deployed client (3 calls had no token); client first is harmless (an extra header). `_tests/runner/lib/local-serve.ts` serves `frontend/build/web` on :3000 same-origin, proxies `/api/*` to a backend URL (the tag URL of a 0%-traffic revision) and rewrites `/assets/.env` (the CORS allow-list has no localhost), so G5/P12 exercise both new halves before anything is pushed. Then: push → Vercel build → traffic shift → full suite on the real pair. Flutter web caches aggressively, so old tabs see a brief 401 window after the merge; the new plain 401/403 messages make that readable.
+**Impact:** No broken window on staging; the founder's merge carries both commits together.
+**Global Candidate:** Yes — contract-tightening changes: client first (or together), test the pair on a tagged revision, and give old clients a readable error.
+
+## 2026-11-09 — Count what a rule would hit on real data before choosing the backfill for existing rows
+
+**Context:** planning item C (chat cut off 24 h after check-out); the founder proposed backfilling existing guests with `check_out = created_at + 7 days`.
+**Discovery:** Read-only counts: prod 34 guests, 29 older than 8 days, 4 of those messaged in the last 14 days, 1 in the last 3 (staging 109 of 111 older, 0 active). A blind created+7 d would have cut off 29 prod guests the moment the migration ran.
+**Impact:** The founder approved `greatest(created_at, last_message_at) + 7 days` instead; with one uniform backfill there is no need for a "dates confirmed" flag.
+**Global Candidate:** Yes — before any rule that applies to existing rows (expiry, quota, cutoff), run a read-only count of the rows and of the recently active ones it would affect, then pick the backfill.
+
 ## 2026-10-15 — One Secret Manager value was shared by both scrapers (staging and prod) and read as `latest`; a key rotation in another project killed Train Now everywhere with HTTP 401
 
 **Context:** the full QA suite failed B1/D8/D9 after the item-D work; they looked like regressions of my change.
