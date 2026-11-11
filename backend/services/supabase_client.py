@@ -3,6 +3,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
+from services import stay
+
 _client: Client | None = None
 
 
@@ -552,7 +554,7 @@ def get_guest_by_booking_id(booking_id: str) -> dict | None:
     result = (
         client.table("guests")
         .select("id, name, booking_id, property_id, preferred_language, "
-                "telegram_chat_id, whatsapp_wa_id")
+                "telegram_chat_id, whatsapp_wa_id, check_out")
         .eq("booking_id", booking_id)
         .maybe_single()
         .execute()
@@ -1338,8 +1340,12 @@ def create_guest(
     name: str,
     guest_chat_url: str,
     host_chat_url: str,
+    check_in: datetime | None = None,
+    check_out: datetime | None = None,
+    stay_timezone: str | None = None,
 ) -> dict:
-    """Insert a new guest booking row and return it."""
+    """Insert a new guest booking row and return it. Without dates the stay is
+    provisional (see services/stay.py) and stay_timezone stays NULL."""
     client = get_client()
     now = datetime.now(timezone.utc)
     result = client.table("guests").insert({
@@ -1351,13 +1357,25 @@ def create_guest(
         "preferred_language": "not_set",
         "guest_chat_url": guest_chat_url,
         "host_chat_url": host_chat_url,
-        # Testing defaults until Channex.io feeds real reservation dates: the
-        # stay starts now and runs 96h. check_out drives auto-archiving of the
-        # conversation once it passes (pg_cron job auto-archive-conversations).
-        "check_in": now.isoformat(),
-        "check_out": (now + timedelta(hours=96)).isoformat(),
+        # check_out drives auto-archiving of the conversation once it passes
+        # (pg_cron job auto-archive-conversations) and the chat cutoff 24 h later
+        # (process_guest_message). Provisional until the host enters real dates.
+        "check_in": (check_in or now).isoformat(),
+        "check_out": (check_out or now + stay.PROVISIONAL).isoformat(),
+        "stay_timezone": stay_timezone,
     }).execute()
     return result.data[0]
+
+
+def update_guest_stay(
+    booking_id: str, check_in: datetime, check_out: datetime, stay_timezone: str,
+) -> None:
+    """Host-confirmed stay dates (instants from services/stay.to_instants)."""
+    get_client().table("guests").update({
+        "check_in": check_in.isoformat(),
+        "check_out": check_out.isoformat(),
+        "stay_timezone": stay_timezone,
+    }).eq("booking_id", booking_id).execute()
 
 
 def get_guests_for_property(property_id: str) -> list[dict]:

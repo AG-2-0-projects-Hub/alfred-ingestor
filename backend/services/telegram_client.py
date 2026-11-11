@@ -89,14 +89,16 @@ async def send_alert(chat_id, text: str, buttons: list[tuple[str, str]]) -> int 
     (see routers/messages._build_host_alert_text). Returns the sent message's
     message_id so the caller can store it on conversations.host_alert_message_id
     for reply-to routing, or None on failure (best-effort, never raises)."""
-    keyboard = {
-        "inline_keyboard": [[{"text": label, "callback_data": data}]
-                             for label, data in buttons]
-    }
-    result = await _post("sendMessage", {
+    payload = {
         "chat_id": chat_id, "text": text, "parse_mode": "HTML",
-        "disable_web_page_preview": True, "reply_markup": keyboard,
-    })
+        "disable_web_page_preview": True,
+    }
+    if buttons:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[{"text": label, "callback_data": data}]
+                                 for label, data in buttons]
+        }
+    result = await _post("sendMessage", payload)
     if not result or not result.get("ok"):
         return None
     return (result.get("result") or {}).get("message_id")

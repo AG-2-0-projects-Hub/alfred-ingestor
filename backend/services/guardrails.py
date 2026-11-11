@@ -8,6 +8,8 @@ routers/messages.process_guest_message, so web and Telegram are both covered.
 """
 import os
 import re
+import time
+from collections import deque
 
 # Per-conversation guest-message ceilings. A counter, not a quota engine:
 # breaching skips the Gemini call (the cost) but the guest message is still
@@ -24,6 +26,42 @@ MAX_GUEST_MESSAGE_CHARS = int(os.getenv("GUEST_MAX_MESSAGE_CHARS", "2000"))
 # conversation and never escalates on volume alone. Both values env-tunable.
 MEDIA_ESCALATE_COUNT = int(os.getenv("GUEST_MEDIA_ESCALATE_COUNT", "2"))
 MEDIA_BURST_WINDOW_MIN = int(os.getenv("GUEST_MEDIA_BURST_WINDOW_MINUTES", "10"))
+
+
+# Failed booking-id lookups per client IP. The booking_id is the only credential
+# on /guest-token and /web-incoming, so guessing is throttled. In-process on
+# purpose: each Cloud Run instance counts for itself (ceiling: N instances allow
+# N x the limit; move to a DB counter if that ever matters).
+LOOKUP_MISS_LIMIT = int(os.getenv("GUEST_LOOKUP_MISS_LIMIT", "20"))
+LOOKUP_MISS_WINDOW_S = 600
+_lookup_misses: dict[str, deque[float]] = {}
+
+
+def client_ip(request) -> str | None:
+    """Cloud Run appends the real client IP as the LAST X-Forwarded-For entry
+    (anything before it is client-supplied, so it can't be trusted). None when
+    there is no header — then nothing is throttled rather than everyone being
+    lumped into one bucket."""
+    last = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
+    return last or None
+
+
+def lookup_blocked(ip: str | None) -> bool:
+    hits = _lookup_misses.get(ip) if ip else None
+    if not hits:
+        return False
+    cutoff = time.monotonic() - LOOKUP_MISS_WINDOW_S
+    while hits and hits[0] < cutoff:
+        hits.popleft()
+    return len(hits) >= LOOKUP_MISS_LIMIT
+
+
+def note_lookup_miss(ip: str | None) -> None:
+    if not ip:
+        return
+    if len(_lookup_misses) > 10_000:  # bounded: this is a throttle, not a log
+        _lookup_misses.clear()
+    _lookup_misses.setdefault(ip, deque()).append(time.monotonic())
 
 
 def truncate_message(text: str) -> str:
@@ -67,6 +105,24 @@ def closed_conversation_notice(language: str | None) -> str:
         "This conversation is no longer available — the host has closed this "
         "listing. Thank you for chatting with me."
     )
+
+
+def has_static_notice(language: str | None) -> bool:
+    """True when the guest's recorded language is one the canned notices are
+    written in (English / Spanish). 'not_set' (a guest Alfred never answered) or
+    any other language is False — the caller then uses the property's language."""
+    lang = (language or "").strip().lower()
+    return _is_spanish(lang) or lang.startswith(("en", "eng"))
+
+
+def stay_ended_reply(language: str | None) -> str:
+    """The stay is over (check-out + 24 h): Alfred stops answering and the host
+    gets the message instead. Mirrors the old Make.com "Expired booking" copy."""
+    if _is_spanish(language):
+        return ("Tu estancia ha terminado. He enviado tu mensaje directamente "
+                "a tu anfitrión.")
+    return ("Your stay has ended. I have forwarded your message directly to "
+            "the host.")
 
 
 def rate_limit_reply(language: str | None) -> str:

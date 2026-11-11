@@ -77,15 +77,16 @@ _SEEN_MAX = 2048
 _seen_ids: set[str] = set()
 _seen_order: deque[str] = deque()
 
-# Booking ids are built as "<slug>-<6 random chars>" (messages._slugify +
-# _random_suffix): lowercase [a-z0-9-], and the FINAL segment is exactly 6 chars.
+# Booking ids are built as "<slug>-<random chars>" (messages._slugify +
+# _random_suffix): lowercase [a-z0-9-], and the FINAL segment is exactly 10 chars
+# (6 for links made before 2026-11-09 — both must keep matching).
 #
 # That last constraint is load-bearing, not pedantry. A looser
 # `[a-z0-9]+(?:-[a-z0-9]+)+` matches "check-out" — a phrase guests in this domain
 # type constantly — which would divert ordinary messages down the linking path and
-# rob them of burst coalescing. Requiring a 6-char tail rules that out ("out" is
-# 3). This only PROPOSES candidates; the database lookup is what decides.
-_BOOKING_RE = re.compile(r"\b[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]{6}\b")
+# rob them of burst coalescing. Requiring a 6- or 10-char tail rules that out
+# ("out" is 3). This only PROPOSES candidates; the database lookup is what decides.
+_BOOKING_RE = re.compile(r"\b[a-z0-9]+(?:-[a-z0-9]+)*-(?:[a-z0-9]{10}|[a-z0-9]{6})\b")
 
 _STRANGER = (
     "I couldn't find that booking. Please open the WhatsApp link your host "

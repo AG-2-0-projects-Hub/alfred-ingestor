@@ -818,6 +818,22 @@ unautomated ones manually before a `staging → main` merge.
 - **status:** passing
 - **promoted from intake:** `14ed3c0`
 
+### G7. A guest's chat closes 24 h after check-out; the host sets the stay dates
+- **id:** guest-stay-cutoff-01
+- **touches:** `backend/routers/messages.py` (`process_guest_message`, `_reply_stay_ended`, `create_guest`, `set_guest_stay`, `web_incoming`), `backend/services/stay.py`, `backend/services/guardrails.py` (`stay_ended_reply`, lookup throttle), `backend/routers/guest_auth.py`, `backend/routers/whatsapp.py` (`_BOOKING_RE`), `backend/services/supabase_client.py` (`create_guest`, `update_guest_stay`), migration `2026-11-09_guest_stay_dates`
+- **layer:** 2 (backend API, deployed staging — `_tests/runner/scenarios/g7.ts`)
+- **action:** create guests with past dates / no dates, write as a guest of an ended stay, move the dates as the host, write again
+- **expected:**
+  1. `POST /api/guests/{booking}/stay`: no/garbage token → 401, another host's guest → 403; partial, unknown-zone, reversed or >1-year-out dates → 422.
+  2. Dates are stored as ONE instant: check_out = END of the check-out day in the entered zone (3 Oct, Mexico City → 4 Oct 06:00 UTC). No dates ("Add later") → check_out ≈ now + 7 d and `stay_timezone` NULL. New booking ids end in a 10-char suffix, total < 64 chars.
+  3. A guest writes after check_out + 24 h → exactly one new `ai` row, the canned "stay ended" notice, no Gemini call; the guest's recorded language (en/es) wins, otherwise the property's language (country → welcome language; the QA property is in Mexico → Spanish). The message itself is kept for the host.
+  3b. It follows the ESCALATION route: conversation `requires_attention` + mode `intervene` + reason `stay_ended`, the `__SYS_INTERVENE__` marker, the host alert with Mark Resolved. A follow-up while the host is in charge gets no second notice. `stay_ended` is a hard-drop reason for learning.
+  4. The host moves the dates forward and resolves → the NEXT message gets a normal Alfred reply; the earlier notice stays.
+  5. One unknown booking id → 404 (20 misses/10 min per client IP, then 429 on `guest-token` and `web-incoming`).
+- **not automated (check by hand with real accounts):** the notice reaching the guest's OTHER linked app (Telegram/WhatsApp, incl. WhatsApp's 24 h window), the host alert arriving on the host's own Telegram/e-mail (the QA host has neither), and a guest writing from Telegram/WhatsApp after the cutoff. Stubbed-send logic for every channel combination was checked in-process (2026-11-09).
+- **last_tested:** 2026-11-11 — PASS on deployed staging rev `alfred-backend-staging-00054-bcv` (71 s; added the escalation route + property-language notice after the founder's live test on 2026-11-09 showed an English, non-escalated notice for a Spanish guest). First version: 2026-11-09 rev 00053 (48 s). Before the change the same ended-stay guest got a full Alfred answer (Wi-Fi password included) on rev 00052. The tagged zero-traffic revision could only be tested through the image-message path: the text path hands off to Cloud Tasks, whose callback goes to the live service URL, not the tag.
+- **status:** passing
+
 ---
 
 ## H. Push notifications (web only)

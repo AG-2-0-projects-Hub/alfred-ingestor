@@ -18,6 +18,7 @@ _HARD_DROP_REASONS = {
     "guest_hostility",
     "out_of_scope_request",
     "financial_request",
+    "stay_ended",  # a guest writing after their stay: never reusable property knowledge
 }
 
 

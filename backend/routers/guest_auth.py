@@ -3,9 +3,9 @@ import os
 import time
 
 import jwt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from services import supabase_client, welcome
+from services import guardrails, supabase_client, welcome
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ def _resolve_identity(prop: dict | None) -> tuple[str | None, str | None]:
 
 
 @router.post("/guest-token")
-async def guest_token(req: GuestTokenRequest):
+async def guest_token(req: GuestTokenRequest, request: Request):
     """
     Exchanges a valid booking_id for a short-lived JWT the guest Flutter
     client uses as its Supabase access token.
@@ -75,11 +75,16 @@ async def guest_token(req: GuestTokenRequest):
     if not jwt_secret:
         raise HTTPException(status_code=500, detail="JWT secret not configured on server")
 
-    # Verify the booking actually exists before handing out a token.
+    # Verify the booking actually exists before handing out a token. Repeated
+    # misses from one IP are throttled (the booking_id is the only credential).
+    ip = guardrails.client_ip(request)
+    if guardrails.lookup_blocked(ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
     guest = await asyncio.to_thread(
         supabase_client.get_guest_by_booking_id, req.booking_id
     )
     if not guest:
+        guardrails.note_lookup_miss(ip)
         raise HTTPException(status_code=404, detail="Booking not found")
 
     # Resolve the property name + host name server-side. RLS blocks the anon

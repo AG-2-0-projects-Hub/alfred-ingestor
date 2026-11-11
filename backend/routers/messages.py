@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from services import (
-    burst_buffer, email_client, guardrails, learning_triage, supabase_client,
+    burst_buffer, email_client, guardrails, learning_triage, stay, supabase_client,
     gemini_messenger, task_queue, telegram_client, welcome, whatsapp_client,
 )
 from routers.guest_auth import _resolve_identity  # host/property name from master_json
@@ -216,6 +216,88 @@ class WebIncomingRequest(BaseModel):
 class HostSendRequest(BaseModel):
     conversation_id: str
     message: str
+
+
+async def _push_to_other_channels(
+    guest: dict, conversation_id: str, text: str, arrived_on: str,
+) -> None:
+    """Send `text` to every messaging app the guest has linked EXCEPT the one
+    they just wrote on (that handler sends result["reply"] itself); a web guest
+    reads it live. Best-effort: a refused send (e.g. WhatsApp's 24 h window) is
+    logged and never fails the caller — the text is already saved in the chat."""
+    if arrived_on != "telegram" and guest.get("telegram_chat_id"):
+        try:
+            await telegram_client.send_message(guest["telegram_chat_id"], text)
+        except Exception as exc:
+            log.warning("telegram push failed for conv=%s: %s", conversation_id, exc)
+    if arrived_on != "whatsapp" and guest.get("whatsapp_wa_id"):
+        try:
+            why = await _deliver_host_whatsapp(
+                conversation_id, guest["whatsapp_wa_id"], text
+            )
+            if why:
+                log.info("whatsapp push not delivered for conv=%s: %s",
+                         conversation_id, why)
+        except Exception as exc:
+            log.warning("whatsapp push failed for conv=%s: %s", conversation_id, exc)
+
+
+async def _reply_stay_ended(
+    guest: dict, conversation: dict, property_data: dict | None, message: str,
+    channel: str, media_kind: str | None, image_count: int,
+) -> dict:
+    """A guest wrote after check_out + 24 h. Alfred does not answer the question;
+    this follows the normal ESCALATION route (same steps as an auto-escalation in
+    process_guest_message): a notice in the guest's language, the conversation
+    flagged needs-attention in intervene mode, the "now speaking with your host"
+    marker, and the host's escalation alert with Mark Resolved (Telegram / e-mail,
+    per their own settings). The notice is also pushed to the guest's other linked
+    apps."""
+    booking_id = guest["booking_id"]
+    # The guest's recorded language (en/es) wins; a guest Alfred never answered
+    # ('not_set') gets the property's default — the same language as its welcome.
+    lang = guest.get("preferred_language")
+    if not guardrails.has_static_notice(lang):
+        lang = welcome.language_for_property((property_data or {}).get("master_json"))
+    notice = guardrails.stay_ended_reply(lang)
+    await asyncio.to_thread(
+        supabase_client.insert_message, conversation["id"], "ai", notice,
+        is_escalated_interaction=True,
+    )
+    await asyncio.to_thread(
+        supabase_client.update_conversation, conversation["id"],
+        ai_status="active", requires_attention=True, mode="intervene",
+        escalation_reason="stay_ended",
+    )
+    await asyncio.to_thread(
+        supabase_client.insert_message, conversation["id"], "system", "__SYS_INTERVENE__"
+    )
+    await _push_to_other_channels(guest, conversation["id"], notice, channel)
+
+    text = message or (
+        (f"[{image_count} images]" if image_count > 1 else "[image]")
+        if media_kind == "image"
+        else "[voice message]" if media_kind == "audio" else ""
+    )
+    property_name, host_name = _resolve_identity(property_data)
+    frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0] \
+        .strip().rstrip("/")
+    await _notify_host_escalation(
+        conversation["id"], (property_data or {}).get("owner_id"),
+        property_name or (property_data or {}).get("name"),
+        text, "",
+        f"{frontend_url}/chat-live?booking={booking_id}"
+        f"&property={guest['property_id']}",
+        "stay_ended", "🔔",
+        [("✅ Mark Resolved", f"resolved_{booking_id}")],
+    )
+    return {
+        "reply": notice,
+        "requires_escalation": True,
+        "conversation_id": conversation["id"],
+        "mode": conversation.get("mode") or "autopilot",
+        "host_name": host_name,
+    }
 
 
 async def process_guest_message(
@@ -441,6 +523,17 @@ async def process_guest_message(
             "mode": conversation.get("mode") or "autopilot",
         }
 
+    # The stay is over (check_out + 24 h): Alfred stops answering, the guest is
+    # told so, and the host gets the message. Deliberately AFTER the intervene
+    # branch (a host mid-conversation isn't contradicted — they already get every
+    # follow-up) and AFTER the rate limit (a guest hammering an ended chat can't
+    # flood the host with alerts).
+    if stay.is_over(guest.get("check_out"), now):
+        return await _reply_stay_ended(
+            guest, conversation, property_data, message, channel,
+            media_kind, image_count,
+        )
+
     # (property_data was fetched above, before the first write, so the
     # deleted-listing guard could run ahead of it.)
     if not property_data:
@@ -641,7 +734,23 @@ async def process_guest_message(
 
 
 @router.post("/messages/web-incoming")
-async def web_incoming(req: WebIncomingRequest, background_tasks: BackgroundTasks):
+async def web_incoming(
+    req: WebIncomingRequest, background_tasks: BackgroundTasks, request: Request,
+):
+    # The booking_id is the only credential here, so repeated misses from one IP
+    # are throttled (see guardrails.lookup_blocked).
+    ip = guardrails.client_ip(request)
+    if guardrails.lookup_blocked(ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    try:
+        return await _web_incoming(req, background_tasks)
+    except HTTPException as he:
+        if he.status_code == 404:
+            guardrails.note_lookup_miss(ip)
+        raise
+
+
+async def _web_incoming(req: WebIncomingRequest, background_tasks: BackgroundTasks):
     media: dict | list[dict] | None = None
     if req.media_items:
         media = [
@@ -1241,6 +1350,37 @@ async def announce_transition(req: TransitionRequest, authorization: str | None 
 class CreateGuestRequest(BaseModel):
     property_id: str
     guest_name: str = "Guest"
+    # Stay dates (YYYY-MM-DD) + an IANA time zone, all three or none ("Add later":
+    # the link then gets a provisional end — see services/stay.py).
+    check_in_date: str | None = None
+    check_out_date: str | None = None
+    stay_timezone: str | None = None
+
+
+class StayRequest(BaseModel):
+    check_in_date: str
+    check_out_date: str
+    stay_timezone: str
+
+
+def _parse_stay(
+    req: CreateGuestRequest | StayRequest,
+) -> tuple[datetime | None, datetime | None, str | None]:
+    """(check_in, check_out, tz) as UTC instants, or (None, None, None) when no
+    dates were sent. 422 when only some were, or they don't make sense."""
+    given = [req.check_in_date, req.check_out_date, req.stay_timezone]
+    if not any(given):
+        return None, None, None
+    if not all(given):
+        raise HTTPException(
+            status_code=422,
+            detail="Send check-in date, check-out date and time zone together.",
+        )
+    try:
+        check_in, check_out = stay.to_instants(*given)
+    except stay.StayError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return check_in, check_out, req.stay_timezone
 
 
 def _slugify(text: str) -> str:
@@ -1250,8 +1390,34 @@ def _slugify(text: str) -> str:
     return re.sub(r"-+", "-", text)
 
 
-def _random_suffix(n: int = 6) -> str:
+# 10 random chars (~52 bits) for new links; links made before 2026-11-09 have 6
+# and still work (routers/whatsapp._BOOKING_RE accepts both). The slug is capped
+# so "<slug>-<suffix>" stays well under Telegram's 64-char /start payload limit.
+def _random_suffix(n: int = 10) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+
+
+@router.post("/guests/{booking_id}/stay")
+async def set_guest_stay(
+    booking_id: str, req: StayRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Host (re)sets a guest's stay dates. Applies from the guest's NEXT message:
+    the cutoff is evaluated per message against the current check_out."""
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_booking, host_id, booking_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your guest")
+    check_in, check_out, tz = _parse_stay(req)
+    await asyncio.to_thread(
+        supabase_client.update_guest_stay, booking_id, check_in, check_out, tz
+    )
+    return {
+        "check_in": check_in.isoformat(),
+        "check_out": check_out.isoformat(),
+        "stay_timezone": tz,
+    }
 
 
 @router.post("/guests")
@@ -1261,6 +1427,7 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
         supabase_client.host_owns_property, host_id, req.property_id
     ):
         raise HTTPException(status_code=403, detail="Not your property")
+    check_in, check_out, stay_tz = _parse_stay(req)
     # Fetch property name for the slug
     prop = await asyncio.to_thread(supabase_client.get_property_for_chat, req.property_id)
     if not prop:
@@ -1272,7 +1439,7 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
                    "before creating a guest link.",
         )
 
-    slug = _slugify(prop.get("name") or "property")
+    slug = _slugify(prop.get("name") or "property")[:30].strip("-") or "property"
     frontend_url = os.environ.get("FRONTEND_URL", "").split(",")[0].strip().rstrip("/")
     bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@").strip()
     # t.me and telegram.me are interchangeable official front-ends for the same
@@ -1313,6 +1480,7 @@ async def create_guest(req: CreateGuestRequest, authorization: str | None = Head
                 req.guest_name,
                 guest_chat_url,
                 host_chat_url,
+                check_in, check_out, stay_tz,
             )
             # Create the conversation + store the welcome now, so the new link
             # shows on the dashboard immediately as "Awaiting reply" (pending),

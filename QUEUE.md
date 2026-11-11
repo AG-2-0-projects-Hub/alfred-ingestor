@@ -198,7 +198,26 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       either (a wrong id gives a distinct 404) and links never expire. The 24 h post-check-out cutoff supplies the
       expiry; also lengthen the suffix for NEW links (mind Telegram's 64-char `start` limit, so cap the slug, and
       WhatsApp's parse of the id out of the prefilled text) and rate-limit `guest-token`/`web-incoming` misses.
-      touches: `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `backend/routers/messages.py`, `backend/services/gemini_messenger.py`
+      **Plan Mode answers (founder, 2026-11-09):** time zone lives on the GUEST (not the property); dates required
+      in the link dialog with an optional "Add later"; a date edit applies from the guest's NEXT message; check-out
+      = END of the check-out day in the entered zone, chat closes 24 h later; host alerts REUSE the existing
+      Profile Telegram/e-mail switches (the "new settings UI" is dropped); "Add later" = provisional end
+      created + 7 d with `stay_timezone` NULL ("dates not set"); no "stay ended" notice while the host is in
+      intervene mode.
+      **BACKEND DONE (staging rev `alfred-backend-staging-00054-bcv`, G7 passing, uncommitted until the founder's yes):**
+      migration `2026-11-09_guest_stay_dates` (staging only; PROD NOT APPLIED — only on the founder's "go" right
+      before their merge), `services/stay.py`, cutoff in `process_guest_message` (follows the ESCALATION route:
+      needs-attention + intervene + `__SYS_INTERVENE__` + host alert with Mark Resolved; notice in the guest's
+      recorded en/es language, else the property's language), `POST /api/guests/{booking}/stay`,
+      10-char link suffix + capped slug, WhatsApp matcher accepts 6 or 10 chars, lookup throttle (20 misses / 10 min
+      / IP, in-process per instance; Telegram `/start` and WhatsApp link misses are NOT throttled).
+      **STILL OPEN (UI, mockups approved first):** date + time-zone fields (default = the host's browser zone) and
+      "Add later" in `generate_guest_link_dialog.dart`; the same fields editable in BOTH live-chat UIs
+      (`chat_live_dialog.dart` and `chat_live_screen.dart`), showing "dates not set" while `stay_timezone` is NULL;
+      the first-time walkthrough must prefill dates (it auto-presses Generate); a new Playwright scenario
+      (FIX_VERIFY) + `run.ts` + `scenarios.md` row. Manual real-account check still owed: the notice on the guest's
+      other linked app, the host alert on Telegram/e-mail, a guest writing from Telegram/WhatsApp after the cutoff.
+      touches: `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `frontend/lib/screens/chat_live_screen.dart`, `backend/routers/messages.py`, `backend/services/gemini_messenger.py`
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the
       PWA plumbing itself is basically already in place (`frontend/web/manifest.json` has
