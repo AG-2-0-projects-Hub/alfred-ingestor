@@ -229,8 +229,10 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       "Add later" in `generate_guest_link_dialog.dart`; the same fields editable in BOTH live-chat UIs
       (`chat_live_dialog.dart` and `chat_live_screen.dart`), showing "dates not set" while `stay_timezone` is NULL;
       the first-time walkthrough must prefill dates (it auto-presses Generate); a new Playwright scenario
-      (FIX_VERIFY) + `run.ts` + `scenarios.md` row. Manual real-account check still owed: the notice on the guest's
-      other linked app, the host alert on Telegram/e-mail, a guest writing from Telegram/WhatsApp after the cutoff.
+      (FIX_VERIFY) + `run.ts` + `scenarios.md` row. Manual real-account check DONE 2026-11-12 for the web link (founder,
+      `alonso` account, Bungalow: notice, red/intervene chat, alert all fine). Still unrun (optional): a guest
+      writing from Telegram/WhatsApp after the cutoff and the notice reaching the other linked app (Telegram needs a
+      SECOND Telegram account: a chat linked to a host acts as the host, not a guest).
       touches: `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `frontend/lib/screens/chat_live_screen.dart`, `backend/routers/messages.py`, `backend/services/gemini_messenger.py`
 - [ ] 🎯 PRIORITY (founder-flagged 2026-09-22): PWA redesign/reformatting/migration. Current web UI
       feels crowded, especially on mobile — a UI draft already exists in Google Stitch. Checked: the

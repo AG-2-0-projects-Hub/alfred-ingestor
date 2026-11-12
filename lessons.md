@@ -3,6 +3,13 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-11-12 — Host Telegram connect codes live 10 minutes and are single-use, and one Telegram chat belongs to ONE role (one host, or a guest), never both
+
+**Context:** the founder's real-account check of item C; "Connect Telegram" on their own account answered "This connection link has expired or was already used".
+**Discovery:** Profile -> Connect Telegram mints a code valid 10 min (`_HOST_LINK_CODE_TTL_MIN`) that is cleared on use. A masked SQL check (who is linked, is a code present, its expiry; never the code itself) showed the account unlinked with its code still stored and 10 min past expiry, so it was a stale link, not a reuse. `link_host_telegram` moves a chat away from any other host ("move, don't duplicate"): one Telegram used for two host accounts means the last connected gets the alerts and the other loses them. In `_dispatch` a plain-text message from a chat linked to a host is a host reply, so that chat cannot also act as a guest.
+**Impact:** Generate a fresh link and open it within 10 minutes; reconnect when switching host accounts; run guest-side Telegram checks from a second Telegram account.
+**Global Candidate:** No — project behaviour.
+
 ## 2026-11-12 — A feature that mirrors an existing flow must copy the WHOLE route, and must reuse how the app already picks the language; the suite passed while the founder's live test found both gaps
 
 **Context:** item C backend: the "stay ended" cutoff mirrors the existing escalation (needs-attention, intervene, system marker, host alert).

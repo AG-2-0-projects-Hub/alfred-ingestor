@@ -8,6 +8,7 @@ index at `_global_lessons/lessons_index.md`.
 
 | Date | Hook | Tags |
 |---|---|---|
+| 2026-11-12 | Host Telegram connect codes live 10 min and are single-use ("expired or already used"); one chat = one host (last connected wins) and a host-linked chat acts as the host, not a guest: use a second Telegram for guest-side tests | telegram, host-link, expiry, testing, profile |
 | 2026-11-12 | A feature "like X" must copy X's WHOLE route and reuse how the app already picks the language; the suite passed while the founder's live test found both gaps | escalation, language, review, qa, global-candidate |
 | 2026-11-12 | Cloud Tasks calls back the LIVE service URL: a tagged zero-traffic revision can't verify the web text/burst path; test sync + media on the tag, the rest after the shift | cloud-run, cloud-tasks, deploy, tag, testing, global-candidate |
 | 2026-11-12 | Environment traps: local Gemini key is AI Studio (402), `pkill -f` self-matches (`[u]vicorn`), Git Bash expands `$VARS` before `wsl` (script file via PowerShell), servers need `setsid nohup … < /dev/null &`, classifier blocks reading the SendGrid key | wsl2, bash-tool, pkill, setsid, gemini, environment, global-candidate |
