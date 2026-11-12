@@ -220,7 +220,7 @@ unautomated ones manually before a `staging → main` merge.
 - **runs_on:** [smart, full]
 - **setup:** the QA host account; 3 real Bungalow files (docx + 2 jpg) read from the gitignored `_Context/full_fidelity_harness/real_property_files/Bungalow/`; the founder's real listing `airbnb.com/rooms/781332019922885278` (real Firecrawl, real Gemini — no mocks)
 - **action:** upload the files to `Property_assets/{id}/user_uploads/`, `POST /api/ingest`, poll the property row until a terminal status (≤ 9 min), then soft-delete the property
-- **db_expected:** status Trained/Conflict_Pending; every `ingest_files` entry `done`; `master_json.location.country` and `.city` present; a real `property_name` (never the "Not specified" placeholder); `curated_photos` non-empty (photo-triage persistence); `hero_image/main.jpg` exists in storage (even when the model omits `media.thumbnail_url`); `scraped_markdown.meta.data_completeness` ∈ High/Medium/Low; `scrape_retry` empty
+- **db_expected:** status Trained/Conflict_Pending; every `ingest_files` entry `done`; `master_json.location.country` and `.city` present; a real `property_name` (never the "Not specified" placeholder); `curated_photos` non-empty (photo-triage persistence); `hero_image/main.jpg` exists in storage (even when the model omits `media.thumbnail_url`); `scraped_markdown.meta.data_completeness` ∈ High/Medium/Low; `scrape_retry` empty; **(2026-11-12)** `GET /api/properties/{id}/stay-defaults` for the new listing returns the Mexico City zone from the listing itself (never the browser fallback) and both check-in/out times (14:00 / 11:00)
 - **covers:** the 2026-09-28 structured-JSON scraper, `UNIVERSAL_FIELDS` extraction, the Phase 2 worker rewrite (happy path), photo-triage persistence, the official-name fallback, and the Gemini model pin (a retired model fails every file)
 - **last_tested:** 2026-10-01 (automated, real staging)
 - **status:** passing — first run found the hero-image/completeness bugs (fixed the same day, see `lessons.md` 2026-10-01); re-run PASS in 188 s after the fix was deployed.
@@ -834,6 +834,16 @@ unautomated ones manually before a `staging → main` merge.
 - **last_tested:** 2026-11-11 — PASS on deployed staging rev `alfred-backend-staging-00054-bcv` (71 s; added the escalation route + property-language notice after the founder's live test on 2026-11-09 showed an English, non-escalated notice for a Spanish guest). First version: 2026-11-09 rev 00053 (48 s). Before the change the same ended-stay guest got a full Alfred answer (Wi-Fi password included) on rev 00052. The tagged zero-traffic revision could only be tested through the image-message path: the text path hands off to Cloud Tasks, whose callback goes to the live service URL, not the tag.
 - **status:** passing
 
+### G8. Stay times + the listing's time zone; the cutoff follows the check-out time
+- **id:** guest-stay-times-01
+- **touches:** `backend/services/stay.py` (`to_instants`, `describe`, `listing_times`, `zone_for`, `resolve_zone`), `backend/routers/messages.py` (`get_stay_defaults`, `get_guest_stay`, `create_guest`, `set_guest_stay`), `backend/services/supabase_client.py` (`get_guest_stay`), `backend/requirements.txt` (timezonefinder)
+- **layer:** 2 (backend API — `_tests/runner/scenarios/g8.ts`; set `G8_API_ONLY=1` to skip the Cloud-Tasks-dependent last step)
+- **action:** read the listing's defaults, create/edit guests with HH:MM times, read them back, move a check-out TIME to 25 h / 23 h ago and write as the guest
+- **expected:** (1) `GET /api/properties/{id}/stay-defaults` and `GET /api/guests/{id}/stay`: no/garbage token → 401, another host's → 403. (2) defaults for the QA property: zone `America/Mexico_City` (from the listing; wins over `browser_tz`), times 14:00 / 11:00 parsed from the listing text. (3) times without dates, `25:00`, `9:5`, same-day check-out before check-in → 422. (4) typed dates + times are stored as the exact UTC instants (UTC-6) and read back as typed, closes = check-out + 24 h. (5) no times → whole days, `check_*_time` null. (6) "Add later" → provisional, closes ≈ 8 d out. (7) edit with times applies. (8) a guest whose check-out TIME was 25 h ago gets the stay-ended notice + escalation (`stay_ended`); 23 h ago is still open.
+- **not automated:** listings without coordinates/country fall back to the browser zone (unit-asserted in `python -m services.stay`, and run over every real staging property on 2026-11-12); a NEW listing's `master_json` carrying country/coordinates/times is checked by hand after a real Train Now (see the 2026-11-12 note).
+- **last_tested:** 2026-11-12 — PASS on deployed staging rev `alfred-backend-staging-00055-9nc` (21 s, incl. the message step), after the API steps passed on the tagged zero-traffic revision (timezonefinder works in the container) and on a local backend.
+- **status:** passing
+
 ---
 
 ## H. Push notifications (web only)
@@ -1382,6 +1392,17 @@ testing plus one direct DB-query verification pass (see P6's note) — not yet r
 - **action:** (1) open the conflict on Edit Property, pick an option, Submit Resolutions with `/api/resolve/*` answered 401 by the test; (2) Submit again for real; (3) open the Ingested property in Edit Property as a dev host, MERGE NOW
 - **host_expected:** (1) a bar reads "Your session expired. Reload the page and sign in again." (not "Request failed (401)"); (2) and (3) every `/api/resolve/*` and `/api/merge/*` request carries a Bearer token and the real calls return 200. Network headers/status are the ground truth; the vision judge only reads the message text
 - **status:** passing — 2026-10-15 (136 s). Run on a LOCAL release build of the working tree served same-origin with `/api/*` proxied to the zero-traffic tagged staging backend revision that enforces ownership (`_tests/runner/lib/local-serve.ts`): 401 message PASS, resolve 401+token then 200+token, merge 200+token. Train Now's `/api/ingest` already sent the token and is covered by B1. Not covered: the real Vercel deploy (pending the push); the add-property screen's own Merge Now button (same code shape as Edit Property's, dev-only)
+
+### P13. New Guest Link takes dates + times (listing zone); the live chat shows and edits the Stay
+- **id:** guest-stay-dates-ui-01
+- **touches:** `frontend/lib/widgets/guest_stay_fields.dart`, `frontend/lib/widgets/guest_stay_panel.dart`, `frontend/lib/widgets/generate_guest_link_dialog.dart`, `frontend/lib/widgets/chat_live_dialog.dart`, `frontend/lib/screens/chat_live_screen.dart`, `frontend/lib/services/api_client.dart` (`getJson`, 422 detail), `backend/services/stay.py`, `backend/routers/messages.py`
+- **layer:** 2 (Playwright + REST ground truth — `_tests/runner/scenarios/p13.ts`)
+- **setup:** the QA host's trained staging property (Mexico City, 14:00 / 11:00); stray `Test walkthrough` / `QA-P13-*` guests of earlier runs are swept first; every guest it creates is resolved + archived in `finally`
+- **action:** (A) first-ever link (walkthrough) → Generate; (B) walkthrough already seen → dialog with empty dates and listing times, hover a time field, type dates, a check-out before check-in, fix it, change the check-out time, Generate; (C) "Add later"; (D) alert-link screen: "dates not set" → Set dates → type → Save; (F) dashboard live-chat dialog; (E) move the stay into the past and reload
+- **host_expected:** no time zone field; times pre-filled from the listing; dates empty at first; Generate greyed out until both dates are valid; the error line "Check-out is before check-in."; a dark hover tooltip on the time field; the guests row holds the EXACT UTC instants (listing zone, REST), "Add later" = no zone and ~7 d provisional end; the Stay block shows amber "Stay — dates not set" → editor → neutral summary with an arrow and "Chat closes …", and red "Stay ended" after the cutoff, in both live-chat screens
+- **not covered:** the mobile bottom-sheet copy of the Stay block (the 390 px dialog was checked by screenshot on 2026-11-12, the sheet was not reached), dark theme, a non-Mexico listing
+- **last_tested:** 2026-11-12 — PASS (166 s) on a LOCAL release build of the working tree served by `local-serve.ts` against the DEPLOYED staging backend `00055-9nc`, as part of the full suite 26/26; first on a local backend (158 s). The Vercel-staging run follows the push.
+- **status:** passing
 
 ---
 

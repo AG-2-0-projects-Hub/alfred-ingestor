@@ -164,6 +164,19 @@ export async function runB1(): Promise<ScenarioResult> {
     for (const k of ['country', 'city']) {
       if (typeof loc[k] !== 'string' || !loc[k].trim()) failures.push(`master_json.location.${k} missing`);
     }
+    // Stay dates (item C, 2026-11-12): a NEW listing must give the stay dialog what it needs. The fixture
+    // listing is in Mexico, so its time zone must come from the listing itself (coordinates or country,
+    // never the browser fallback) and both check-in/out times must parse.
+    const sdRes = await fetch(`${env.stagingBackend}/api/properties/${propertyId}/stay-defaults?browser_tz=UTC`, {
+      headers: authHeaders(token),
+    });
+    const sd: any = sdRes.ok ? await sdRes.json() : {};
+    notes.push(`stay-defaults: ${sdRes.status} ${JSON.stringify(sd)}`);
+    if (!sdRes.ok || sd.timezone !== 'America/Mexico_City' || sd.timezone_source === 'browser'
+        || !sd.check_in_time || !sd.check_out_time) {
+      failures.push(`stay-defaults of the new listing unusable: ${sdRes.status} ${JSON.stringify(sd)}`);
+    }
+    artifacts.stayDefaults = sd;
     const propName = master.property_identity?.property_name;
     if (typeof propName !== 'string' || !propName.trim() || /not specified/i.test(propName)) {
       failures.push(`property_name missing or placeholder: ${JSON.stringify(propName)}`);

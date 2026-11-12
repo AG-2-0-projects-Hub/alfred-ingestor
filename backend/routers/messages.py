@@ -1351,16 +1351,21 @@ class CreateGuestRequest(BaseModel):
     property_id: str
     guest_name: str = "Guest"
     # Stay dates (YYYY-MM-DD) + an IANA time zone, all three or none ("Add later":
-    # the link then gets a provisional end — see services/stay.py).
+    # the link then gets a provisional end — see services/stay.py). Times are
+    # optional HH:MM (listing's local time); none = whole days.
     check_in_date: str | None = None
     check_out_date: str | None = None
     stay_timezone: str | None = None
+    check_in_time: str | None = None
+    check_out_time: str | None = None
 
 
 class StayRequest(BaseModel):
     check_in_date: str
     check_out_date: str
     stay_timezone: str
+    check_in_time: str | None = None
+    check_out_time: str | None = None
 
 
 def _parse_stay(
@@ -1369,7 +1374,7 @@ def _parse_stay(
     """(check_in, check_out, tz) as UTC instants, or (None, None, None) when no
     dates were sent. 422 when only some were, or they don't make sense."""
     given = [req.check_in_date, req.check_out_date, req.stay_timezone]
-    if not any(given):
+    if not any(given + [req.check_in_time, req.check_out_time]):
         return None, None, None
     if not all(given):
         raise HTTPException(
@@ -1377,7 +1382,9 @@ def _parse_stay(
             detail="Send check-in date, check-out date and time zone together.",
         )
     try:
-        check_in, check_out = stay.to_instants(*given)
+        check_in, check_out = stay.to_instants(
+            *given, check_in_time=req.check_in_time, check_out_time=req.check_out_time,
+        )
     except stay.StayError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return check_in, check_out, req.stay_timezone
@@ -1395,6 +1402,41 @@ def _slugify(text: str) -> str:
 # so "<slug>-<suffix>" stays well under Telegram's 64-char /start payload limit.
 def _random_suffix(n: int = 10) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+
+
+@router.get("/properties/{property_id}/stay-defaults")
+async def get_stay_defaults(
+    property_id: str, browser_tz: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """What the new-guest dialog pre-fills: the listing's time zone (coordinates,
+    else country, else the host's browser zone) and its check-in/out times.
+    Anything unknown comes back null and the UI leaves that field empty."""
+    await _require_property_owner(authorization, property_id)
+    prop = await asyncio.to_thread(supabase_client.get_property_for_chat, property_id)
+    master = (prop or {}).get("master_json")
+    zone, source = stay.resolve_zone(master, browser_tz)
+    check_in_time, check_out_time = stay.listing_times(master)
+    return {
+        "timezone": zone, "timezone_source": source,
+        "check_in_time": check_in_time, "check_out_time": check_out_time,
+    }
+
+
+@router.get("/guests/{booking_id}/stay")
+async def get_guest_stay(
+    booking_id: str, authorization: str | None = Header(default=None),
+):
+    """The guest's stay as the host reads it (local dates/times, see stay.describe)."""
+    host_id = await _require_host(authorization)
+    if not await asyncio.to_thread(
+        supabase_client.host_owns_booking, host_id, booking_id
+    ):
+        raise HTTPException(status_code=403, detail="Not your guest")
+    row = await asyncio.to_thread(supabase_client.get_guest_stay, booking_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    return stay.describe(row.get("check_in"), row.get("check_out"), row.get("stay_timezone"))
 
 
 @router.post("/guests/{booking_id}/stay")

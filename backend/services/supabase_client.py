@@ -1367,6 +1367,17 @@ def create_guest(
     return result.data[0]
 
 
+def get_guest_stay(booking_id: str) -> dict | None:
+    result = (
+        get_client().table("guests")
+        .select("check_in, check_out, stay_timezone")
+        .eq("booking_id", booking_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else None
+
+
 def update_guest_stay(
     booking_id: str, check_in: datetime, check_out: datetime, stay_timezone: str,
 ) -> None:

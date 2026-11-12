@@ -6,6 +6,7 @@ import { runC6 } from './scenarios/c6.ts';
 import { runG2 } from './scenarios/g2.ts';
 import { runG5 } from './scenarios/g5.ts';
 import { runG7 } from './scenarios/g7.ts';
+import { runG8 } from './scenarios/g8.ts';
 // Layer 2
 import { runA2 } from './scenarios/a2.ts';
 import { runA3 } from './scenarios/a3.ts';
@@ -25,6 +26,7 @@ import { runP9 } from './scenarios/p9.ts';
 import { runP10 } from './scenarios/p10.ts';
 import { runP11 } from './scenarios/p11.ts';
 import { runP12 } from './scenarios/p12.ts';
+import { runP13 } from './scenarios/p13.ts';
 import { runQ1 } from './scenarios/q1.ts';
 import { runL1 } from './scenarios/l1.ts';
 
@@ -110,6 +112,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runG5,
     // Layer 2 — a guest's chat closes 24 h after check-out; the host sets the stay dates (backend API, deployed staging)
     runG7,
+    // Layer 2 — stay times + the listing's time zone; the cutoff follows the check-out time (backend API, deployed staging)
+    runG8,
     // Layer 3 — core Train Now end-to-end (backend, real deployed staging)
     runB1,
     // Layer 2 — ingest error paths
@@ -132,6 +136,8 @@ function pickScenarios(mode: string): Array<() => Promise<ScenarioResult>> {
     runP11,
     // Layer 2 — Edit Property merge + Submit Resolutions send the host token and still work; a 401 reads clearly
     runP12,
+    // Layer 2 — New Guest Link takes dates + times; the live chat's Stay block (UI + REST ground truth)
+    runP13,
     // Layer 2 — first-login onboarding
     runQ1,
     // Layer 2 — landing waitlist form (static page + Supabase function, staging)

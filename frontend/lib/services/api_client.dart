@@ -100,6 +100,37 @@ class ApiClient {
     return _decode(response);
   }
 
+  /// GET [path]. Same contract as [postJson] (parsed JSON on 2xx, an
+  /// [ApiException] otherwise; one retry on a transient fetch failure).
+  static Future<Map<String, dynamic>> getJson(
+    String path, {
+    String? bearer,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final headers = <String, String>{};
+    if (bearer != null) headers['Authorization'] = 'Bearer $bearer';
+
+    Future<http.Response> doRequest() =>
+        http.get(_uri(path), headers: headers).timeout(timeout);
+
+    http.Response response;
+    try {
+      response = await doRequest();
+    } on TimeoutException {
+      throw const RequestTimeoutException();
+    } on http.ClientException {
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      try {
+        response = await doRequest();
+      } on TimeoutException {
+        throw const RequestTimeoutException();
+      } on http.ClientException {
+        throw const NetworkException();
+      }
+    }
+    return _decode(response);
+  }
+
   static Map<String, dynamic> _decode(http.Response r) {
     final ct = (r.headers['content-type'] ?? '').toLowerCase();
     Map<String, dynamic> bodyJson = const {};
@@ -152,6 +183,11 @@ class ApiClient {
     }
     if (r.statusCode == 403) {
       throw ServerException(403, "You don't have access to this.");
+    }
+    // 422 with a plain-text reason from the backend (e.g. the stay-date checks):
+    // show it as written.
+    if (r.statusCode == 422 && bodyJson['detail'] is String) {
+      throw ServerException(422, bodyJson['detail'] as String);
     }
     // 4xx other than 404 — usually a client bug, no retry.
     throw ServerException(r.statusCode, 'Request failed (${r.statusCode}).');

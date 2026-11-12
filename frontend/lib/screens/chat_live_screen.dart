@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
 import '../widgets/aurora_background.dart';
+import '../widgets/guest_stay_panel.dart';
 
 enum _EscalationState { none, active, resolved }
 
@@ -460,6 +461,8 @@ class _ChatLiveScreenState extends State<ChatLiveScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildGuestLinkSection(),
+                GuestStayPanel(
+                    bookingId: widget.bookingId, propertyId: widget.propertyId),
                 _buildModeToggle(),
                 if (_mode == 'intervene') _buildResolveButton(),
                 if (_mode == 'autopilot' && _escalationReason != null)

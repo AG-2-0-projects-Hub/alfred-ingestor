@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_live_dialog.dart';
+import 'guest_stay_fields.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 import '../services/api_client.dart';
@@ -28,6 +29,11 @@ class GenerateGuestLinkDialog extends StatefulWidget {
 
 class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   final _nameController = TextEditingController();
+  // Check-in/out dates (start empty) + times (pre-filled from the listing).
+  final _stay = GuestStayController();
+  // The listing's time zone + check-in/out times; null until loaded (Generate
+  // fetches it itself if the early load failed).
+  Map<String, dynamic>? _defaults;
   bool _loading = false;
   Map<String, dynamic>? _result; // {booking_id, guest_chat_url, host_chat_url}
 
@@ -45,7 +51,22 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   @override
   void initState() {
     super.initState();
+    _stay.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _loadDefaults();
     _maybeStartWalkthrough();
+  }
+
+  /// Pre-fill the check-in/out times from the listing. Best effort: dates still
+  /// work without it, and Generate asks again if this didn't land.
+  Future<void> _loadDefaults() async {
+    try {
+      final d = await GuestStayApi.defaults(widget.property['id'] as String);
+      if (!mounted) return;
+      _defaults = d;
+      _stay.fillTimes(d);
+    } catch (_) {/* retried by _generate */}
   }
 
   Future<void> _maybeStartWalkthrough() async {
@@ -57,9 +78,15 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     // the walkthrough at all on a narrow viewport, rather than disabling
     // Cancel/Done with no visible explanation of why.
     if (MediaQuery.sizeOf(context).width < 1000) return;
+    final today = DateTime.now();
     setState(() {
       _wtActive = true;
       _nameController.text = 'Test walkthrough';
+      // The walkthrough tip just says "hit Generate Link", so the dates it
+      // would otherwise wait for are filled in too (today -> today + 2 days).
+      _stay.checkInDate.text = GuestStayController.formatDate(today);
+      _stay.checkOutDate.text =
+          GuestStayController.formatDate(today.add(const Duration(days: 2)));
     });
     _wtStepNotifier.value = 0;
   }
@@ -140,10 +167,14 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     _wtOverlay = null;
     _wtStepNotifier.dispose();
     _nameController.dispose();
+    _stay.dispose();
     super.dispose();
   }
 
-  Future<void> _generate() async {
+  /// [addLater] = make the link without dates (the backend gives it a
+  /// provisional end; the host sets the dates later from the live chat).
+  Future<void> _generate({bool addLater = false}) async {
+    if (_loading || (!addLater && !_stay.complete)) return;
     setState(() => _loading = true);
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
@@ -151,16 +182,22 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
     // fallback (bypassing ApiClient's fail-loud config guard) and no timeout —
     // ApiClient.postJson resolves BACKEND_URL itself and times out/retries.
     try {
-      final data = await ApiClient.postJson(
-        '/api/guests',
-        {
-          'property_id': widget.property['id'],
-          'guest_name': _nameController.text.trim().isEmpty
-              ? 'Guest'
-              : _nameController.text.trim(),
-        },
-        bearer: token,
-      );
+      final body = <String, dynamic>{
+        'property_id': widget.property['id'],
+        'guest_name': _nameController.text.trim().isEmpty
+            ? 'Guest'
+            : _nameController.text.trim(),
+      };
+      if (!addLater) {
+        _defaults ??= await GuestStayApi.defaults(widget.property['id'] as String);
+        final tz = _defaults!['timezone'] as String?;
+        if (tz == null) {
+          throw const ServerException(422,
+              "Couldn't work out this listing's time zone. Use Add later, then set the dates in the chat.");
+        }
+        body.addAll(_stay.toBody(tz));
+      }
+      final data = await ApiClient.postJson('/api/guests', body, bearer: token);
       if (mounted) setState(() => _result = data);
       if (_wtActive) _wtStepNotifier.value = 1;
       widget.onCreated?.call();
@@ -208,27 +245,53 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
   // During the walkthrough, only the intended next action is clickable —
   // the alternate escape hatch (Cancel / Done) is disabled so a first-time
   // host goes through the full sequence instead of bailing out early.
-  List<Widget> get _actions => _result == null
-      ? [
-          TextButton(
-            onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          WalkthroughHighlight(
-            active: _wtActive,
-            child: FilledButton(
-              onPressed: _loading ? null : _generate,
-              child: _loading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.5, color: Colors.white))
-                  : const Text('Generate Link'),
-            ),
-          ),
-        ]
-      : [
+  List<Widget> _actions(bool isMobile) {
+    if (_result == null) {
+      final addLater = Tooltip(
+        message: 'Creates the link now. Add the dates later from the chat.',
+        waitDuration: const Duration(milliseconds: 500),
+        child: TextButton(
+          onPressed: (_wtActive || _loading) ? null : () => _generate(addLater: true),
+          child: const Text('Add later'),
+        ),
+      );
+      final cancel = TextButton(
+        onPressed: _wtActive ? null : () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      );
+      final generate = WalkthroughHighlight(
+        active: _wtActive,
+        child: FilledButton(
+          onPressed: (_loading || !_stay.complete) ? null : _generate,
+          child: _loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.5, color: Colors.white))
+              : const Text('Generate Link'),
+        ),
+      );
+      // Desktop: Add later on the left, Cancel + Generate on the right.
+      // Mobile: stacked, Generate first.
+      return [
+        SizedBox(
+          width: double.infinity,
+          child: isMobile
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [generate, addLater, cancel])
+              : Row(children: [
+                  addLater,
+                  const Spacer(),
+                  cancel,
+                  const SizedBox(width: 8),
+                  generate,
+                ]),
+        ),
+      ];
+    }
+    return [
           WalkthroughHighlight(
             active: _wtActive,
             child: TextButton(
@@ -241,6 +304,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
             child: const Text('Done'),
           ),
         ];
+  }
 
   String get _titleText => _result != null
       ? '✓  Links ready${_nameController.text.trim().isNotEmpty ? " for ${_nameController.text.trim()}" : ""}'
@@ -276,7 +340,7 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
       actionsOverflowButtonSpacing: isMobile ? 8 : null,
       title: Text(_titleText),
       content: content,
-      actions: _actions,
+      actions: _actions(isMobile),
     );
 
     _ensureWtOverlayInserted();
@@ -301,6 +365,8 @@ class _GenerateGuestLinkDialogState extends State<GenerateGuestLinkDialog> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _generate(),
           ),
+          const SizedBox(height: 10),
+          GuestStayFields(controller: _stay),
         ],
       ),
     );

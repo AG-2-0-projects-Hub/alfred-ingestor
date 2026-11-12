@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../utils/relative_time.dart';
 import '../utils/chat_system_messages.dart';
 import '../utils/walkthrough_prefs.dart';
+import 'guest_stay_panel.dart';
 import 'walkthrough_highlight.dart';
 import 'walkthrough_tip_panel.dart';
 
@@ -1076,7 +1077,14 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
       builder: (_) => SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(top: 8, bottom: 16),
-          child: _buildGuestLinkSection(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildGuestLinkSection(),
+              GuestStayPanel(
+                  bookingId: widget.bookingId, propertyId: widget.propertyId),
+            ],
+          ),
         ),
       ),
     );
@@ -1175,6 +1183,8 @@ class _ChatLiveDialogState extends State<ChatLiveDialog> {
                 active: _wtStep == 1,
                 child: _buildGuestLinkSection(),
               ),
+              GuestStayPanel(
+                  bookingId: widget.bookingId, propertyId: widget.propertyId),
               _wtHighlight(
                 key: _wtModeKey,
                 active: _wtStep == 2 || _wtStep == 3,
