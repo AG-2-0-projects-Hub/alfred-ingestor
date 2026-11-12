@@ -3,6 +3,55 @@ _Discoveries logged here during sessions. Global candidates flagged for promotio
 
 ---
 
+## 2026-11-12 — A feature that mirrors an existing flow must copy the WHOLE route, and must reuse how the app already picks the language; the suite passed while the founder's live test found both gaps
+
+**Context:** item C backend: the "stay ended" cutoff mirrors the existing escalation (needs-attention, intervene, system marker, host alert).
+**Discovery:** The first cut copied only part of the escalation route and invented its own notice language; every automated check passed. The founder's live test on staging caught both. The app already has a rule for language (the guest's recorded language, else `welcome.language_for_property` from the property's country).
+**Impact:** The cutoff now follows the whole escalation route and picks the language the way the rest of the app does; G7 asserts the notice, the escalation and the host alert.
+**Global Candidate:** Yes — when a new path is "like X", diff it step by step against X's whole route and grep how the app already decides things like language before inventing a rule.
+
+## 2026-11-12 — Cloud Tasks calls back the LIVE service URL, so a tagged zero-traffic revision cannot verify the web text/burst path
+
+**Context:** testing the cutoff on a 0%-traffic tagged revision before shifting traffic.
+**Discovery:** The web chat's burst worker is enqueued as a Cloud Task whose callback URL is the live service, not the tag URL, so the tagged revision only proves the media path and the synchronous endpoints; the web text path is exercised by the OLD revision until traffic shifts.
+**Impact:** Test everything synchronous (and the media path) on the tag, then shift and run the web-text steps in full on the live revision (G8 does: API steps on the tag, the message step after the shift).
+**Global Candidate:** Yes — any Cloud Run + Cloud Tasks service: a tag URL cannot test task-driven paths.
+
+## 2026-11-12 — Environment traps met during item C: local Gemini key is out of credits, `pkill -f` kills its own shell, Git Bash expands variables before `wsl`, background servers die with the WSL command
+
+**Context:** running a local backend and local release build for FIX_VERIFY.
+**Discovery:** (1) the local `backend/.env` Gemini key is an AI Studio key with no credits (HTTP 402) while deployed staging uses Vertex, so replies cannot be tested locally; (2) `pkill -f uvicorn` matches the shell that runs it, use `[u]vicorn`; (3) the Bash tool is Git Bash and expands `$VARS`, `$PATH` and loops BEFORE `wsl` sees them, so anything with variables goes in a script file written to `\\wsl.localhost\Ubuntu\tmp\` and run with `wsl bash -l /tmp/x.sh` from PowerShell; (4) servers started from a `wsl` command die when it returns unless launched as `setsid nohup cmd > log 2>&1 < /dev/null &`; (5) the auto-mode classifier blocks reading the live SendGrid key for diagnostics, so ask the founder to check their inbox and spam first.
+**Impact:** The local recipe (uvicorn :8099, `local-serve.ts` :3000) is in the continuation file; Gemini-dependent steps run only against deployed staging.
+**Global Candidate:** Yes — items 2-4 apply to any WSL2 + Windows-shell session.
+
+## 2026-11-12 — Check the next free scenario id before naming a scenario, and time-filter any cleanup lookup in a UI test
+
+**Context:** adding G8 and P13 to `_tests/scenarios.md`; P13's first run.
+**Discovery:** Ids collide silently (the "G6" clash happened once), so grep `scenarios.md` for the next free id first. P13's first run found "the guest named Test walkthrough" and cleaned up a September guest of the same name because the lookup was not time-filtered; the stale test chat got archived (reversible) before it was fixed.
+**Impact:** The scenario filters `created_at >= test start` and sweeps known stray test names explicitly at the start.
+**Global Candidate:** No — project QA hygiene.
+
+## 2026-11-12 — UI scenario traps: the vision judge cannot do date/time arithmetic, and a popup's coordinates drift with its content
+
+**Context:** P13 (Flutter canvas UI driven by coordinates + keyboard, qwen3-vl-8b judging screenshots).
+**Discovery:** The judge nitpicked arithmetic ("13:30 is earlier than 14:00", "two days after") and flaked; the popup's "New Guest Link" button moves with the number of conversations in the list, so fixed coordinates broke.
+**Impact:** Judge expectations stay structural (what is shown), numbers are asserted over REST (ground truth); the dialog opens from the property card's "+ Guest" button and row y is computed from the conversation count.
+**Global Candidate:** No — specific to this runner.
+
+## 2026-11-12 — `ApiClient` swallowed the backend's 422 reason text, so the host saw "Request failed (422)"
+
+**Context:** wiring the stay fields to endpoints that return plain-language 422 `detail` strings.
+**Discovery:** a 422 with a string `detail` reached the host as the generic "Request failed (422)", hiding "Check-out is before check-in." and the time-format hint.
+**Impact:** A 422 with a string `detail` now throws a `ServerException` carrying it; P13 asserts the visible error line. When adding an endpoint with human 422 messages, check the client renders them.
+**Global Candidate:** No — project client behaviour.
+
+## 2026-11-12 — Run a new parser or resolver over EVERY real record before shipping, and assert on a created test listing inside its scenario (soft-delete tombstones `master_json`)
+
+**Context:** zone and check-in/out time resolution from `master_json` (item C).
+**Discovery:** Running `stay.resolve_zone`/`listing_times` over all 26 real staging properties was cheap and showed every one resolves a zone and that 3 have no times (so "empty = whole days" is a real, common case, not an edge). B1 soft-deletes its property and the soft-delete tombstones `master_json`, so the new listing cannot be inspected afterwards.
+**Impact:** The new-listing check (zone from coordinates = America/Mexico_City, both times present) lives INSIDE B1, before cleanup.
+**Global Candidate:** Yes — a real-data run of any new parser over all existing records before shipping; and assert on a test-created record before the scenario's own cleanup removes it.
+
 ## 2026-11-09 — Service-role routes must police ownership themselves: an unguessable id is not auth, and the ownership check runs before any upsert or file move
 
 **Context:** item B (auth gaps on property endpoints), FIX_VERIFY, staging.

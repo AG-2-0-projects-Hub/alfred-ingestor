@@ -210,19 +210,22 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       Profile Telegram/e-mail switches (the "new settings UI" is dropped); "Add later" = provisional end
       created + 7 d with `stay_timezone` NULL ("dates not set"); no "stay ended" notice while the host is in
       intervene mode.
-      **BACKEND DONE (staging rev `alfred-backend-staging-00054-bcv`, G7 passing, uncommitted until the founder's yes):**
+      **STATUS 2026-11-12: backend (`42db480`) AND UI (`1b7a37d`) are on staging, full suite 26/26 (G7, G8, P13). Only
+      "Alfred knows the dates" (below) and the manual real-account check remain; the "STILL OPEN (UI ...)" paragraph
+      further down is DONE (kept for the decisions it records).**
+      **BACKEND DONE (staging rev `alfred-backend-staging-00054-bcv`, G7 passing; commit `42db480`):**
       migration `2026-11-09_guest_stay_dates` (staging only; PROD NOT APPLIED — only on the founder's "go" right
       before their merge), `services/stay.py`, cutoff in `process_guest_message` (follows the ESCALATION route:
       needs-attention + intervene + `__SYS_INTERVENE__` + host alert with Mark Resolved; notice in the guest's
       recorded en/es language, else the property's language), `POST /api/guests/{booking}/stay`,
       10-char link suffix + capped slug, WhatsApp matcher accepts 6 or 10 chars, lookup throttle (20 misses / 10 min
       / IP, in-process per instance; Telegram `/start` and WhatsApp link misses are NOT throttled).
-      **NOT DONE (original purpose of C; founder 2026-11-11: build right after the date-field UI, same session):**
+      **NOT DONE — NEXT (original purpose of C; founder approved 2026-11-11/12, new session):**
       Alfred still doesn't KNOW the dates — `check_in`/`check_out` are not fed into the Brain's context, so
-      "when do I check out?" isn't answered from them yet.
-      **Founder 2026-11-11: build the UI now on the current theme; full plan + spec + test plan in
-      `_Context/CONTINUATION_PROMPT_2026-11-11.md` (gitignored).**
-      **STILL OPEN (UI, mockups approved first):** date + time-zone fields (default = the host's browser zone) and
+      "when do I check out?" isn't answered from them yet. Spec + FMEA seed + checklist of everything else still open:
+      `_Context/CONTINUATION_PROMPT_2026-11-12.md` (gitignored; supersedes the 2026-11-11 file).
+      touches: `backend/services/gemini_messenger.py`, `backend/routers/messages.py`, `backend/services/stay.py`
+      **DONE 2026-11-12 (was: STILL OPEN, UI, mockups approved first):** date + time-zone fields (default = the host's browser zone) and
       "Add later" in `generate_guest_link_dialog.dart`; the same fields editable in BOTH live-chat UIs
       (`chat_live_dialog.dart` and `chat_live_screen.dart`), showing "dates not set" while `stay_timezone` is NULL;
       the first-time walkthrough must prefill dates (it auto-presses Generate); a new Playwright scenario
