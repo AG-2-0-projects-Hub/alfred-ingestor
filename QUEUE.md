@@ -92,6 +92,12 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       with before/after screenshots, founder checks on staging; (5) re-audit, then refresh guide.html
       screenshots. Plan Mode + FMEA per slice; known traps: GlassPanel gradient-over-color, the yellow-underline
       text bug. touches: `frontend/lib/theme/app_theme.dart`, `frontend/lib/widgets/glass_panel.dart`, `frontend/lib/screens/dashboard_screen.dart`, `brand-assets/DESIGN.md`
+      **MERGED INTO THIS PROJECT (founder, 2026-11-11): the former "Part 2 UI batch" — no separate UI fixes before
+      the restyle.** Absorbed: the walkthrough tip bubbles see-through item (+ the `GlassPanel` root fix = step 3),
+      the guide.html screenshot rework (= step 5), the feedback dialog item, and the `/host-panel?property=`
+      return-to-link gap (fold into the audit, P-rank it, fix inside the restyle slice for that screen). The ONLY UI
+      built beforehand is item C's stay-date fields (below), on the current theme with shared tokens so they restyle
+      with everything else.
 - [ ] 🟡 guide.html screenshot rework (carried over from the 2026-09-21 handoff, parked 2026-10-01
       as not merge-connected): highlight boxes off-target/cutting into fields, no glow, one
       lightbox opens the wrong image, Step 2 shot inside the wrong callout, Knowledge tab should be
@@ -211,6 +217,11 @@ an item usually lives in `ROADMAP.md` or `CONTEXT.md` — this file stays short 
       recorded en/es language, else the property's language), `POST /api/guests/{booking}/stay`,
       10-char link suffix + capped slug, WhatsApp matcher accepts 6 or 10 chars, lookup throttle (20 misses / 10 min
       / IP, in-process per instance; Telegram `/start` and WhatsApp link misses are NOT throttled).
+      **NOT DONE (original purpose of C; founder 2026-11-11: build right after the date-field UI, same session):**
+      Alfred still doesn't KNOW the dates — `check_in`/`check_out` are not fed into the Brain's context, so
+      "when do I check out?" isn't answered from them yet.
+      **Founder 2026-11-11: build the UI now on the current theme; full plan + spec + test plan in
+      `_Context/CONTINUATION_PROMPT_2026-11-11.md` (gitignored).**
       **STILL OPEN (UI, mockups approved first):** date + time-zone fields (default = the host's browser zone) and
       "Add later" in `generate_guest_link_dialog.dart`; the same fields editable in BOTH live-chat UIs
       (`chat_live_dialog.dart` and `chat_live_screen.dart`), showing "dates not set" while `stay_timezone` is NULL;
